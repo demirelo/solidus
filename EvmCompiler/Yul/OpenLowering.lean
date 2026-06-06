@@ -1200,8 +1200,34 @@ theorem evmOpenCall?_resume_pc
       cases hCall
       rfl
 
+def basicOpSourceBridgeSafe? : Structured.BasicOp → Bool
+  | .extcodesize | .extcodecopy | .extcodehash => false
+  | .msize => false
+  | .dup1 | .dup2 | .dup3 | .dup4
+  | .dup5 | .dup6 | .dup7 | .dup8
+  | .dup9 | .dup10 | .dup11 | .dup12
+  | .dup13 | .dup14 | .dup15 | .dup16 => false
+  | .swap1 | .swap2 | .swap3 | .swap4
+  | .swap5 | .swap6 | .swap7 | .swap8
+  | .swap9 | .swap10 | .swap11 | .swap12
+  | .swap13 | .swap14 | .swap15 | .swap16 => false
+  | .create | .call | .callcode | .delegatecall | .create2 | .staticcall =>
+      false
+  | _ => true
+
+def BasicOpSourceBridgeSafe (op : Structured.BasicOp) : Prop :=
+  basicOpSourceBridgeSafe? op = true
+
+theorem BasicOpSourceBridgeSafe.no_callCreate
+    {op : Structured.BasicOp}
+    (hSafe : BasicOpSourceBridgeSafe op) :
+    op.toPrimOp.isCallCreate = false := by
+  cases op <;>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.toPrimOp, Assembly.PrimOp.isCallCreate] at hSafe ⊢
+
 def BasicOpOpenSupported (op : Structured.BasicOp) : Prop :=
-  op.toPrimOp.isCallCreate = false ∨
+  BasicOpSourceBridgeSafe op ∨
     ∃ kind : OpenExternal.CallKind,
       OpenExternal.CallKind.ofBasicOp? op = some kind
 
@@ -1254,59 +1280,11 @@ theorem functions_argExprs_openSupported :
         (Locals.ExprSeq.cons arg (Functions.Lower.argExprs rest))]
       simp [LocalsExprSeqOpenSupported, hArg, hTail]
 
-theorem basicOpOpenSupported_of_no_callCreate
+theorem basicOpOpenSupported_of_sourceBridgeSafe
     {op : Structured.BasicOp}
-    (hNoCallCreate : op.toPrimOp.isCallCreate = false) :
+    (hSafe : BasicOpSourceBridgeSafe op) :
     BasicOpOpenSupported op :=
-  Or.inl hNoCallCreate
-
-mutual
-  theorem localsExprOpenSupported_of_sourceOwned_no_callCreate :
-      ∀ {results : Nat} {expr : Locals.Expr results},
-        Locals.Source.Expr.SourceOwned expr →
-        expr.usesCallCreate = false →
-          LocalsExprOpenSupported expr := by
-    intro results expr hOwned hNoCallCreate
-    cases expr with
-    | lit value =>
-        simp [LocalsExprOpenSupported]
-    | var name =>
-        simp [LocalsExprOpenSupported]
-    | code code =>
-        simp [Locals.Source.Expr.SourceOwned] at hOwned
-    | prim op args =>
-        simp [Locals.Source.Expr.SourceOwned] at hOwned
-        have hParts :
-            args.usesCallCreate = false ∧
-              op.toPrimOp.isCallCreate = false := by
-          simpa [Locals.Expr.usesCallCreate] using hNoCallCreate
-        exact
-          ⟨localsExprSeqOpenSupported_of_sourceOwned_no_callCreate
-              hOwned hParts.1,
-            basicOpOpenSupported_of_no_callCreate hParts.2⟩
-
-  theorem localsExprSeqOpenSupported_of_sourceOwned_no_callCreate :
-      ∀ {results : Nat} {exprs : Locals.ExprSeq results},
-        Locals.Source.ExprSeq.SourceOwned exprs →
-        exprs.usesCallCreate = false →
-          LocalsExprSeqOpenSupported exprs := by
-    intro results exprs hOwned hNoCallCreate
-    cases exprs with
-    | nil =>
-        simp [LocalsExprSeqOpenSupported]
-    | @cons left right head tail =>
-        simp [Locals.Source.ExprSeq.SourceOwned] at hOwned
-        rcases hOwned with ⟨hHeadOwned, hTailOwned⟩
-        have hParts :
-            head.usesCallCreate = false ∧
-              tail.usesCallCreate = false := by
-          simpa [Locals.ExprSeq.usesCallCreate] using hNoCallCreate
-        exact
-          ⟨localsExprOpenSupported_of_sourceOwned_no_callCreate
-              hHeadOwned hParts.1,
-            localsExprSeqOpenSupported_of_sourceOwned_no_callCreate
-              hTailOwned hParts.2⟩
-end
+  Or.inl hSafe
 
 theorem codeSegment_instrAtPc_start_cons
     {asm : Assembly.Program} {instr : Assembly.Instr}
@@ -18892,10 +18870,7 @@ theorem compilerOpenPrimitive_stackPrefix_openRunNResult_continue_of_resolves_ok
     {compiler compilerAfter : Objects.Source.State}
     {state : EvmYul.EVM.State}
     (op : Structured.BasicOp)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (values : List Word)
     (hValuesLen :
       values.length = Expressions.Structured.BasicOp.inputs op)
@@ -18929,8 +18904,8 @@ theorem compilerOpenPrimitive_stackPrefix_openRunNResult_continue_of_resolves_ok
   | none =>
       have hNoCallCreate :
           op.toPrimOp.isCallCreate = false := by
-        rcases hSupported with hNoCallCreate | ⟨kind, hSome⟩
-        · exact hNoCallCreate
+        rcases hSupported with hSafe | ⟨kind, hSome⟩
+        · exact BasicOpSourceBridgeSafe.no_callCreate hSafe
         · rw [hKind] at hSome
           cases hSome
       rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
@@ -18989,10 +18964,7 @@ theorem compilerOpenPrimitive_stackPrefix_openRunNResult_continue_pc_of_resolves
     {compiler compilerAfter : Objects.Source.State}
     {state : EvmYul.EVM.State}
     (op : Structured.BasicOp)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (values : List Word)
     (hValuesLen :
       values.length = Expressions.Structured.BasicOp.inputs op)
@@ -19027,8 +18999,8 @@ theorem compilerOpenPrimitive_stackPrefix_openRunNResult_continue_pc_of_resolves
   | none =>
       have hNoCallCreate :
           op.toPrimOp.isCallCreate = false := by
-        rcases hSupported with hNoCallCreate | ⟨kind, hSome⟩
-        · exact hNoCallCreate
+        rcases hSupported with hSafe | ⟨kind, hSome⟩
+        · exact BasicOpSourceBridgeSafe.no_callCreate hSafe
         · rw [hKind] at hSome
           cases hSome
       rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
@@ -19280,10 +19252,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_args
     {state : EvmYul.EVM.State}
     {op : Structured.BasicOp}
     {args : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -19378,10 +19347,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_fallthro
     {state : EvmYul.EVM.State}
     {op : Structured.BasicOp}
     {args : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -19483,10 +19449,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_sourc
     {op : Structured.BasicOp}
     {args : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
     (hArgsOwned : Locals.Source.ExprSeq.SourceOwned args)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -19554,10 +19517,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_fallthro
     (hCompile :
       Locals.Expr.compileCode ctx offset (.prim op args) = some code)
     (hArgsOwned : Locals.Source.ExprSeq.SourceOwned args)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -23029,9 +22989,7 @@ def PrimitiveStackPrefixSuffixErasedSound
     {compiler compilerAfter : Objects.Source.State}
     {state : EvmYul.EVM.State}
     (op : Structured.BasicOp),
-    (op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind) →
+    BasicOpOpenSupported op →
     ∀ (values : List Word),
     values.length = Expressions.Structured.BasicOp.inputs op →
     ∀ (stackPrefix suffix : List Word),
@@ -23069,8 +23027,8 @@ theorem primitiveStackPrefixSuffixErasedSound_of_primitiveSound
   | none =>
       have hNoCallCreate :
           op.toPrimOp.isCallCreate = false := by
-        rcases hSupported with hNoCallCreate | ⟨kind, hSome⟩
-        · exact hNoCallCreate
+        rcases hSupported with hSafe | ⟨kind, hSome⟩
+        · exact BasicOpSourceBridgeSafe.no_callCreate hSafe
         · rw [hKind] at hSome
           cases hSome
       exact
@@ -23120,10 +23078,7 @@ theorem compilerOpenPrimitive_stackPrefixSuffixErased_openRunNResult_continue_pc
     {compiler compilerAfter : Objects.Source.State}
     {state : EvmYul.EVM.State}
     (op : Structured.BasicOp)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (values : List Word)
     (hValuesLen :
       values.length = Expressions.Structured.BasicOp.inputs op)
@@ -23170,10 +23125,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_openRunNResult_conti
     {state : EvmYul.EVM.State}
     {op : Structured.BasicOp}
     {args : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix suffix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -23279,10 +23231,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_openRunNResult_conti
     (hCompile :
       Locals.Expr.compileCode ctx offset (.prim op args) = some code)
     (hArgsOwned : Locals.Source.ExprSeq.SourceOwned args)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix suffix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -41244,6 +41193,50 @@ def FunctionsOpenCurrentSharedStateBridgeRel
   ∃ sourceShared : EvmYul.SharedState .Yul,
     Reference.SharedStateRel cfg sourceShared target.toSharedState
 
+namespace FunctionsOpenCurrentSharedStateBridgeRel
+
+theorem storageImageRel
+    {cfg : Reference.StateRelConfig} {target : EvmYul.EVM.State}
+    (hBridge : FunctionsOpenCurrentSharedStateBridgeRel cfg target) :
+    ∃ sourceShared : EvmYul.SharedState .Yul,
+      Reference.StorageImageRel sourceShared.toState.accountMap
+        target.toSharedState.toState.accountMap :=
+  let ⟨sourceShared, hShared⟩ := hBridge
+  ⟨sourceShared, Reference.SharedStateRel.storageImageRel hShared⟩
+
+theorem transientStorageImageRel
+    {cfg : Reference.StateRelConfig} {target : EvmYul.EVM.State}
+    (hBridge : FunctionsOpenCurrentSharedStateBridgeRel cfg target) :
+    ∃ sourceShared : EvmYul.SharedState .Yul,
+      Reference.TransientStorageImageRel sourceShared.toState.accountMap
+        target.toSharedState.toState.accountMap :=
+  let ⟨sourceShared, hShared⟩ := hBridge
+  ⟨sourceShared, Reference.SharedStateRel.transientStorageImageRel hShared⟩
+
+theorem storageAndTransientImageRel
+    {cfg : Reference.StateRelConfig} {target : EvmYul.EVM.State}
+    (hBridge : FunctionsOpenCurrentSharedStateBridgeRel cfg target) :
+    ∃ sourceShared : EvmYul.SharedState .Yul,
+      Reference.StorageImageRel sourceShared.toState.accountMap
+          target.toSharedState.toState.accountMap ∧
+        Reference.TransientStorageImageRel sourceShared.toState.accountMap
+          target.toSharedState.toState.accountMap :=
+  let ⟨sourceShared, hShared⟩ := hBridge
+  ⟨sourceShared,
+    Reference.SharedStateRel.storageImageRel hShared,
+    Reference.SharedStateRel.transientStorageImageRel hShared⟩
+
+theorem selfbalanceRel
+    {cfg : Reference.StateRelConfig} {target : EvmYul.EVM.State}
+    (hBridge : FunctionsOpenCurrentSharedStateBridgeRel cfg target) :
+    ∃ sourceShared : EvmYul.SharedState .Yul,
+      EvmYul.State.selfbalance sourceShared.toState =
+        EvmYul.State.selfbalance target.toSharedState.toState :=
+  let ⟨sourceShared, hShared⟩ := hBridge
+  ⟨sourceShared, Reference.SharedStateRel.selfbalanceRel hShared⟩
+
+end FunctionsOpenCurrentSharedStateBridgeRel
+
 def SourceStateTargetGasRel
     (cfg : Reference.StateRelConfig) (source : Reference.State)
     (target : EvmYul.EVM.State) : Prop :=
@@ -41279,6 +41272,18 @@ theorem ok_store
     SourceStateTargetGasRel cfg (.Ok sourceShared sourceStore) target) :
     SourceStateTargetGasRel cfg (.Ok sourceShared sourceStore') target :=
   hRel
+
+theorem ok_of_source_target_gasAvailable_eq
+    {cfg : Reference.StateRelConfig}
+    {sourceShared sourceShared' : EvmYul.SharedState .Yul}
+    {sourceStore sourceStore' : EvmYul.Yul.VarStore}
+    {target target' : EvmYul.EVM.State}
+    (hRel :
+      SourceStateTargetGasRel cfg (.Ok sourceShared sourceStore) target)
+    (hSourceGas : sourceShared'.gasAvailable = sourceShared.gasAvailable)
+    (hTargetGas : target'.gasAvailable = target.gasAvailable) :
+    SourceStateTargetGasRel cfg (.Ok sourceShared' sourceStore') target' := by
+  simpa [SourceStateTargetGasRel, hSourceGas, hTargetGas] using hRel
 
 theorem of_openPrimitiveEVMResultRel
     {cfg : Reference.StateRelConfig}
@@ -41594,6 +41599,469 @@ theorem sourceStateTargetGasRel_of_callKind_response
     hEVMResume] using hSourceTargetAfter.machine.gasAvailable
 
 end StackPrefixSuffixErasedRel
+
+set_option maxHeartbeats 2000000 in
+theorem basicOpSourceBridgeSafe_step_sharedStateRel
+    {cfg : Reference.StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {state stateAfter : EvmYul.EVM.State}
+    {op : Structured.BasicOp}
+    (hShared : Reference.SharedStateRel cfg sourceShared state.toSharedState)
+    (hSafe : BasicOpSourceBridgeSafe op)
+    (hStep : Structured.BasicOp.step op state = .ok stateAfter) :
+    ∃ sourceSharedAfter : EvmYul.SharedState .Yul,
+      Reference.SharedStateRel cfg sourceSharedAfter
+        stateAfter.toSharedState ∧
+      sourceSharedAfter.gasAvailable = sourceShared.gasAvailable := by
+  cases op
+  case balance =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.executionEnvOp, EvmYul.EVM.unaryStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop, EvmYul.Stack.push, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack address hStack
+      cases hStep
+      refine ⟨{ sourceShared with
+        toState := (EvmYul.State.balance sourceShared.toState address).1 },
+        ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.balance (cfg := cfg)
+            (sourceShared := sourceShared) (target := state)
+            (address := address) hShared
+      · rfl
+    · simp at hStep
+  case calldatacopy =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.ternaryCopyOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop3, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack memStart dataStart size hStack
+      cases hStep
+      refine
+        ⟨EvmYul.SharedState.calldatacopy sourceShared memStart dataStart
+          size, ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.calldatacopy (cfg := cfg)
+            (sourceShared := sourceShared) (target := state)
+            (memStart := memStart) (dataStart := dataStart) (size := size)
+            hShared
+      · rfl
+    · simp at hStep
+  case codecopy =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.ternaryCopyOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop3, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack memStart codeStart size hStack
+      cases hStep
+      refine
+        ⟨EvmYul.SharedState.codeBytesCopy sourceShared memStart codeStart
+          size, ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.codecopy_of_codeBytes (cfg := cfg)
+            (sourceShared := sourceShared) (target := state)
+            (memStart := memStart) (codeStart := codeStart) (size := size)
+            hShared (Reference.SharedStateRel.codeBytes hShared)
+      · rfl
+    · simp at hStep
+  case returndatacopy =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.ternaryMachineStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop3, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack memStart dataStart size hStack
+      cases hStep
+      refine
+        ⟨{ sourceShared with
+          toMachineState :=
+            EvmYul.MachineState.returndatacopy
+              sourceShared.toMachineState memStart dataStart size }, ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.returndatacopy (cfg := cfg)
+            (sourceShared := sourceShared) (target := state)
+            (memStart := memStart) (dataStart := dataStart) (size := size)
+            hShared
+      · rfl
+    · simp at hStep
+  case mload =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.machineStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop, EvmYul.Stack.push, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack slot hStack
+      cases hStep
+      refine
+        ⟨{ sourceShared with
+          toMachineState :=
+            (EvmYul.MachineState.mload sourceShared.toMachineState slot).2 },
+          ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.mload (cfg := cfg)
+            (sourceShared := sourceShared) (target := state) (slot := slot)
+            hShared
+      · rfl
+    · simp at hStep
+  case mstore =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.binaryMachineStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop2, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack slot value hStack
+      cases hStep
+      refine
+        ⟨{ sourceShared with
+          toMachineState :=
+            EvmYul.MachineState.mstore sourceShared.toMachineState slot
+              value }, ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.mstore (cfg := cfg)
+            (sourceShared := sourceShared) (target := state) (slot := slot)
+            (value := value) hShared
+      · rfl
+    · simp at hStep
+  case sload =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.unaryStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop, EvmYul.Stack.push, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack slot hStack
+      cases hStep
+      refine
+        ⟨{ sourceShared with
+          toState := (EvmYul.State.sload sourceShared.toState slot).1 },
+          ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.sload (cfg := cfg)
+            (sourceShared := sourceShared) (target := state) (slot := slot)
+            hShared
+      · rfl
+    · simp at hStep
+  case sstore =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.binaryStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop2, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack slot value hStack
+      cases hStep
+      refine
+        ⟨{ sourceShared with
+          toState := EvmYul.State.sstore sourceShared.toState slot value },
+          ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.sstore (cfg := cfg)
+            (sourceShared := sourceShared) (target := state) (slot := slot)
+            (value := value) hShared
+      · rfl
+    · simp at hStep
+  case mstore8 =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.binaryMachineStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop2, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack slot value hStack
+      cases hStep
+      refine
+        ⟨{ sourceShared with
+          toMachineState :=
+            EvmYul.MachineState.mstore8 sourceShared.toMachineState slot
+              value }, ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.mstore8 (cfg := cfg)
+            (sourceShared := sourceShared) (target := state) (slot := slot)
+            (value := value) hShared
+      · rfl
+    · simp at hStep
+  case tstore =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.binaryStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop2, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack slot value hStack
+      cases hStep
+      refine
+        ⟨{ sourceShared with
+          toState := EvmYul.State.tstore sourceShared.toState slot value },
+          ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.tstore (cfg := cfg)
+            (sourceShared := sourceShared) (target := state) (slot := slot)
+            (value := value) hShared
+      · rfl
+    · simp at hStep
+  case mcopy =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.ternaryMachineStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop3, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack writeStart readStart size hStack
+      cases hStep
+      refine
+        ⟨{ sourceShared with
+          toMachineState :=
+            EvmYul.MachineState.mcopy sourceShared.toMachineState writeStart
+              readStart size }, ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.mcopy (cfg := cfg)
+            (sourceShared := sourceShared) (target := state)
+            (writeStart := writeStart) (readStart := readStart)
+            (size := size) hShared
+      · rfl
+    · simp at hStep
+  case keccak256 =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.binaryMachineStateOp',
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop2, EvmYul.Stack.push, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack start size hStack
+      cases hStep
+      refine
+        ⟨{ sourceShared with
+          toMachineState :=
+            (EvmYul.MachineState.keccak256 sourceShared.toMachineState start
+              size).2 }, ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.keccak256 (cfg := cfg)
+            (sourceShared := sourceShared) (target := state) (start := start)
+            (size := size) hShared
+      · rfl
+    · simp at hStep
+  case log0 =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.ternaryMachineStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop2, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack offset size hStack
+      cases hStep
+      refine
+        ⟨EvmYul.SharedState.logOp offset size #[] sourceShared, ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.logOp (cfg := cfg)
+            (sourceShared := sourceShared) (targetShared := state.toSharedState)
+            (offset := offset) (size := size) (topics := #[]) hShared
+      · rfl
+    · simp at hStep
+  case log1 =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop3, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack offset size topic0 hStack
+      cases hStep
+      refine
+        ⟨EvmYul.SharedState.logOp offset size #[topic0] sourceShared, ?_,
+          ?_⟩
+      · simpa using
+          Reference.SharedStateRel.logOp (cfg := cfg)
+            (sourceShared := sourceShared) (targetShared := state.toSharedState)
+            (offset := offset) (size := size) (topics := #[topic0]) hShared
+      · rfl
+    · simp at hStep
+  case log2 =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop4, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack offset size topic0 topic1 hStack
+      cases hStep
+      refine
+        ⟨EvmYul.SharedState.logOp offset size #[topic0, topic1]
+          sourceShared, ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.logOp (cfg := cfg)
+            (sourceShared := sourceShared) (targetShared := state.toSharedState)
+            (offset := offset) (size := size) (topics := #[topic0, topic1])
+            hShared
+      · rfl
+    · simp at hStep
+  case log3 =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop5, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack offset size topic0 topic1 topic2 hStack
+      cases hStep
+      refine
+        ⟨EvmYul.SharedState.logOp offset size #[topic0, topic1, topic2]
+          sourceShared, ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.logOp (cfg := cfg)
+            (sourceShared := sourceShared) (targetShared := state.toSharedState)
+            (offset := offset) (size := size)
+            (topics := #[topic0, topic1, topic2]) hShared
+      · rfl
+    · simp at hStep
+  case log4 =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop6, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack offset size topic0 topic1 topic2 topic3 hStack
+      cases hStep
+      refine
+        ⟨EvmYul.SharedState.logOp offset size
+          #[topic0, topic1, topic2, topic3] sourceShared, ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.logOp (cfg := cfg)
+            (sourceShared := sourceShared) (targetShared := state.toSharedState)
+            (offset := offset) (size := size)
+            (topics := #[topic0, topic1, topic2, topic3]) hShared
+      · rfl
+    · simp at hStep
+  all_goals
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.execBinOp, EvmYul.EVM.execUnOp,
+      EvmYul.EVM.execTriOp,
+      EvmYul.EVM.executionEnvOp, EvmYul.EVM.unaryExecutionEnvOp,
+      EvmYul.EVM.machineStateOp, EvmYul.EVM.stateOp,
+      EvmYul.EVM.unaryStateOp, EvmYul.EVM.binaryStateOp,
+      EvmYul.EVM.binaryMachineStateOp,
+      EvmYul.EVM.binaryMachineStateOp',
+      EvmYul.EVM.ternaryMachineStateOp,
+      EvmYul.EVM.ternaryCopyOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop, EvmYul.Stack.pop2, EvmYul.Stack.pop3,
+      EvmYul.Stack.pop4, EvmYul.Stack.pop5, EvmYul.Stack.pop6,
+      EvmYul.Stack.push, Id.run] at hSafe hStep ⊢
+  all_goals
+    repeat (first | split at hStep | split)
+  all_goals
+    try simp at hStep
+  all_goals
+    try cases hStep
+  all_goals
+    exact ⟨sourceShared, hShared, rfl⟩
+
+theorem structured_eval_sourceBridgeSafe_sourceStateRel
+    {cfg : Reference.StateRelConfig}
+    {sourceLayout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {sourceStore : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {op : Structured.BasicOp}
+    {argValues valuesAfter : List Word}
+    {sharedAfter : EvmYul.SharedState .EVM}
+    (hSourceRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
+        (.Ok sourceShared sourceStore) compiler)
+    (hSafe : BasicOpSourceBridgeSafe op)
+    (hEval :
+      Locals.Source.PrimitiveSemantics.structured.eval op compiler.shared
+        argValues = .ok (sharedAfter, valuesAfter)) :
+    ∃ sourceSharedAfter,
+      Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
+        (.Ok sourceSharedAfter sourceStore)
+        (compiler.withShared sharedAfter) ∧
+      sourceSharedAfter.gasAvailable = sourceShared.gasAvailable := by
+  cases hSourceRel with
+  | ok hShared hVars =>
+      let evm : EvmYul.EVM.State :=
+        { toSharedState := compiler.shared
+          pc := EvmYul.UInt256.ofNat 0
+          stack := argValues.reverse
+          execLength := 0 }
+      rcases
+        Locals.SourceLowering.PrimitiveSemantics.structured_eval_step_exists
+          (op := op) (shared := compiler.shared) (shared' := sharedAfter)
+          (values := argValues) (values' := valuesAfter)
+          (evm := evm) (baseStack := ([] : EvmYul.Stack Word))
+          hEval (by simp [evm]) (by simp [evm]) with
+        ⟨evmAfter, hStep, hSharedAfterEq, _hStackAfter⟩
+      rcases
+        basicOpSourceBridgeSafe_step_sharedStateRel
+          (cfg := cfg) (sourceShared := sourceShared)
+          (state := evm) (stateAfter := evmAfter) (op := op)
+          hShared hSafe hStep with
+        ⟨sourceSharedAfter, hSharedAfterRel, hSourceGas⟩
+      refine ⟨sourceSharedAfter, ?_, hSourceGas⟩
+      exact
+        Reference.SourceBridgeFacts.SourceStateRel.ok
+          (by simpa [evm, hSharedAfterEq] using hSharedAfterRel)
+          hVars
 
 namespace FunctionsOpenCurrentSharedStateBridgeRel
 
@@ -47474,6 +47942,7 @@ theorem compilerOpenPrimitive_no_callCreate_stackPrefixSuffixErased_sourceTrace_
       StackPrefixSuffixErasedRel layout (compiler.withShared sharedAfter)
         (valuesAfter.reverse ++ stackPrefix) suffix evmAfter ∧
       evmAfter.pc = state.pc + EvmYul.UInt256.ofNat 1 ∧
+      evmAfter.gasAvailable = state.gasAvailable ∧
       ∀ {tailTrace : OpenExternal.OpenTrace}
         {targetResult : Assembly.StepResult}
         (hTailTrace :
@@ -47560,6 +48029,16 @@ theorem compilerOpenPrimitive_no_callCreate_stackPrefixSuffixErased_sourceTrace_
   have hAfterPc :
       evmAfter.pc = state.pc + EvmYul.UInt256.ofNat 1 :=
     basicOp_no_callCreate_step_pc hNoCallCreate hFullBasic
+  have hAfterGas :
+      evmAfter.gasAvailable = state.gasAvailable := by
+    have hNoInstrCall :
+        (Structured.BasicInstr.op op).usesCallCreate = false := by
+      simpa [Structured.BasicInstr.usesCallCreate] using hNoCallCreate
+    have hInstrStep :
+        (Structured.BasicInstr.op op).step state = .ok evmAfter := by
+      simpa [Structured.BasicInstr.step] using hFullBasic
+    exact structuredBasicInstr_step_no_call_gasAvailable_eq
+      hNoInstrCall hInstrStep
   have hSource :
       OpenExternal.OpenResultResolves
         (Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
@@ -47573,7 +48052,7 @@ theorem compilerOpenPrimitive_no_callCreate_stackPrefixSuffixErased_sourceTrace_
   have hNoInstr :
       Assembly.Instr.usesCallCreate (.prim op.toPrimOp) = false := by
     simpa [Assembly.Instr.usesCallCreate] using hNoCallCreate
-  refine ⟨evmAfter, hSource, hAfterRel, hAfterPc, ?_⟩
+  refine ⟨evmAfter, hSource, hAfterRel, hAfterPc, hAfterGas, ?_⟩
   intro tailTrace targetResult hTailTrace hTailReady
   let hRawTrace :
       OpenAssembly.Source.OpenTraceResult program (fuel + 1) state
@@ -47609,10 +48088,7 @@ theorem compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedB
         (.Ok sourceShared sourceStore) compiler)
     (hGasRel :
       cfg.gasAvailableRel sourceShared.gasAvailable state.gasAvailable)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (values : List Word)
     (hValuesLen :
       values.length = Expressions.Structured.BasicOp.inputs op)
@@ -47650,8 +48126,8 @@ theorem compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedB
   | none =>
       have hNoCallCreate :
           op.toPrimOp.isCallCreate = false := by
-        rcases hSupported with hNoCallCreate | ⟨kind, hSome⟩
-        · exact hNoCallCreate
+        rcases hSupported with hSafe | ⟨kind, hSome⟩
+        · exact BasicOpSourceBridgeSafe.no_callCreate hSafe
         · rw [hKind] at hSome
           cases hSome
       rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
@@ -47670,7 +48146,7 @@ theorem compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedB
                 (compiler := compiler) (state := state)
                 op hNoCallCreate values stackPrefix suffix hPrefixRel
                 program pc fuel hAt hEval with
-            ⟨evmAfter, _hSource, hAfterRel, hAfterPc, hCont⟩
+            ⟨evmAfter, _hSource, hAfterRel, hAfterPc, _hAfterGas, hCont⟩
           refine ⟨evmAfter, hAfterRel, hAfterPc, ?_⟩
           intro tailTrace targetResult hTailTrace hTailReady
           rcases hCont hTailTrace hTailReady with
@@ -47727,10 +48203,7 @@ theorem compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedB
         compiler)
     (hGasRel :
       SourceStateTargetGasRel cfg source state)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (values : List Word)
     (hValuesLen :
       values.length = Expressions.Structured.BasicOp.inputs op)
@@ -47790,10 +48263,7 @@ theorem compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedB
         (.Ok sourceShared sourceStore) compiler)
     (hGasRel :
       cfg.gasAvailableRel sourceShared.gasAvailable state.gasAvailable)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (values : List Word)
     (hValuesLen :
       values.length = Expressions.Structured.BasicOp.inputs op)
@@ -47809,10 +48279,12 @@ theorem compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedB
       ∀ {sharedAfter : EvmYul.SharedState .EVM}
         {valuesAfter : List Word} {evmAfter : EvmYul.EVM.State},
         OpenExternal.CallKind.ofBasicOp? op = none →
+        BasicOpSourceBridgeSafe op →
         prim.eval op compiler.shared values = .ok (sharedAfter, valuesAfter) →
         StackPrefixSuffixErasedRel layout (compiler.withShared sharedAfter)
           (valuesAfter.reverse ++ stackPrefix) suffix evmAfter →
         evmAfter.pc = state.pc + EvmYul.UInt256.ofNat 1 →
+        evmAfter.gasAvailable = state.gasAvailable →
         ∃ sourceAfter : Reference.State,
           Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
             sourceAfter (compiler.withShared sharedAfter) ∧
@@ -47850,12 +48322,13 @@ theorem compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedB
               hFullTrace := by
   cases hKind : OpenExternal.CallKind.ofBasicOp? op with
   | none =>
-      have hNoCallCreate :
-          op.toPrimOp.isCallCreate = false := by
-        rcases hSupported with hNoCallCreate | ⟨kind, hSome⟩
-        · exact hNoCallCreate
+      have hOpSafe : BasicOpSourceBridgeSafe op := by
+        rcases hSupported with hSafe | ⟨kind, hSome⟩
+        · exact hSafe
         · rw [hKind] at hSome
           cases hSome
+      have hNoCallCreate : op.toPrimOp.isCallCreate = false :=
+        BasicOpSourceBridgeSafe.no_callCreate hOpSafe
       rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
         hKind] at hResolve
       cases hEval : prim.eval op compiler.shared values with
@@ -47872,8 +48345,9 @@ theorem compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedB
                 (compiler := compiler) (state := state)
                 op hNoCallCreate values stackPrefix suffix hPrefixRel
                 program pc fuel hAt hEval with
-            ⟨evmAfter, _hSource, hAfterRel, hAfterPc, hCont⟩
-          rcases hNonCallSourceGas hKind hEval hAfterRel hAfterPc with
+            ⟨evmAfter, _hSource, hAfterRel, hAfterPc, hAfterGas, hCont⟩
+          rcases hNonCallSourceGas hKind hOpSafe hEval hAfterRel hAfterPc
+              hAfterGas with
             ⟨sourceAfter, hSourceAfter, hGasAfter⟩
           refine
             ⟨sourceAfter, hSourceAfter, evmAfter, hGasAfter, hAfterRel,
@@ -49016,10 +49490,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentS
     {state : EvmYul.EVM.State}
     {op : Structured.BasicOp}
     {args : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix suffix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -49154,10 +49625,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentS
     {state : EvmYul.EVM.State}
     {op : Structured.BasicOp}
     {args : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix suffix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -49241,12 +49709,14 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentS
         StackPrefixSuffixErasedRel layout compilerAfterArgs
           (argValues.reverse ++ stackPrefix) suffix evmAfterArgs →
         OpenExternal.CallKind.ofBasicOp? op = none →
+        BasicOpSourceBridgeSafe op →
         prim.eval op compilerAfterArgs.shared argValues =
           .ok (sharedAfter, primValuesAfter) →
         StackPrefixSuffixErasedRel layout
           (compilerAfterArgs.withShared sharedAfter)
           (primValuesAfter.reverse ++ stackPrefix) suffix evmAfter →
         evmAfter.pc = evmAfterArgs.pc + EvmYul.UInt256.ofNat 1 →
+        evmAfter.gasAvailable = evmAfterArgs.gasAvailable →
         ∃ sourceAfter : Reference.State,
           Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
             sourceAfter (compilerAfterArgs.withShared sharedAfter) ∧
@@ -49308,22 +49778,25 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentS
             ∀ {sharedAfter : EvmYul.SharedState .EVM}
               {valuesAfter : List Word} {evmAfter : EvmYul.EVM.State},
               OpenExternal.CallKind.ofBasicOp? op = none →
+              BasicOpSourceBridgeSafe op →
               prim.eval op compilerAfterArgs.shared argValues =
                 .ok (sharedAfter, valuesAfter) →
               StackPrefixSuffixErasedRel layout
                 (compilerAfterArgs.withShared sharedAfter)
                 (valuesAfter.reverse ++ stackPrefix) suffix evmAfter →
               evmAfter.pc = evmAfterArgs.pc + EvmYul.UInt256.ofNat 1 →
+              evmAfter.gasAvailable = evmAfterArgs.gasAvailable →
               ∃ sourceAfter : Reference.State,
                 Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
                   sourceAfter (compilerAfterArgs.withShared sharedAfter) ∧
                 SourceStateTargetGasRel cfg sourceAfter evmAfter := by
-          intro sharedAfter valuesAfter evmAfter hKindNone hEval hAfterRel
-            hAfterPc
+          intro sharedAfter valuesAfter evmAfter hKindNone hOpSafe hEval
+            hAfterRel hAfterPc hAfterGas
           exact
             hNonCallSourceGas hResolveArgs
               (Reference.SourceBridgeFacts.SourceStateRel.ok hShared hVars)
-              hGasArgs hArgsRel hKindNone hEval hAfterRel hAfterPc
+              hGasArgs hArgsRel hKindNone hOpSafe hEval hAfterRel hAfterPc
+              hAfterGas
         rcases
             compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_sourceGasSeed_of_resolves_ok
               (prim := prim) hPrim (cfg := cfg)
@@ -49364,10 +49837,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentS
     (hCompile :
       Locals.Expr.compileCode ctx offset (.prim op args) = some code)
     (hArgsOwned : Locals.Source.ExprSeq.SourceOwned args)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix suffix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -49785,10 +50255,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentS
     (hCompile :
       Locals.Expr.compileCode ctx offset (.prim op args) = some code)
     (hArgsOwned : Locals.Source.ExprSeq.SourceOwned args)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix suffix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -49871,12 +50338,14 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentS
         StackPrefixSuffixErasedRel layout compilerAfterArgs
           (argValues.reverse ++ stackPrefix) suffix evmAfterArgs →
         OpenExternal.CallKind.ofBasicOp? op = none →
+        BasicOpSourceBridgeSafe op →
         prim.eval op compilerAfterArgs.shared argValues =
           .ok (sharedAfter, primValuesAfter) →
         StackPrefixSuffixErasedRel layout
           (compilerAfterArgs.withShared sharedAfter)
           (primValuesAfter.reverse ++ stackPrefix) suffix evmAfter →
         evmAfter.pc = evmAfterArgs.pc + EvmYul.UInt256.ofNat 1 →
+        evmAfter.gasAvailable = evmAfterArgs.gasAvailable →
         ∃ sourceAfter : Reference.State,
           Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
             sourceAfter (compilerAfterArgs.withShared sharedAfter) ∧
@@ -50249,10 +50718,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentS
     {state : EvmYul.EVM.State}
     {op : Structured.BasicOp}
     {args : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix suffix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -50318,12 +50784,14 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentS
         StackPrefixSuffixErasedRel layout compilerAfterArgs
           (argValues.reverse ++ stackPrefix) suffix evmAfterArgs →
         OpenExternal.CallKind.ofBasicOp? op = none →
+        BasicOpSourceBridgeSafe op →
         prim.eval op compilerAfterArgs.shared argValues =
           .ok (sharedAfter, primValuesAfter) →
         StackPrefixSuffixErasedRel layout
           (compilerAfterArgs.withShared sharedAfter)
           (primValuesAfter.reverse ++ stackPrefix) suffix evmAfter →
         evmAfter.pc = evmAfterArgs.pc + EvmYul.UInt256.ofNat 1 →
+        evmAfter.gasAvailable = evmAfterArgs.gasAvailable →
         ∃ sourceAfter : Reference.State,
           Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
             sourceAfter (compilerAfterArgs.withShared sharedAfter) ∧
@@ -50408,24 +50876,27 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentS
           exact hResponsesPrim hMem hSharedTarget
         have hNonCallSourceGasLocal :
             ∀ {sharedAfter : EvmYul.SharedState .EVM}
-              {valuesAfter : List Word} {evmAfter : EvmYul.EVM.State},
-              OpenExternal.CallKind.ofBasicOp? op = none →
-              prim.eval op compilerAfterArgs.shared argValues =
-                .ok (sharedAfter, valuesAfter) →
+             {valuesAfter : List Word} {evmAfter : EvmYul.EVM.State},
+             OpenExternal.CallKind.ofBasicOp? op = none →
+              BasicOpSourceBridgeSafe op →
+             prim.eval op compilerAfterArgs.shared argValues =
+               .ok (sharedAfter, valuesAfter) →
               StackPrefixSuffixErasedRel layout
                 (compilerAfterArgs.withShared sharedAfter)
                 (valuesAfter.reverse ++ stackPrefix) suffix evmAfter →
               evmAfter.pc = evmAfterArgs.pc + EvmYul.UInt256.ofNat 1 →
+              evmAfter.gasAvailable = evmAfterArgs.gasAvailable →
               ∃ sourceAfter : Reference.State,
                 Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
                   sourceAfter (compilerAfterArgs.withShared sharedAfter) ∧
                 SourceStateTargetGasRel cfg sourceAfter evmAfter := by
-          intro sharedAfter valuesAfter evmAfter hKindNone hEval hAfterRel
-            hAfterPc
+          intro sharedAfter valuesAfter evmAfter hKindNone hOpSafe hEval
+            hAfterRel hAfterPc hAfterGas
           exact
             hNonCallSourceGas hResolveArgs
               (Reference.SourceBridgeFacts.SourceStateRel.ok hShared hVars)
-              hGasArgs hArgsRel hKindNone hEval hAfterRel hAfterPc
+              hGasArgs hArgsRel hKindNone hOpSafe hEval hAfterRel hAfterPc
+              hAfterGas
         rcases
             compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_sourceGasSeed_of_resolves_ok
               (prim := prim) hPrim (cfg := cfg)
@@ -50466,10 +50937,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentS
     (hCompile :
       Locals.Expr.compileCode ctx offset (.prim op args) = some code)
     (hArgsOwned : Locals.Source.ExprSeq.SourceOwned args)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix suffix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -50534,12 +51002,14 @@ theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentS
         StackPrefixSuffixErasedRel layout compilerAfterArgs
           (argValues.reverse ++ stackPrefix) suffix evmAfterArgs →
         OpenExternal.CallKind.ofBasicOp? op = none →
+        BasicOpSourceBridgeSafe op →
         prim.eval op compilerAfterArgs.shared argValues =
           .ok (sharedAfter, primValuesAfter) →
         StackPrefixSuffixErasedRel layout
           (compilerAfterArgs.withShared sharedAfter)
           (primValuesAfter.reverse ++ stackPrefix) suffix evmAfter →
         evmAfter.pc = evmAfterArgs.pc + EvmYul.UInt256.ofNat 1 →
+        evmAfter.gasAvailable = evmAfterArgs.gasAvailable →
         ∃ sourceAfter : Reference.State,
           Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
             sourceAfter (compilerAfterArgs.withShared sharedAfter) ∧
@@ -50695,6 +51165,7 @@ abbrev LocalsExprNonCallSourceGasSeedReadyFor
       evmAfterArgs →
     StackPrefixSuffixErasedRel layout compilerAfterArgs
       (argValues.reverse ++ currentPrefix) suffix evmAfterArgs →
+    BasicOpSourceBridgeSafe op →
     OpenExternal.CallKind.ofBasicOp? op = none →
     prim.eval op compilerAfterArgs.shared argValues =
       .ok (sharedAfter, primValuesAfter) →
@@ -50702,10 +51173,35 @@ abbrev LocalsExprNonCallSourceGasSeedReadyFor
       (compilerAfterArgs.withShared sharedAfter)
       (primValuesAfter.reverse ++ currentPrefix) suffix evmAfter →
     evmAfter.pc = evmAfterArgs.pc + EvmYul.UInt256.ofNat 1 →
+    evmAfter.gasAvailable = evmAfterArgs.gasAvailable →
     ∃ sourceAfter : Reference.State,
       Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout sourceAfter
         (compilerAfterArgs.withShared sharedAfter) ∧
       SourceStateTargetGasRel cfg sourceAfter evmAfter
+
+theorem localsExprNonCallSourceGasSeedReadyFor_structured
+    {cfg : Reference.StateRelConfig}
+    {sourceLayout layout : List Name}
+    {suffix : List Word} :
+    LocalsExprNonCallSourceGasSeedReadyFor cfg sourceLayout layout
+      Locals.Source.PrimitiveSemantics.structured suffix := by
+  intro currentCompiler currentPrefix op args argsTrace compilerAfterArgs
+    argValues sourceShared sourceStore evmAfterArgs sharedAfter
+    primValuesAfter evmAfter _hResolveArgs hSourceRel hGasRel _hPrefixRel
+    hSafe _hKind hEval _hAfterRel _hAfterPc hAfterGas
+  rcases
+    structured_eval_sourceBridgeSafe_sourceStateRel
+      (cfg := cfg) (sourceLayout := sourceLayout)
+      (sourceShared := sourceShared) (sourceStore := sourceStore)
+      (compiler := compilerAfterArgs) (op := op)
+      (argValues := argValues) (valuesAfter := primValuesAfter)
+      (sharedAfter := sharedAfter)
+      hSourceRel hSafe hEval with
+    ⟨sourceSharedAfter, hSourceAfter, hSourceGas⟩
+  exact
+    ⟨.Ok sourceSharedAfter sourceStore, hSourceAfter,
+      SourceStateTargetGasRel.ok_of_source_target_gasAvailable_eq
+        hGasRel hSourceGas hAfterGas⟩
 
 mutual
   theorem compilerOpenLocalsExpr_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode_responses
@@ -50880,10 +51376,11 @@ mutual
                   by simpa [hFuel] using hFullReady⟩)
               (fun {argsTrace compilerAfterArgs argValues sourceShared
                   sourceStore evmAfterArgs sharedAfter primValuesAfter evmAfter}
-                  hResolveArgs hSourceArgs hGasArgs hArgsRel hKindNone hEval
-                  hAfterRel hAfterPc => by
+                  hResolveArgs hSourceArgs hGasArgs hArgsRel hKindNone
+                  hOpSafe hEval hAfterRel hAfterPc hAfterGas => by
                 exact hNonCallSourceGas hResolveArgs hSourceArgs hGasArgs
-                  hArgsRel hKindNone hEval hAfterRel hAfterPc)
+                  hArgsRel hOpSafe hKindNone hEval hAfterRel hAfterPc
+                  hAfterGas)
               hResponses hResolve with
           ⟨sourceAfter, hSourceAfter, evmAfter, hGasAfter, hRel,
             hAfterPc, hCont⟩
@@ -51224,10 +51721,7 @@ theorem compilerOpenPrimitive_stackPrefix_sourceTrace_currentSharedBridgeReady_o
     (hSourceRel :
       Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
         (.Ok sourceShared sourceStore) compiler)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (values : List Word)
     (hValuesLen :
       values.length = Expressions.Structured.BasicOp.inputs op)
@@ -51265,8 +51759,8 @@ theorem compilerOpenPrimitive_stackPrefix_sourceTrace_currentSharedBridgeReady_o
   | none =>
       have hNoCallCreate :
           op.toPrimOp.isCallCreate = false := by
-        rcases hSupported with hNoCallCreate | ⟨kind, hSome⟩
-        · exact hNoCallCreate
+        rcases hSupported with hSafe | ⟨kind, hSome⟩
+        · exact BasicOpSourceBridgeSafe.no_callCreate hSafe
         · rw [hKind] at hSome
           cases hSome
       rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
@@ -51340,10 +51834,7 @@ theorem compilerOpenPrimitive_stackPrefix_sourceTrace_currentSharedBridgeReady_o
     (hSourceRel :
       Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout source
         compiler)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (values : List Word)
     (hValuesLen :
       values.length = Expressions.Structured.BasicOp.inputs op)
@@ -51397,10 +51888,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefix_sourceTrace_currentSharedBridgeR
     {state : EvmYul.EVM.State}
     {op : Structured.BasicOp}
     {args : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -51532,10 +52020,7 @@ theorem compilerOpenLocalsExpr_prim_stackPrefix_sourceTrace_currentSharedBridgeR
     (hCompile :
       Locals.Expr.compileCode ctx offset (.prim op args) = some code)
     (hArgsOwned : Locals.Source.ExprSeq.SourceOwned args)
-    (hSupported :
-      op.toPrimOp.isCallCreate = false ∨
-        ∃ kind : OpenExternal.CallKind,
-          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hSupported : BasicOpOpenSupported op)
     (stackPrefix : List Word)
     (program : Assembly.Program)
     (primitiveTailFuel expressionFuel : Nat)
@@ -85745,19 +86230,20 @@ def FunctionsProgramRegularOpenSupported
                 fn.body.stmts
 
 def basicOpOpenSupported? (op : Structured.BasicOp) : Bool :=
-  if op.toPrimOp.isCallCreate = false then
-    true
-  else
-    (OpenExternal.CallKind.ofBasicOp? op).isSome
+  match basicOpSourceBridgeSafe? op with
+  | true => true
+  | false => (OpenExternal.CallKind.ofBasicOp? op).isSome
 
 theorem basicOpOpenSupported?_sound
     {op : Structured.BasicOp}
     (hCheck : basicOpOpenSupported? op = true) :
     BasicOpOpenSupported op := by
   unfold basicOpOpenSupported? at hCheck
-  by_cases hNoCallCreate : op.toPrimOp.isCallCreate = false
-  · exact Or.inl hNoCallCreate
-  · simp [hNoCallCreate] at hCheck
+  cases hSafe : basicOpSourceBridgeSafe? op with
+  | true =>
+      exact Or.inl hSafe
+  | false =>
+    simp [hSafe] at hCheck
     cases hKind : OpenExternal.CallKind.ofBasicOp? op with
     | none =>
         simp [hKind] at hCheck
@@ -95588,6 +96074,224 @@ theorem compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridg
           SourceOpenTraceCurrentSharedBridgeReadyResultRel.append_running
             (hPrefix := hCleanupTrace) hCleanupReady hPostRel
 
+theorem compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_endPc_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {cfg : Reference.StateRelConfig}
+    {programSource : Functions.Program} {lower : Expressions.Program}
+    (hProgramSupported :
+      FunctionsProgramRegularOpenSupported programSource)
+    (hNonCallSourceGas :
+      ∀ {sourceLayout' layout' : List Name}
+        {sourceRef' : Reference.State}
+        {compiler' : Objects.Source.State}
+        {state' : EvmYul.EVM.State}
+        {suffix : List Word},
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout'
+          sourceRef' compiler' →
+        SourceStateTargetGasRel cfg sourceRef' state' →
+        StackPrefixSuffixErasedRel layout' compiler' [] suffix state' →
+        LocalsExprNonCallSourceGasSeedReadyFor cfg sourceLayout' layout'
+          prim suffix)
+    {sourceFuel : Nat}
+    {stmts : List Functions.Stmt}
+    {finalLocalsCtx : Locals.Ctx}
+    {compiledStmts : List Expressions.Stmt}
+    {sourceRef : Reference.State}
+    {compiler : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {cleanup : Structured.Code}
+    (hSupported :
+      FunctionsStmtListRegularOpenSupportedFor programSource [] [] stmts)
+    (hLower : Functions.Program.toExpressions? programSource = some lower)
+    (layoutProgram :
+      Structured.Preservation.ProcedurePreservation.ProgramLayout
+        lower.toStructured)
+    (bounds :
+      Structured.Preservation.ProcedurePreservation.CompilationBounds
+        lower.toStructured)
+    (hCtxProcs : structuredCtx.procs = lower.toStructured.procs)
+    (hCalls :
+      Structured.Preservation.ProcedurePreservation.CallsIncluded
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).calls
+        layoutProgram.sites)
+    (hCompileBlock :
+      Locals.Block.compileOpen Locals.Ctx.initial
+          (Functions.Block.toLocals [] { stmts := stmts }) =
+        some (compiledStmts, finalLocalsCtx))
+    (bodySegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (cleanupSegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        cleanup.toAssembly)
+    (hAsm : layoutProgram.asm = lower.toStructured.compile)
+    (hCleanupStart :
+      Structured.Preservation.CodeSegment.startPc cleanupSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc bodySegment)
+    (hCleanupFallthrough :
+      Structured.Preservation.CodeSegment.fallthroughPc cleanupSegment =
+        Assembly.Program.pcAfter
+          (Structured.Preservation.CompiledProgram.main
+            lower.toStructured).code)
+    (hCleanup : finalLocalsCtx.cleanupTo? 0 = some cleanup)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc bodySegment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel [] compiler [] state)
+    (hSourceRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg [] sourceRef compiler)
+    (hGasRel : SourceStateTargetGasRel cfg sourceRef state)
+    {trace : OpenExternal.OpenTrace}
+    (hResponses :
+      SourceOpenTraceResponsesSharedBridgeRel cfg trace)
+    {sourceOutcome : Functions.Source.Outcome}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runScoped
+          prim programSource Functions.Source.Ctx.initial
+          { stmts := stmts } sourceFuel compiler)
+        trace (.ok sourceOutcome)) :
+    ∃ targetFuel,
+      SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg layoutProgram.asm
+        targetFuel state trace
+        (fun targetResult =>
+          Functions.Source.WholeProgramOutcomeRel sourceOutcome
+            targetResult ∧
+          Structured.Preservation.TargetOutcomeEndPc layoutProgram.asm
+            targetResult) := by
+  rcases
+      compilerOpenFunctionsBlock_runScoped_regular_inv_of_supportedFor
+        hProgramSupported hSupported hResolve with
+    ⟨sourceInner, _ctxFinal, _hRawResolve, hSourceOutcome⟩
+  subst sourceOutcome
+  rcases
+      compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_compiledOutcomeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+        hPrim hProgramSupported hNonCallSourceGas hSupported hLower
+        layoutProgram hCtxProcs hCalls hCompileBlock bodySegment
+        cleanupSegment hCleanupStart hCleanup hPc hPrefixRel hSourceRel
+        hGasRel hResponses hResolve with
+    ⟨cleanupFuel, hCleanupPkg⟩
+  rcases hCleanupPkg with
+    ⟨cleanupResult, hCleanupTrace, hCleanupReady, hCleanupRel⟩
+  rcases hCleanupRel with ⟨directOutcome, hScopedRel, hCompiledRel⟩
+  cases directOutcome with
+  | mk directState directMode =>
+      cases directMode <;> cases cleanupResult
+      all_goals
+        simp [Functions.Source.WholeProgramOutcomeRel,
+          Functions.SourceDirect.BlockScopedOutcomeRel,
+          Functions.SourceDirect.StmtOutcomeRel,
+          Structured.Preservation.CompiledOutcomeRel,
+          Structured.Preservation.WholeProgramOutcomeRel,
+          Functions.Source.Outcome.regular,
+          Locals.Source.Outcome.regular,
+          Structured.Outcome.regular,
+          Structured.Preservation.TargetOutcomeEndPc]
+          at hScopedRel hCompiledRel ⊢
+      · rcases hCompiledRel with ⟨hFrame, hPcClean⟩
+        rename_i targetClean
+        have hPcMain :
+            targetClean.pc =
+              Assembly.Program.pcAfter
+                (Structured.Preservation.CompiledProgram.main
+                  lower.toStructured).code := by
+          exact hPcClean.trans hCleanupFallthrough
+        have hPostResultRel :
+            ∀ final,
+              Structured.Preservation.eraseControl final =
+                  Structured.Preservation.eraseControl targetClean →
+              final.pc = Assembly.Program.pcAfter lower.toStructured.compile →
+              Functions.Source.WholeProgramOutcomeRel
+                (Functions.Source.Outcome.regular
+                  (Locals.Source.State.restrictTo [] sourceInner))
+                (.running final) ∧
+              Structured.Preservation.TargetOutcomeEndPc
+                lower.toStructured.compile
+                (.running final) := by
+          intro final hErase hFinalPc
+          have hWholeClean :
+              Structured.Preservation.WholeProgramOutcomeRel
+                (Structured.Outcome.regular directState)
+                (.running targetClean) :=
+            Structured.Preservation.WholeProgramOutcomeRel.running_of_stateRel
+              hFrame
+          have hEraseDirect :
+              Structured.Preservation.eraseControl directState.evm =
+                Structured.Preservation.eraseControl targetClean := by
+            simpa [Structured.Preservation.WholeProgramOutcomeRel,
+              Structured.Outcome.regular] using hWholeClean
+          have hWholeStructured :
+              Structured.Preservation.WholeProgramOutcomeRel
+                (Structured.Outcome.regular directState)
+                (.running final) := by
+            simp [Structured.Preservation.WholeProgramOutcomeRel,
+              Structured.Outcome.regular]
+            exact hEraseDirect.trans hErase.symm
+          have hWholeFunctions :
+              Functions.Source.WholeProgramOutcomeRel
+                (Functions.Source.Outcome.regular
+                  (Locals.Source.State.restrictTo [] sourceInner))
+                (.running final) :=
+            ⟨Structured.Outcome.regular directState,
+              by
+                simpa [Functions.SourceDirect.BlockScopedOutcomeRel,
+                  Functions.SourceDirect.StmtOutcomeRel,
+                  Functions.Source.Outcome.regular,
+                  Locals.Source.Outcome.regular,
+                  Structured.Outcome.regular] using hScopedRel,
+              hWholeStructured⟩
+          have hEndPc :
+              Structured.Preservation.TargetOutcomeEndPc
+                lower.toStructured.compile
+                (.running final) := by
+            simpa [Structured.Preservation.TargetOutcomeEndPc]
+              using hFinalPc
+          exact ⟨hWholeFunctions, hEndPc⟩
+        let ResultRel : Assembly.StepResult → Prop := fun targetResult =>
+          Functions.Source.WholeProgramOutcomeRel
+            (Functions.Source.Outcome.regular
+              (Locals.Source.State.restrictTo [] sourceInner))
+            targetResult ∧
+          Structured.Preservation.TargetOutcomeEndPc
+            lower.toStructured.compile targetResult
+        have hPostResultRel' :
+            ∀ final,
+              Structured.Preservation.eraseControl final =
+                  Structured.Preservation.eraseControl targetClean →
+              final.pc = Assembly.Program.pcAfter lower.toStructured.compile →
+              ResultRel (.running final) := by
+          intro final hErase hFinalPc
+          exact hPostResultRel final hErase hFinalPc
+        rcases
+            sourceTrace_currentSharedBridgeReadyResultRel_program_end_postamble_of_main_fallthrough
+              (cfg := cfg)
+              (program := lower.toStructured)
+              (ResultRel := ResultRel)
+              bounds hPcMain hPostResultRel' with
+          ⟨postFuel, hPostRelStructured⟩
+        have hPostRel :
+            SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg
+              layoutProgram.asm postFuel targetClean []
+              (fun targetResult =>
+                Functions.Source.WholeProgramOutcomeRel
+                  (Functions.Source.Outcome.regular
+                    (Locals.Source.State.restrictTo [] sourceInner))
+                  targetResult ∧
+                Structured.Preservation.TargetOutcomeEndPc layoutProgram.asm
+                  targetResult) := by
+          simpa [hAsm] using hPostRelStructured
+        refine ⟨cleanupFuel + postFuel, ?_⟩
+        simpa [List.append_nil] using
+          SourceOpenTraceCurrentSharedBridgeReadyResultRel.append_running
+            (hPrefix := hCleanupTrace) hCleanupReady hPostRel
+
 theorem compilerOpenFunctionsBlock_initial_block_scoped_openRunNResult_wholeRel_of_compileOpen_supportedFor_programLayout
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
@@ -95849,6 +96553,108 @@ theorem compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentShare
   | mk stmts =>
       exact
         compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+          hPrim hProgramSupported hNonCallSourceGas hSupported hLower
+          layoutProgram bounds hCtxProcs hCalls hCompileBlock bodySegment
+          cleanupSegment hAsm hCleanupStart hCleanupFallthrough hCleanup hPc
+          hPrefixRel hSourceRel hGasRel hResponses hResolve
+
+theorem compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_endPc_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {cfg : Reference.StateRelConfig}
+    {programSource : Functions.Program} {lower : Expressions.Program}
+    (hProgramSupported :
+      FunctionsProgramRegularOpenSupported programSource)
+    (hNonCallSourceGas :
+      ∀ {sourceLayout' layout' : List Name}
+        {sourceRef' : Reference.State}
+        {compiler' : Objects.Source.State}
+        {state' : EvmYul.EVM.State}
+        {suffix : List Word},
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout'
+          sourceRef' compiler' →
+        SourceStateTargetGasRel cfg sourceRef' state' →
+        StackPrefixSuffixErasedRel layout' compiler' [] suffix state' →
+        LocalsExprNonCallSourceGasSeedReadyFor cfg sourceLayout' layout'
+          prim suffix)
+    {sourceFuel : Nat}
+    {block : Functions.Block}
+    {finalLocalsCtx : Locals.Ctx}
+    {compiledStmts : List Expressions.Stmt}
+    {sourceRef : Reference.State}
+    {compiler : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {cleanup : Structured.Code}
+    (hSupported :
+      FunctionsStmtListRegularOpenSupportedFor programSource [] []
+        block.stmts)
+    (hLower : Functions.Program.toExpressions? programSource = some lower)
+    (layoutProgram :
+      Structured.Preservation.ProcedurePreservation.ProgramLayout
+        lower.toStructured)
+    (bounds :
+      Structured.Preservation.ProcedurePreservation.CompilationBounds
+        lower.toStructured)
+    (hCtxProcs : structuredCtx.procs = lower.toStructured.procs)
+    (hCalls :
+      Structured.Preservation.ProcedurePreservation.CallsIncluded
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).calls
+        layoutProgram.sites)
+    (hCompileBlock :
+      Locals.Block.compileOpen Locals.Ctx.initial
+          (Functions.Block.toLocals [] block) =
+        some (compiledStmts, finalLocalsCtx))
+    (bodySegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (cleanupSegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        cleanup.toAssembly)
+    (hAsm : layoutProgram.asm = lower.toStructured.compile)
+    (hCleanupStart :
+      Structured.Preservation.CodeSegment.startPc cleanupSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc bodySegment)
+    (hCleanupFallthrough :
+      Structured.Preservation.CodeSegment.fallthroughPc cleanupSegment =
+        Assembly.Program.pcAfter
+          (Structured.Preservation.CompiledProgram.main
+            lower.toStructured).code)
+    (hCleanup : finalLocalsCtx.cleanupTo? 0 = some cleanup)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc bodySegment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel [] compiler [] state)
+    (hSourceRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg [] sourceRef compiler)
+    (hGasRel : SourceStateTargetGasRel cfg sourceRef state)
+    {trace : OpenExternal.OpenTrace}
+    (hResponses :
+      SourceOpenTraceResponsesSharedBridgeRel cfg trace)
+    {sourceOutcome : Functions.Source.Outcome}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runScoped
+          prim programSource Functions.Source.Ctx.initial block sourceFuel
+          compiler)
+        trace (.ok sourceOutcome)) :
+    ∃ targetFuel,
+      SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg layoutProgram.asm
+        targetFuel state trace
+        (fun targetResult =>
+          Functions.Source.WholeProgramOutcomeRel sourceOutcome
+            targetResult ∧
+          Structured.Preservation.TargetOutcomeEndPc layoutProgram.asm
+            targetResult) := by
+  cases block with
+  | mk stmts =>
+      exact
+        compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_endPc_sourceGasSeed_of_compileOpen_supportedFor_programLayout
           hPrim hProgramSupported hNonCallSourceGas hSupported hLower
           layoutProgram bounds hCtxProcs hCalls hCompileBlock bodySegment
           cleanupSegment hAsm hCleanupStart hCleanupFallthrough hCleanup hPc
@@ -96546,6 +97352,229 @@ theorem FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked
       using hSource
   rcases
       compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+        hPrim hProgramSupported hNonCallSourceGas hProgramSupported.1 hLower
+        layoutProgram hBounds hCtxProcs hCallsBody hCompileOpen bodySegment
+        cleanupCodeSegment (by rfl) hCleanupCodeStart'
+        hCleanupCodeFallthrough hCleanup hBodyPc hPrefixRel hInitialSourceRel
+        hInitialGasRel hResponses hSourceBlock with
+    ⟨targetFuel, hTargetRel⟩
+  exact ⟨targetFuel, by simpa [layoutProgram] using hTargetRel⟩
+
+theorem FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_sourceGasSeed_responses_endPc
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {cfg : Reference.StateRelConfig}
+    {program : Functions.Program} {asm : Assembly.Program}
+    {sourceFuel : Nat} {initial : EvmYul.EVM.State}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {sourceStore : EvmYul.Yul.VarStore}
+    (hProgramSupported :
+      FunctionsProgramRegularOpenSupported program)
+    (hInitialShared :
+      Reference.SharedStateRel cfg sourceShared initial.toSharedState)
+    (hNonCallSourceGas :
+      ∀ {sourceLayout' layout' : List Name}
+        {sourceRef' : Reference.State}
+        {compiler' : Objects.Source.State}
+        {state' : EvmYul.EVM.State}
+        {suffix : List Word},
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout'
+          sourceRef' compiler' →
+        SourceStateTargetGasRel cfg sourceRef' state' →
+        StackPrefixSuffixErasedRel layout' compiler' [] suffix state' →
+        LocalsExprNonCallSourceGasSeedReadyFor cfg sourceLayout' layout'
+          prim suffix)
+    (hCompile : Functions.Source.Program.compileChecked? program = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = []) :
+    ∀ {trace : OpenExternal.OpenTrace}
+      {sourceOutcome : Functions.Source.Outcome},
+      SourceOpenTraceResponsesSharedBridgeRel cfg trace →
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Program.runState
+          prim sourceFuel program
+          (Functions.Source.Program.initialState initial.toSharedState))
+        trace (.ok sourceOutcome) →
+      ∃ targetFuel,
+        SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg asm targetFuel
+          initial trace
+          (fun targetResult =>
+            Functions.Source.WholeProgramOutcomeRel sourceOutcome
+              targetResult ∧
+            Structured.Preservation.TargetOutcomeEndPc asm targetResult) := by
+  rcases Functions.Source.Program.compileChecked?_eq_some hCompile with
+    ⟨lower, hLower, hStructuredCompile⟩
+  rcases
+      Structured.Preservation.ProcedurePreservation.compileChecked?_eq_some
+        hStructuredCompile with
+    ⟨hAsm, _hAccepted, hBounds⟩
+  subst asm
+  let layoutProgram :=
+    Structured.Preservation.ProcedurePreservation.ProgramLayout.ofCompilationBounds
+      hBounds
+  let mainEvidence :=
+    Structured.Preservation.ProcedurePreservation.ProgramLayout.mainEvidenceOfCompilationBounds
+      hBounds
+  have hLowerBodyStructured :
+      lower.body.toStructured =
+        { stmts := Expressions.StmtList.toStructured lower.body.stmts } := by
+    cases lower.body
+    rfl
+  have hMainCodeEq :
+      (Structured.Preservation.CompiledProgram.main lower.toStructured).code =
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured lower.body.stmts }
+          (Structured.Preservation.CompiledProgram.mainCtx lower.toStructured)
+          0).code := by
+    simp [Structured.Preservation.CompiledProgram.main,
+      Expressions.Block.toStructured, Expressions.Program.toStructured,
+      hLowerBodyStructured]
+  let mainSegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured lower.body.stmts }
+          (Structured.Preservation.CompiledProgram.mainCtx lower.toStructured)
+          0).code :=
+    Structured.Preservation.CodeSegment.cast_code hMainCodeEq
+      mainEvidence.mainSegment
+  have hLowerLocals :
+      (Functions.Program.toLocals program).toExpressions? = some lower := by
+    simpa [Functions.Program.toExpressions?] using hLower
+  have hBodyCompile :
+      Locals.Block.compile Locals.Ctx.initial
+          (Functions.Block.toLocals [] program.body) =
+        some lower.body := by
+    simpa [Functions.Program.toLocals] using
+      (Locals.Program.body_toExpressions_of_toExpressions? hLowerLocals)
+  rcases
+      codeSegment_localsBlock_compile_split
+        (ctx := Locals.Ctx.initial)
+        (block := Functions.Block.toLocals [] program.body)
+        (lower := lower.body)
+        (asm := layoutProgram.asm)
+        (structuredCtx :=
+          Structured.Preservation.CompiledProgram.mainCtx lower.toStructured)
+        (supply := 0)
+        hBodyCompile mainSegment with
+    ⟨bodyStmts, finalLocalsCtx, cleanup, hCompileOpen, hCleanup,
+      hLowerStmts, bodySegment, cleanupSegment, hBodyStart,
+      hCleanupStart, hCleanupFall⟩
+  have hCallsFull :
+      Structured.Preservation.ProcedurePreservation.CallsIncluded
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (bodyStmts ++ Locals.codeStmt cleanup) }
+          (Structured.Preservation.CompiledProgram.mainCtx lower.toStructured)
+          0).calls
+        layoutProgram.sites := by
+    simpa [layoutProgram, mainEvidence,
+      Structured.Preservation.ProcedurePreservation.ProgramLayout.ofCompilationBounds,
+      Structured.Preservation.ProcedurePreservation.ProgramLayout.mainEvidenceOfCompilationBounds,
+      Structured.Preservation.CompiledProgram.main,
+      Structured.Preservation.CompiledProgram.mainCtx,
+      Expressions.Block.toStructured,
+      Expressions.Program.toStructured, hLowerBodyStructured, hLowerStmts] using
+      mainEvidence.mainCalls
+  have hCallsBody :
+      Structured.Preservation.ProcedurePreservation.CallsIncluded
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured bodyStmts }
+          (Structured.Preservation.CompiledProgram.mainCtx lower.toStructured)
+          0).calls
+        layoutProgram.sites :=
+    expressionsStmtList_toStructured_append_callsIncluded_left
+      (ctx := Structured.Preservation.CompiledProgram.mainCtx lower.toStructured)
+      (supply := 0) (left := bodyStmts)
+      (right := Locals.codeStmt cleanup) hCallsFull
+  have hCtxProcs :
+      (Structured.Preservation.CompiledProgram.mainCtx lower.toStructured).procs =
+        lower.toStructured.procs := by
+    simp [Structured.Preservation.CompiledProgram.mainCtx]
+  have hMainStart :
+      Structured.Preservation.CodeSegment.startPc mainSegment =
+        Assembly.Program.pcAfter [] := by
+    simp [mainSegment, layoutProgram, mainEvidence,
+      Structured.Preservation.ProcedurePreservation.ProgramLayout.ofCompilationBounds,
+      Structured.Preservation.ProcedurePreservation.ProgramLayout.mainEvidenceOfCompilationBounds,
+      Structured.Preservation.CompiledProgram.mainSegmentFromWholeFits,
+      Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc,
+      Assembly.Program.pcAfter]
+  have hBodyPc :
+      initial.pc =
+        Structured.Preservation.CodeSegment.startPc bodySegment := by
+    calc
+      initial.pc = Assembly.Program.pcAfter [] := hInitialPc
+      _ = Structured.Preservation.CodeSegment.startPc mainSegment :=
+        hMainStart.symm
+      _ = Structured.Preservation.CodeSegment.startPc bodySegment :=
+        hBodyStart.symm
+  have hMainFallthrough :
+      Structured.Preservation.CodeSegment.fallthroughPc mainSegment =
+        Assembly.Program.pcAfter
+          (Structured.Preservation.CompiledProgram.main
+            lower.toStructured).code := by
+    simp [mainSegment, layoutProgram, mainEvidence,
+      Structured.Preservation.ProcedurePreservation.ProgramLayout.ofCompilationBounds,
+      Structured.Preservation.ProcedurePreservation.ProgramLayout.mainEvidenceOfCompilationBounds,
+      Structured.Preservation.CompiledProgram.mainSegmentFromWholeFits,
+      Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.fallthroughPc, hMainCodeEq,
+      Assembly.Program.pcAfter]
+  have hCleanupFallthrough :
+      Structured.Preservation.CodeSegment.fallthroughPc cleanupSegment =
+        Assembly.Program.pcAfter
+          (Structured.Preservation.CompiledProgram.main
+            lower.toStructured).code :=
+    hCleanupFall.trans hMainFallthrough
+  rcases codeSegment_expressions_codeStmt_single_split cleanupSegment with
+    ⟨cleanupCodeSegment, hCleanupCodeStart, hCleanupCodeFall⟩
+  have hCleanupCodeStart' :
+      Structured.Preservation.CodeSegment.startPc cleanupCodeSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc bodySegment :=
+    hCleanupCodeStart.trans hCleanupStart
+  have hCleanupCodeFallthrough :
+      Structured.Preservation.CodeSegment.fallthroughPc cleanupCodeSegment =
+        Assembly.Program.pcAfter
+          (Structured.Preservation.CompiledProgram.main
+            lower.toStructured).code :=
+    hCleanupCodeFall.trans hCleanupFallthrough
+  have hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel []
+        (Functions.Source.Program.initialState initial.toSharedState) []
+        initial := by
+    have hInitialRel :=
+      (Functions.SourceDirect.StateRel.initial
+        (evm := initial) hInitialStack).1
+    simpa [Structured.RunState.initial] using
+      Locals.SourceLowering.StackPrefixRel.of_stateRel hInitialRel
+  have hInitialSourceRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg []
+        (.Ok sourceShared sourceStore)
+        (Functions.Source.Program.initialState initial.toSharedState) := by
+    simpa [Functions.Source.Program.initialState] using
+      Reference.SourceBridgeFacts.sourceStateRel_nil
+        (cfg := cfg) (shared := sourceShared) (store := sourceStore)
+        (source := Functions.Source.Program.initialState
+          initial.toSharedState)
+        hInitialShared
+  have hInitialGasRel :
+      SourceStateTargetGasRel cfg (.Ok sourceShared sourceStore)
+        initial := by
+    simpa [SourceStateTargetGasRel] using
+      hInitialShared.machine.gasAvailable
+  intro trace sourceOutcome hResponses hSource
+  have hSourceBlock :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runScoped
+          prim program Functions.Source.Ctx.initial program.body sourceFuel
+          (Functions.Source.Program.initialState initial.toSharedState))
+        trace (.ok sourceOutcome) := by
+    simpa [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Program.runState]
+      using hSource
+  rcases
+      compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_endPc_sourceGasSeed_of_compileOpen_supportedFor_programLayout
         hPrim hProgramSupported hNonCallSourceGas hProgramSupported.1 hLower
         layoutProgram hBounds hCtxProcs hCallsBody hCompileOpen bodySegment
         cleanupCodeSegment (by rfl) hCleanupCodeStart'

@@ -1,4 +1,5 @@
 import EvmCompiler.Structured.TypedContinuations
+import EvmCompiler.Assembly.PrimSemantics
 import EvmCompiler.Assembly.GasAware
 
 namespace EvmCompiler
@@ -23,6 +24,173 @@ theorem eraseControl_with_pc (state : EVMState) (pc : Word) :
     eraseControl { state with pc := pc } = eraseControl state := by
   cases state
   rfl
+
+theorem primStep_run_pc
+    {step : Assembly.PrimStep} {state mid : EVMState}
+    (hRun : step.run state = .ok mid) :
+    mid.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  cases step <;>
+    simp [Assembly.PrimStep.run, EvmYul.EVM.execBinOp,
+      EvmYul.EVM.execUnOp, EvmYul.EVM.execTriOp,
+      EvmYul.EVM.executionEnvOp, EvmYul.EVM.unaryExecutionEnvOp,
+      EvmYul.EVM.machineStateOp, EvmYul.EVM.binaryMachineStateOp,
+      EvmYul.EVM.binaryMachineStateOp',
+      EvmYul.EVM.ternaryMachineStateOp, EvmYul.EVM.stateOp,
+      EvmYul.EVM.unaryStateOp, EvmYul.EVM.binaryStateOp,
+      EvmYul.EVM.ternaryCopyOp, EvmYul.EVM.quaternaryCopyOp,
+      EvmYul.dup, EvmYul.swap] at hRun
+  all_goals repeat (first | split at hRun | split)
+  all_goals
+    simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC] at hRun
+  all_goals cases hRun
+  all_goals simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+    EvmYul.EVM.State.incrPC]
+
+theorem primStep_run_execLength
+    {step : Assembly.PrimStep} {state mid : EVMState}
+    (hRun : step.run state = .ok mid) :
+    mid.execLength = state.execLength := by
+  cases step <;>
+    simp [Assembly.PrimStep.run, EvmYul.EVM.execBinOp,
+      EvmYul.EVM.execUnOp, EvmYul.EVM.execTriOp,
+      EvmYul.EVM.executionEnvOp, EvmYul.EVM.unaryExecutionEnvOp,
+      EvmYul.EVM.machineStateOp, EvmYul.EVM.binaryMachineStateOp,
+      EvmYul.EVM.binaryMachineStateOp',
+      EvmYul.EVM.ternaryMachineStateOp, EvmYul.EVM.stateOp,
+      EvmYul.EVM.unaryStateOp, EvmYul.EVM.binaryStateOp,
+      EvmYul.EVM.ternaryCopyOp, EvmYul.EVM.quaternaryCopyOp,
+      EvmYul.dup, EvmYul.swap] at hRun
+  all_goals repeat (first | split at hRun | split)
+  all_goals
+    simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC] at hRun
+  all_goals cases hRun
+  all_goals simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+    EvmYul.EVM.State.incrPC]
+
+theorem primStep_run_with_pc
+    {step : Assembly.PrimStep} {state final : EVMState}
+    {pc : EvmYul.UInt256}
+    (hRun : step.run state = .ok final) :
+    step.run { state with pc := pc } =
+      .ok { final with pc := pc + EvmYul.UInt256.ofNat 1 } := by
+  cases step <;>
+    simp [Assembly.PrimStep.run, EvmYul.EVM.execBinOp,
+      EvmYul.EVM.execUnOp, EvmYul.EVM.execTriOp,
+      EvmYul.EVM.executionEnvOp, EvmYul.EVM.unaryExecutionEnvOp,
+      EvmYul.EVM.machineStateOp, EvmYul.EVM.binaryMachineStateOp,
+      EvmYul.EVM.binaryMachineStateOp',
+      EvmYul.EVM.ternaryMachineStateOp, EvmYul.EVM.stateOp,
+      EvmYul.EVM.unaryStateOp, EvmYul.EVM.binaryStateOp,
+      EvmYul.EVM.ternaryCopyOp, EvmYul.EVM.quaternaryCopyOp,
+      EvmYul.dup, EvmYul.swap] at hRun ⊢
+  all_goals repeat (first | split at hRun | split)
+  all_goals
+    simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, Id.run] at hRun ⊢
+  all_goals cases hRun
+  all_goals simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+    EvmYul.EVM.State.incrPC, Id.run]
+
+theorem primStep_run_with_pc_execLength
+    {step : Assembly.PrimStep} {state final : EVMState}
+    {pc : EvmYul.UInt256} {execLength : Nat}
+    (hRun : step.run state = .ok final) :
+    step.run { state with pc := pc, execLength := execLength } =
+      .ok { final with
+        pc := pc + EvmYul.UInt256.ofNat 1,
+        execLength := execLength } := by
+  cases step <;>
+    simp [Assembly.PrimStep.run, EvmYul.EVM.execBinOp,
+      EvmYul.EVM.execUnOp, EvmYul.EVM.execTriOp,
+      EvmYul.EVM.executionEnvOp, EvmYul.EVM.unaryExecutionEnvOp,
+      EvmYul.EVM.machineStateOp, EvmYul.EVM.binaryMachineStateOp,
+      EvmYul.EVM.binaryMachineStateOp',
+      EvmYul.EVM.ternaryMachineStateOp, EvmYul.EVM.stateOp,
+      EvmYul.EVM.unaryStateOp, EvmYul.EVM.binaryStateOp,
+      EvmYul.EVM.ternaryCopyOp, EvmYul.EVM.quaternaryCopyOp,
+      EvmYul.dup, EvmYul.swap] at hRun ⊢
+  all_goals repeat (first | split at hRun | split)
+  all_goals
+    simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, Id.run] at hRun ⊢
+  all_goals cases hRun
+  all_goals simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+    EvmYul.EVM.State.incrPC, Id.run]
+
+theorem primStep_run_isoState
+    {step : Assembly.PrimStep} {state final : EVMState}
+    (hRun : step.run state = .ok final) :
+    step.run
+        (Assembly.PrimStep.isoState
+          state.toSharedState state.stack) =
+      .ok { final with
+        pc := EvmYul.UInt256.ofNat 0 + EvmYul.UInt256.ofNat 1,
+        execLength := 0 } := by
+  simpa [Assembly.PrimStep.isoState] using
+    (primStep_run_with_pc_execLength
+      (pc := EvmYul.UInt256.ofNat 0) (execLength := 0) hRun)
+
+theorem primStep_run_append_hidden_of_suffixSafe
+    {step : Assembly.PrimStep} {state final : EVMState}
+    {hidden : EvmYul.Stack Word}
+    (hSafe : Assembly.PrimStep.SuffixSafe step)
+    (hRun : step.run state = .ok final) :
+    step.run { state with stack := state.stack ++ hidden } =
+      .ok { final with stack := final.stack ++ hidden } := by
+  have hIso := primStep_run_isoState hRun
+  rcases
+      Assembly.PrimStep.run_suffix_exists_safe
+        (step := step) (shared := state.toSharedState)
+        (stack := state.stack) (base := hidden)
+        (iso' :=
+          { final with
+            pc := EvmYul.UInt256.ofNat 0 + EvmYul.UInt256.ofNat 1,
+            execLength := 0 })
+        (evm := { state with stack := state.stack ++ hidden })
+        hSafe hIso rfl rfl with
+    ⟨hiddenFinal, hHiddenRun, hHiddenShared, hHiddenStack⟩
+  have hHiddenPc := primStep_run_pc hHiddenRun
+  have hFinalPc := primStep_run_pc hRun
+  have hHiddenExec := primStep_run_execLength hHiddenRun
+  have hFinalExec := primStep_run_execLength hRun
+  have hEq :
+      hiddenFinal = { final with stack := final.stack ++ hidden } := by
+    cases hiddenFinal with
+    | mk hiddenShared hiddenPc hiddenStack hiddenExec =>
+        cases final with
+        | mk finalShared finalPc finalStack finalExec =>
+            simp at hHiddenShared hHiddenStack hHiddenPc hFinalPc hHiddenExec hFinalExec ⊢
+            subst hiddenShared
+            subst hiddenStack
+            subst hiddenPc
+            subst finalPc
+            subst hiddenExec
+            subst finalExec
+            simp
+  rw [hEq] at hHiddenRun
+  exact hHiddenRun
+
+theorem gasExecRel_of_eraseControl_eq_with_pc
+    {source target : EVMState}
+    (hEq : eraseControl target = eraseControl source) :
+    Assembly.GasAware.GasExecRel target { source with pc := target.pc } := by
+  cases source
+  cases target
+  rename_i sourceShared sourcePc sourceStack sourceExec
+    targetShared targetPc targetStack targetExec
+  cases sourceShared
+  cases targetShared
+  rename_i sourceState sourceMachine targetState targetMachine
+  cases sourceMachine
+  cases targetMachine
+  simp [eraseControl, Assembly.eraseGas,
+    Assembly.GasAware.GasExecRel] at hEq ⊢
+  rcases hEq with ⟨hShared, hStack⟩
+  rcases hShared with
+    ⟨hState, hActive, hMemory, hReturnData, hReturn⟩
+  simp [hState, hActive, hMemory, hReturnData, hReturn, hStack]
 
 theorem eraseControl_with_stack (state : EVMState)
     (stack : EvmYul.Stack Word) :
@@ -49,6 +217,86 @@ theorem stack_eq_of_eraseControl_eq {left right : EVMState}
   simp [eraseControl, Assembly.eraseGas] at h
   exact h.2
 
+theorem machineState_eq_of_eraseControl_eq {source target : EVMState}
+    (hEq : eraseControl target = eraseControl source) :
+    source.toMachineState =
+      { target.toMachineState with
+        gasAvailable := source.toMachineState.gasAvailable } := by
+  cases source
+  cases target
+  rename_i sourceShared _sourcePc _sourceStack _sourceExec targetShared
+    _targetPc _targetStack _targetExec
+  cases sourceShared
+  cases targetShared
+  simp [eraseControl, Assembly.eraseGas] at hEq ⊢
+  rcases hEq with
+    ⟨⟨_hState, hActive, hMemory, hReturnData, hReturn⟩, _hStack⟩
+  simp [hActive, hMemory, hReturnData, hReturn]
+
+theorem eraseControl_with_mload_of_eq {source target : EVMState}
+    {offset : Word}
+    (hEq : eraseControl target = eraseControl source) :
+    eraseControl
+        ({ target with
+          toMachineState := (target.toMachineState.mload offset).2 } :
+          EVMState) =
+      eraseControl
+        ({ source with
+          toMachineState := (source.toMachineState.mload offset).2 } :
+          EVMState) := by
+  have hMachine := machineState_eq_of_eraseControl_eq hEq
+  rcases Assembly.GasAware.machine_mload_gasAvailable_rel
+      (offset := offset) hMachine with
+    ⟨_hValue, hMachineLoaded⟩
+  have hActive :=
+    congrArg EvmYul.MachineState.activeWords hMachineLoaded
+  have hMemory :=
+    congrArg EvmYul.MachineState.memory hMachineLoaded
+  have hReturnData :=
+    congrArg EvmYul.MachineState.returnData hMachineLoaded
+  have hReturn :=
+    congrArg EvmYul.MachineState.H_return hMachineLoaded
+  cases source
+  cases target
+  rename_i sourceShared _sourcePc _sourceStack _sourceExec targetShared
+    _targetPc _targetStack _targetExec
+  cases sourceShared
+  cases targetShared
+  simp [eraseControl, Assembly.eraseGas] at hEq hActive hMemory hReturnData hReturn ⊢
+  rcases hEq with
+    ⟨⟨hState, _hActive0, _hMemory0, _hReturnData0, _hReturn0⟩, hStack⟩
+  simp [hState, hActive, hMemory, hReturnData, hReturn, hStack]
+
+theorem eraseControl_with_mstore_of_eq {source target : EVMState}
+    {offset value : Word}
+    (hEq : eraseControl target = eraseControl source) :
+    eraseControl
+        ({ target with
+          toMachineState := target.toMachineState.mstore offset value } :
+          EVMState) =
+      eraseControl
+        ({ source with
+          toMachineState := source.toMachineState.mstore offset value } :
+          EVMState) := by
+  have hMachine := machineState_eq_of_eraseControl_eq hEq
+  have hMachineStore :=
+    Assembly.GasAware.machine_mstore_gasAvailable_rel
+      (offset := offset) (value := value) hMachine
+  have hActive := congrArg EvmYul.MachineState.activeWords hMachineStore
+  have hMemory := congrArg EvmYul.MachineState.memory hMachineStore
+  have hReturnData := congrArg EvmYul.MachineState.returnData hMachineStore
+  have hReturn := congrArg EvmYul.MachineState.H_return hMachineStore
+  cases source
+  cases target
+  rename_i sourceShared _sourcePc _sourceStack _sourceExec targetShared
+    _targetPc _targetStack _targetExec
+  cases sourceShared
+  cases targetShared
+  simp [eraseControl, Assembly.eraseGas] at hEq hActive hMemory hReturnData hReturn ⊢
+  rcases hEq with
+    ⟨⟨hState, _hActive0, _hMemory0, _hReturnData0, _hReturn0⟩, hStack⟩
+  simp [hState, hActive, hMemory, hReturnData, hReturn, hStack]
+
 theorem eraseControl_replaceStackAndIncrPC_of_eq {left right : EVMState}
     {leftStack rightStack : EvmYul.Stack Word}
     {pcΔ : Nat}
@@ -66,9 +314,13 @@ theorem uint256_eq_ne_zero (left right : Word) :
     (EvmYul.UInt256.eq left right != EvmYul.UInt256.ofNat 0) =
       decide (left = right) := by
   have hOne : (EvmYul.UInt256.ofNat 1 != EvmYul.UInt256.ofNat 0) = true := by
-    native_decide
+    simp [bne, EvmYul.instBEqUInt256, EvmYul.instBEqUInt256.beq,
+      EvmYul.UInt256.ofNat, Id.run]
+    unfold EvmYul.UInt256.size
+    omega
   have hZero : (EvmYul.UInt256.ofNat 0 != EvmYul.UInt256.ofNat 0) = false := by
-    native_decide
+    simp [bne, EvmYul.instBEqUInt256, EvmYul.instBEqUInt256.beq,
+      EvmYul.UInt256.ofNat, Id.run]
   by_cases hEq : left = right
   · subst right
     simp [EvmYul.UInt256.eq, hOne]
@@ -902,6 +1154,11 @@ noncomputable def procCalls (program : Program) : List CallSite :=
 noncomputable def allCalls (program : Program) : List CallSite :=
   (main program).calls ++ procCalls program
 
+theorem allCalls_eq_compileResult_calls (program : Program) :
+    allCalls program = program.compileResult.calls := by
+  simp [allCalls, procCalls, procBodiesResult, main, mainCtx,
+    Program.compileResult]
+
 noncomputable def emittedProcs (program : Program) : CompileResult :=
   CompiledProcBodies.emit (procBodies program) (allCalls program)
     (procBodyNext program)
@@ -1173,6 +1430,115 @@ theorem dup1_runnerSafe :
     RunnerSafe (.op .dup1) := by
   exact ⟨dup1_controlSafe, dup1_stepPC⟩
 
+theorem basicOp_dup_controlSafe
+    {op : BasicOp} {n : Nat}
+    (hStep : op.toPrimOp.continuingStep? = some (.dup n)) :
+    ControlSafe (.op op) := by
+  intro source target source' hEq hInstrStep
+  have hRunDup : EvmYul.dup n source = .ok source' := by
+    simpa [BasicInstr.step, BasicOp.step, Assembly.Target.stepInstr,
+      Assembly.PrimOp.step_eq_continuingStep_run hStep,
+      Assembly.PrimStep.run] using hInstrStep
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  unfold EvmYul.dup at hRunDup
+  by_cases hLe : n ≤ source.stack.length
+  · simp [hLe] at hRunDup
+    cases hRunDup
+    have hTake : target.stack.take n = source.stack.take n := by
+      rw [hStack]
+    let target' : EVMState :=
+      target.replaceStackAndIncrPC
+        ((source.stack.take n).getLast?.getD default :: target.stack)
+    refine ⟨target', ?_, ?_⟩
+    · have hTargetDup : EvmYul.dup n target = .ok target' := by
+        unfold target'
+        unfold EvmYul.dup
+        simp [hTake, hLe]
+      simpa [BasicInstr.step, BasicOp.step, Assembly.Target.stepInstr,
+        Assembly.PrimOp.step_eq_continuingStep_run hStep,
+        Assembly.PrimStep.run] using hTargetDup
+    · exact
+        eraseControl_replaceStackAndIncrPC_of_eq hEq (by rw [hStack])
+  · simp [hLe] at hRunDup
+
+theorem basicOp_dup_stepPC
+    {op : BasicOp} {n : Nat}
+    (hStep : op.toPrimOp.continuingStep? = some (.dup n)) :
+    StepPC (.op op) := by
+  intro state final hInstrStep
+  have hRunDup : EvmYul.dup n state = .ok final := by
+    simpa [BasicInstr.step, BasicOp.step, Assembly.Target.stepInstr,
+      Assembly.PrimOp.step_eq_continuingStep_run hStep,
+      Assembly.PrimStep.run] using hInstrStep
+  have hRunPrim : (Assembly.PrimStep.dup n).run state = .ok final := by
+    simpa [Assembly.PrimStep.run] using hRunDup
+  have hPc := primStep_run_pc hRunPrim
+  simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using hPc
+
+theorem basicOp_dup_runnerSafe
+    {op : BasicOp} {n : Nat}
+    (hStep : op.toPrimOp.continuingStep? = some (.dup n)) :
+    RunnerSafe (.op op) := by
+  exact ⟨basicOp_dup_controlSafe hStep, basicOp_dup_stepPC hStep⟩
+
+theorem basicOp_swap_controlSafe
+    {op : BasicOp} {n : Nat}
+    (hStep : op.toPrimOp.continuingStep? = some (.swap n)) :
+    ControlSafe (.op op) := by
+  intro source target source' hEq hInstrStep
+  have hRunSwap : EvmYul.swap n source = .ok source' := by
+    simpa [BasicInstr.step, BasicOp.step, Assembly.Target.stepInstr,
+      Assembly.PrimOp.step_eq_continuingStep_run hStep,
+      Assembly.PrimStep.run] using hInstrStep
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  unfold EvmYul.swap at hRunSwap
+  by_cases hLe : n + 1 ≤ source.stack.length
+  · simp [hLe] at hRunSwap
+    cases hRunSwap
+    have hTake : target.stack.take (n + 1) =
+        source.stack.take (n + 1) := by
+      rw [hStack]
+    have hDrop : target.stack.drop (n + 1) =
+        source.stack.drop (n + 1) := by
+      rw [hStack]
+    let target' : EVMState :=
+      target.replaceStackAndIncrPC
+        ((source.stack.take (n + 1)).getLast?.getD default ::
+          ((source.stack.take (n + 1)).tail!.dropLast ++
+            (source.stack.take (n + 1)).head! ::
+            target.stack.drop (n + 1)))
+    refine ⟨target', ?_, ?_⟩
+    · have hTargetSwap : EvmYul.swap n target = .ok target' := by
+        unfold target'
+        unfold EvmYul.swap
+        simp [hTake, hDrop, hLe, List.append_assoc]
+      simpa [BasicInstr.step, BasicOp.step, Assembly.Target.stepInstr,
+        Assembly.PrimOp.step_eq_continuingStep_run hStep,
+        Assembly.PrimStep.run] using hTargetSwap
+    · exact
+        eraseControl_replaceStackAndIncrPC_of_eq hEq (by rw [hStack])
+  · simp [hLe] at hRunSwap
+
+theorem basicOp_swap_stepPC
+    {op : BasicOp} {n : Nat}
+    (hStep : op.toPrimOp.continuingStep? = some (.swap n)) :
+    StepPC (.op op) := by
+  intro state final hInstrStep
+  have hRunSwap : EvmYul.swap n state = .ok final := by
+    simpa [BasicInstr.step, BasicOp.step, Assembly.Target.stepInstr,
+      Assembly.PrimOp.step_eq_continuingStep_run hStep,
+      Assembly.PrimStep.run] using hInstrStep
+  have hRunPrim : (Assembly.PrimStep.swap n).run state = .ok final := by
+    simpa [Assembly.PrimStep.run] using hRunSwap
+  have hPc := primStep_run_pc hRunPrim
+  simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using hPc
+
+theorem basicOp_swap_runnerSafe
+    {op : BasicOp} {n : Nat}
+    (hStep : op.toPrimOp.continuingStep? = some (.swap n)) :
+    RunnerSafe (.op op) := by
+  exact ⟨basicOp_swap_controlSafe hStep, basicOp_swap_stepPC hStep⟩
+
 theorem pop_controlSafe :
     ControlSafe (.op .pop) := by
   intro source target source' hEq hStep
@@ -1218,6 +1584,136 @@ theorem pop_stepPC :
 theorem pop_runnerSafe :
     RunnerSafe (.op .pop) := by
   exact ⟨pop_controlSafe, pop_stepPC⟩
+
+theorem mload_controlSafe :
+    ControlSafe (.op .mload) := by
+  intro source target source' hEq hStep
+  unfold BasicInstr.step BasicOp.step at hStep
+  simp [BasicOp.toPrimOp, Assembly.Target.stepInstr, Assembly.PrimOp.step,
+    Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run] at hStep
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  cases hSourceStack : source.stack with
+  | nil =>
+      simp [EvmYul.Stack.pop, hSourceStack] at hStep
+  | cons offset rest =>
+      have hTargetStack : target.stack = offset :: rest := by
+        rw [hStack, hSourceStack]
+      simp [EvmYul.Stack.pop, hSourceStack] at hStep
+      cases hStep
+      let sourceLoaded : Word × EvmYul.MachineState :=
+        source.toMachineState.mload offset
+      let targetLoaded : Word × EvmYul.MachineState :=
+        target.toMachineState.mload offset
+      let target' : EVMState :=
+        ({ target with toMachineState := targetLoaded.2 } :
+          EVMState).replaceStackAndIncrPC (targetLoaded.1 :: rest)
+      refine ⟨target', ?_, ?_⟩
+      · rw [show target = { target with stack := offset :: rest } by
+          cases target
+          simp at hTargetStack ⊢
+          exact hTargetStack]
+        simp [BasicInstr.step, BasicOp.step, BasicOp.toPrimOp,
+          Assembly.Target.stepInstr, Assembly.PrimOp.step,
+          Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+          EvmYul.Stack.pop, EvmYul.Stack.push,
+          EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, targetLoaded, target']
+      · have hMachine := machineState_eq_of_eraseControl_eq hEq
+        rcases Assembly.GasAware.machine_mload_gasAvailable_rel
+            (offset := offset) hMachine with
+          ⟨hValue, _hMachineLoaded⟩
+        have hBase := eraseControl_with_mload_of_eq
+          (offset := offset) hEq
+        rw [hSourceStack] at hBase
+        exact
+          eraseControl_replaceStackAndIncrPC_of_eq hBase
+            (by simp [targetLoaded, hValue, EvmYul.Stack.push])
+
+theorem mload_stepPC :
+    StepPC (.op .mload) := by
+  intro state final hStep
+  unfold BasicInstr.step BasicOp.step at hStep
+  simp [BasicOp.toPrimOp, Assembly.Target.stepInstr, Assembly.PrimOp.step,
+    Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run] at hStep
+  cases hStack : state.stack with
+  | nil =>
+      simp [EvmYul.Stack.pop, hStack] at hStep
+  | cons _offset _rest =>
+      simp [EvmYul.Stack.pop, hStack] at hStep
+      cases hStep
+      simp [BasicInstr.toAssembly, Assembly.Instr.byteSize,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem mload_runnerSafe :
+    RunnerSafe (.op .mload) := by
+  exact ⟨mload_controlSafe, mload_stepPC⟩
+
+theorem mstore_controlSafe :
+    ControlSafe (.op .mstore) := by
+  intro source target source' hEq hStep
+  unfold BasicInstr.step BasicOp.step at hStep
+  simp [BasicOp.toPrimOp, Assembly.Target.stepInstr, Assembly.PrimOp.step,
+    Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+    EvmYul.EVM.binaryMachineStateOp, Id.run] at hStep
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  cases hSourceStack : source.stack with
+  | nil =>
+      simp [EvmYul.Stack.pop2, hSourceStack] at hStep
+  | cons offset rest1 =>
+      cases hRest1 : rest1 with
+      | nil =>
+          simp [EvmYul.Stack.pop2, hSourceStack, hRest1] at hStep
+      | cons value rest =>
+          have hTargetStack : target.stack = offset :: value :: rest := by
+            rw [hStack, hSourceStack, hRest1]
+          simp [EvmYul.Stack.pop2, hSourceStack, hRest1] at hStep
+          cases hStep
+          let target' : EVMState :=
+            ({ target with
+              toMachineState :=
+                target.toMachineState.mstore offset value } :
+              EVMState).replaceStackAndIncrPC rest
+          refine ⟨target', ?_, ?_⟩
+          · rw [show target = { target with stack := offset :: value :: rest } by
+              cases target
+              simp at hTargetStack ⊢
+              exact hTargetStack]
+            simp [BasicInstr.step, BasicOp.step, BasicOp.toPrimOp,
+              Assembly.Target.stepInstr, Assembly.PrimOp.step,
+              Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+              EvmYul.EVM.binaryMachineStateOp, EvmYul.Stack.pop2,
+              Id.run, EvmYul.EVM.State.replaceStackAndIncrPC,
+              EvmYul.EVM.State.incrPC, target']
+          · have hBase := eraseControl_with_mstore_of_eq
+                (offset := offset) (value := value) hEq
+            rw [hSourceStack, hRest1] at hBase
+            exact eraseControl_replaceStackAndIncrPC_of_eq hBase rfl
+
+theorem mstore_stepPC :
+    StepPC (.op .mstore) := by
+  intro state final hStep
+  unfold BasicInstr.step BasicOp.step at hStep
+  simp [BasicOp.toPrimOp, Assembly.Target.stepInstr, Assembly.PrimOp.step,
+    Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+    EvmYul.EVM.binaryMachineStateOp, Id.run] at hStep
+  cases hStack : state.stack with
+  | nil =>
+      simp [EvmYul.Stack.pop2, hStack] at hStep
+  | cons _offset rest1 =>
+      cases hRest1 : rest1 with
+      | nil =>
+          simp [EvmYul.Stack.pop2, hStack, hRest1] at hStep
+      | cons _value _rest =>
+          simp [EvmYul.Stack.pop2, hStack, hRest1] at hStep
+          cases hStep
+          simp [BasicInstr.toAssembly, Assembly.Instr.byteSize,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+
+theorem mstore_runnerSafe :
+    RunnerSafe (.op .mstore) := by
+  exact ⟨mstore_controlSafe, mstore_stepPC⟩
 
 theorem eq_controlSafe :
     ControlSafe (.op .eq) := by
@@ -1398,12 +1894,29 @@ end BasicInstr
 
 namespace Code
 
+theorem run_append (left right : Code) (state : EVMState) :
+    Code.run (left ++ right) state =
+      (do
+        let state' ← Code.run left state
+        Code.run right state') := by
+  induction left generalizing state with
+  | nil => rfl
+  | cons instr rest ih => simp [Code.run, ih]
+
 inductive RunnerSafe : Code → Prop where
   | nil : RunnerSafe []
   | cons {instr : BasicInstr} {rest : Code}
       (hInstr : BasicInstr.RunnerSafe instr)
       (hRest : RunnerSafe rest) :
       RunnerSafe (instr :: rest)
+
+theorem RunnerSafe.append {left right : Code}
+    (hLeft : RunnerSafe left) (hRight : RunnerSafe right) :
+    RunnerSafe (left ++ right) := by
+  induction hLeft with
+  | nil => simpa using hRight
+  | cons hInstr hRest ih =>
+      simpa using RunnerSafe.cons hInstr ih
 
 theorem pop_runnerSafe :
     RunnerSafe [BasicInstr.op .pop] := by
@@ -1435,6 +1948,148 @@ theorem pop_frameSafe :
         EvmYul.EVM.State.incrPC, Bind.bind, Except.bind] at hRun ⊢
       cases hRun
       simp [Code.run]
+
+theorem evmYul_dup_append_hidden
+    {n : Nat} {state final : EVMState}
+    {hidden : EvmYul.Stack Word}
+    (hRun : EvmYul.dup n state = .ok final) :
+    EvmYul.dup n { state with stack := state.stack ++ hidden } =
+      .ok { final with stack := final.stack ++ hidden } := by
+  unfold EvmYul.dup at hRun ⊢
+  by_cases hLe : n ≤ state.stack.length
+  · have hLen : (state.stack.take n).length = n := by
+      simp [List.length_take, Nat.min_eq_left hLe]
+    have hTakeAppend :
+        (state.stack ++ hidden).take n = state.stack.take n :=
+      List.take_append_of_le_length hLe
+    have hLenAppend :
+        ((state.stack ++ hidden).take n).length = n := by
+      simp [hTakeAppend, hLen]
+    simp [hLen, hTakeAppend] at hRun ⊢
+    cases hRun
+    simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC]
+  · have hLen : ¬ (state.stack.take n).length = n := by
+      have hLt : state.stack.length < n := Nat.lt_of_not_ge hLe
+      simp [List.length_take, Nat.min_eq_right (Nat.le_of_lt hLt)]
+      omega
+    simp [hLe] at hRun
+
+theorem evmYul_swap_append_hidden
+    {n : Nat} {state final : EVMState}
+    {hidden : EvmYul.Stack Word}
+    (hRun : EvmYul.swap n state = .ok final) :
+    EvmYul.swap n { state with stack := state.stack ++ hidden } =
+      .ok { final with stack := final.stack ++ hidden } := by
+  unfold EvmYul.swap at hRun ⊢
+  by_cases hLe : n + 1 ≤ state.stack.length
+  · have hLen : (state.stack.take (n + 1)).length = n + 1 := by
+      simp [List.length_take, Nat.min_eq_left hLe]
+    have hTakeAppend :
+        (state.stack ++ hidden).take (n + 1) =
+          state.stack.take (n + 1) :=
+      List.take_append_of_le_length hLe
+    have hDropAppend :
+        (state.stack ++ hidden).drop (n + 1) =
+          state.stack.drop (n + 1) ++ hidden :=
+      List.drop_append_of_le_length hLe
+    have hLenAppend :
+        ((state.stack ++ hidden).take (n + 1)).length = n + 1 := by
+      simp [hTakeAppend, hLen]
+    simp [hLen, hTakeAppend, hDropAppend] at hRun ⊢
+    cases hRun
+    simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, List.append_assoc]
+  · have hLen : ¬ (state.stack.take (n + 1)).length = n + 1 := by
+      have hLt : state.stack.length < n + 1 := Nat.lt_of_not_ge hLe
+      simp [List.length_take, Nat.min_eq_right (Nat.le_of_lt hLt)]
+      omega
+    simp [hLe] at hRun
+
+theorem frameSafe_basicOp_dup
+    {op : BasicOp} {n : Nat}
+    (hStep : op.toPrimOp.continuingStep? = some (.dup n)) :
+    Code.FrameSafe [BasicInstr.op op] := by
+  intro state final hidden hRun
+  have hRunBind :
+      (do
+        let state' ← EvmYul.dup n state
+        Except.ok state') = .ok final := by
+    simpa [Code.run, BasicInstr.step, BasicOp.step,
+      Assembly.Target.stepInstr,
+      Assembly.PrimOp.step_eq_continuingStep_run hStep,
+      Assembly.PrimStep.run] using hRun
+  have hRunDup : EvmYul.dup n state = .ok final := by
+    cases hDup : EvmYul.dup n state with
+    | error err =>
+        simp [hDup] at hRunBind
+        cases hRunBind
+    | ok mid =>
+        simp [hDup] at hRunBind
+        cases hRunBind
+        rfl
+  have hHidden := evmYul_dup_append_hidden (hidden := hidden) hRunDup
+  have hHiddenBind :
+      (do
+        let state' ← EvmYul.dup n
+          { state with stack := state.stack ++ hidden }
+        Except.ok state') =
+        .ok { final with stack := final.stack ++ hidden } := by
+    simp [hHidden, Bind.bind, Except.bind]
+  simpa [Code.run, BasicInstr.step, BasicOp.step,
+    Assembly.Target.stepInstr,
+    Assembly.PrimOp.step_eq_continuingStep_run hStep,
+    Assembly.PrimStep.run] using hHiddenBind
+
+theorem frameSafe_basicOp_swap
+    {op : BasicOp} {n : Nat}
+    (hStep : op.toPrimOp.continuingStep? = some (.swap n)) :
+    Code.FrameSafe [BasicInstr.op op] := by
+  intro state final hidden hRun
+  have hRunBind :
+      (do
+        let state' ← EvmYul.swap n state
+        Except.ok state') = .ok final := by
+    simpa [Code.run, BasicInstr.step, BasicOp.step,
+      Assembly.Target.stepInstr,
+      Assembly.PrimOp.step_eq_continuingStep_run hStep,
+      Assembly.PrimStep.run] using hRun
+  have hRunSwap : EvmYul.swap n state = .ok final := by
+    cases hSwap : EvmYul.swap n state with
+    | error err =>
+        simp [hSwap] at hRunBind
+        cases hRunBind
+    | ok mid =>
+        simp [hSwap] at hRunBind
+        cases hRunBind
+        rfl
+  have hHidden := evmYul_swap_append_hidden (hidden := hidden) hRunSwap
+  have hHiddenBind :
+      (do
+        let state' ← EvmYul.swap n
+          { state with stack := state.stack ++ hidden }
+        Except.ok state') =
+        .ok { final with stack := final.stack ++ hidden } := by
+    simp [hHidden, Bind.bind, Except.bind]
+  simpa [Code.run, BasicInstr.step, BasicOp.step,
+    Assembly.Target.stepInstr,
+    Assembly.PrimOp.step_eq_continuingStep_run hStep,
+    Assembly.PrimStep.run] using hHiddenBind
+
+theorem FrameSafe.append {left right : Code}
+    (hLeft : Code.FrameSafe left) (hRight : Code.FrameSafe right) :
+    Code.FrameSafe (left ++ right) := by
+  intro state final hidden hRun
+  rw [run_append] at hRun
+  cases hLeftRun : Code.run left state with
+  | error err =>
+      rw [hLeftRun] at hRun
+      cases hRun
+  | ok mid =>
+      rw [hLeftRun] at hRun
+      have hLeftHidden := hLeft state mid hidden hLeftRun
+      rw [run_append, hLeftHidden]
+      exact hRight mid final hidden hRun
 
 theorem source_run_ctx_relAt_of_relAt {code : Code}
     {pre post : Assembly.Program}
@@ -25483,13 +26138,31 @@ noncomputable instance instDecidableCompilationBounds (program : Program) :
     · exact isFalse (fun hBounds => hLabels hBounds.labelsNodup)
   · exact isFalse (fun hBounds => hPc hBounds.pcFits)
 
-noncomputable def compilationBoundsChecked (program : Program) : Bool :=
-  decide (CompilationBounds program)
+def compilationBoundsChecked (program : Program) : Bool :=
+  decide (AssemblyProgram.PCFitsFrom [] program.compile) &&
+    decide ((Assembly.Program.labels program.compile).Nodup) &&
+      decide ((program.compileResult.calls.map CallSite.token).Nodup)
 
 theorem bounds_of_checked {program : Program}
     (hChecked : compilationBoundsChecked program = true) :
     CompilationBounds program := by
-  exact of_decide_eq_true hChecked
+  simp [compilationBoundsChecked] at hChecked
+  exact
+    { pcFits := hChecked.1.1
+      labelsNodup := hChecked.1.2
+      callTokensNodup := by
+        simpa [CompiledProgram.allCalls_eq_compileResult_calls] using
+          hChecked.2 }
+
+theorem compilationBoundsChecked_of_bounds {program : Program}
+    (hBounds : CompilationBounds program) :
+    compilationBoundsChecked program = true := by
+  have hTokens :
+      (program.compileResult.calls.map CallSite.token).Nodup := by
+    simpa [← CompiledProgram.allCalls_eq_compileResult_calls] using
+      hBounds.callTokensNodup
+  simp [compilationBoundsChecked, hBounds.pcFits, hBounds.labelsNodup,
+    hTokens]
 
 noncomputable def compilerChecked (program : Program) : Bool :=
   Program.accepted program && compilationBoundsChecked program
@@ -25513,6 +26186,15 @@ theorem compileChecked?_eq_some {program : Program} {asm : Assembly.Program}
   exact
     ⟨rfl, Program.accepted_of_check hAcceptedChecked,
       bounds_of_checked hBoundsChecked⟩
+
+theorem compileChecked?_of_accepted_bounds {program : Program}
+    (hAccepted : Program.Accepted program)
+    (hBounds : CompilationBounds program) :
+    compileChecked? program = some program.compile := by
+  unfold compileChecked? compilerChecked
+  rw [Program.accepted_check_of hAccepted,
+    compilationBoundsChecked_of_bounds hBounds]
+  simp
 
 theorem compileChecked?_noCallCreate {program : Program}
     {asm : Assembly.Program}

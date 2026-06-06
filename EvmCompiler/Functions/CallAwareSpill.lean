@@ -1,0 +1,16884 @@
+import EvmCompiler.Functions.Preservation
+
+/-!
+Checked, fail-closed spill compilation for the function layer with explicit
+internal-call splice points.
+
+This module is intentionally a compiler/checker slice, not yet the public
+semantic-preservation theorem.  It reuses the existing private-scratch spill
+backend for no-call spans, but handles `Functions.Stmt.call` by spilling the
+current locals, evaluating call arguments from the scratch-aware layout,
+emitting an `Expressions.Stmt.call`, and storing returned stack values back into
+the existing scratch slots.
+-/
+
+namespace EvmCompiler
+namespace Functions
+namespace CallAwareSpill
+
+open Locals.SourceLowering.StateRel.SpillScratch
+
+abbrev ScratchRange :=
+  Locals.SourceLowering.StateRel.SpillScratch.ScratchRange
+
+structure Plan where
+  sourceScope : List Name
+  stackLayout : List Name
+  layout : SpillLayout.Layout
+  block : Expressions.Block
+
+namespace ExpressionsBlock
+
+def append (left right : Expressions.Block) : Expressions.Block :=
+  { stmts := left.stmts ++ right.stmts }
+
+def ofCode (code : Structured.Code) : Expressions.Block :=
+  { stmts := [Expressions.Stmt.code code] }
+
+def ofCall (name : Name) : Expressions.Block :=
+  { stmts := [Expressions.Stmt.call name] }
+
+def seqList : List Expressions.Block → Expressions.Block
+  | [] => { stmts := [] }
+  | head :: tail => append head (seqList tail)
+
+end ExpressionsBlock
+
+theorem expressionsBlock_append_regular_exists
+    (program : Expressions.Program)
+    {left right : Expressions.Block}
+    {state mid : Expressions.RunState}
+    {outcome : Expressions.Outcome}
+    (hLeft :
+      ∃ fuel, Expressions.Block.run program fuel left state =
+        .ok (Expressions.Outcome.regular mid))
+    (hRight :
+      ∃ fuel, Expressions.Block.run program fuel right mid =
+        .ok outcome) :
+    ∃ fuel,
+      Expressions.Block.run program fuel (ExpressionsBlock.append left right)
+          state =
+        .ok outcome := by
+  cases left
+  cases right
+  simpa [ExpressionsBlock.append] using
+    Expressions.Block.run_append_regular_exists program _ _
+      state mid outcome hLeft hRight
+
+theorem expressionsBlock_append_nonregular_exists
+    (program : Expressions.Program)
+    {left right : Expressions.Block}
+    {state : Expressions.RunState}
+    {outcome : Expressions.Outcome}
+    (hLeft :
+      ∃ fuel, Expressions.Block.run program fuel left state =
+        .ok outcome)
+    (hMode : outcome.mode ≠ .regular) :
+    ∃ fuel,
+      Expressions.Block.run program fuel (ExpressionsBlock.append left right)
+          state =
+        .ok outcome := by
+  cases left
+  cases right
+  simpa [ExpressionsBlock.append] using
+    Expressions.Block.run_append_nonregular_exists program _ _
+      state outcome hLeft hMode
+
+theorem expressionsBlock_ofCode_run_exists
+    (program : Expressions.Program)
+    {code : Structured.Code}
+    {state : Expressions.RunState} {final : EVMState}
+    (hRun : Structured.Code.run code state.evm = .ok final) :
+    ∃ fuel,
+      Expressions.Block.run program fuel (ExpressionsBlock.ofCode code)
+          state =
+        .ok (Expressions.Outcome.regular (state.withEVM final)) := by
+  refine ⟨2, ?_⟩
+  simp [ExpressionsBlock.ofCode, Expressions.Block.run,
+    Expressions.Stmt.run, Structured.Code.runState, hRun]
+
+theorem expressionsBlock_ofCall_run_exists
+    (program : Expressions.Program)
+    {name : Name} {state : Expressions.RunState}
+    {outcome : Expressions.Outcome}
+    (hRun :
+      ∃ fuel,
+        Expressions.Stmt.run program fuel (Expressions.Stmt.call name) state =
+          .ok outcome) :
+    ∃ fuel,
+      Expressions.Block.run program fuel (ExpressionsBlock.ofCall name)
+          state =
+        .ok outcome := by
+  exact Expressions.Block.run_single_exists program hRun
+
+theorem source_store_lookupMany_of_restrictTo_of_mem :
+    ∀ {names scope : List Name} {store : Source.Store}
+      {values : List Word},
+      (∀ name, name ∈ names → name ∈ scope) →
+      Source.Store.lookupMany names
+          (Locals.Source.Store.restrictTo scope store) =
+        some values →
+      Source.Store.lookupMany names store = some values
+  | [], _scope, _store, _values, _hMem, hLookup => by
+      simp [Source.Store.lookupMany] at hLookup ⊢
+      exact hLookup
+  | name :: rest, scope, store, values, hMem, hLookup => by
+      unfold Source.Store.lookupMany at hLookup ⊢
+      have hNameMem : name ∈ scope :=
+        hMem name (by simp)
+      have hRestrictedName :
+          Locals.Source.Store.restrictTo scope store name = store name :=
+        Locals.Source.Store.restrictTo_mem hNameMem
+      rw [hRestrictedName] at hLookup
+      cases hName : store name with
+      | none =>
+          simp [hName] at hLookup
+      | some value =>
+          simp [hName] at hLookup ⊢
+          cases hTail :
+              Source.Store.lookupMany rest
+                (Locals.Source.Store.restrictTo scope store) with
+          | none =>
+              simp [hTail] at hLookup
+          | some tailValues =>
+              simp [hTail] at hLookup
+              cases hTailOrig :
+                  Source.Store.lookupMany rest store with
+              | none =>
+                  have hTailMem :
+                      ∀ name, name ∈ rest → name ∈ scope := by
+                    intro restName hRestMem
+                    exact hMem restName (by simp [hRestMem])
+                  have hTailSome :
+                      Source.Store.lookupMany rest store = some tailValues :=
+                    source_store_lookupMany_of_restrictTo_of_mem
+                      hTailMem hTail
+                  rw [hTailOrig] at hTailSome
+                  contradiction
+              | some origTailValues =>
+                  have hTailMem :
+                      ∀ name, name ∈ rest → name ∈ scope := by
+                    intro restName hRestMem
+                    exact hMem restName (by simp [hRestMem])
+                  have hTailSome :
+                      Source.Store.lookupMany rest store = some tailValues :=
+                    source_store_lookupMany_of_restrictTo_of_mem
+                      hTailMem hTail
+                  rw [hTailOrig] at hTailSome
+                  cases hTailSome
+                  simpa using hLookup
+
+theorem stackFrame_splitArgs?_append_exact
+    {argc : Nat} {args callerStack stack : EvmYul.Stack Word}
+    (hStack : stack = args ++ callerStack)
+    (hArgc : argc = args.length) :
+    Structured.StackFrame.splitArgs? argc stack =
+      some (args, callerStack) := by
+  unfold Structured.StackFrame.splitArgs?
+  subst stack
+  subst argc
+  have hLe : args.length ≤ (args ++ callerStack).length := by
+    simp
+  rw [if_pos hLe]
+  simp
+
+theorem stackFrame_attachReturns?_append_exact
+    {frame : Structured.ReturnDest}
+    {returnValues : EvmYul.Stack Word}
+    (hLength : returnValues.length = frame.retc) :
+    Structured.StackFrame.attachReturns? frame returnValues =
+      some (returnValues ++ frame.callerStack) := by
+  unfold Structured.StackFrame.attachReturns?
+  rw [if_pos hLength]
+
+namespace Plan
+
+def appendBlock (plan : Plan) (block : Expressions.Block) : Plan :=
+  { plan with block := ExpressionsBlock.append plan.block block }
+
+end Plan
+
+def layoutOfStack : List Name → SpillLayout.Layout
+  | [] => []
+  | name :: rest =>
+      SpillLayout.pushStackLayout name (layoutOfStack rest)
+
+def layoutOfParamStack : List Name → SpillLayout.Layout
+  | [] => []
+  | param :: rest =>
+      (param, SpillLayout.LocalLocation.stack rest.length) ::
+        layoutOfParamStack rest
+
+theorem layoutOfParamStack_names (params : List Name) :
+    SpillLayout.names (layoutOfParamStack params) = params := by
+  induction params with
+  | nil =>
+      rfl
+  | cons param rest ih =>
+      change param :: SpillLayout.names (layoutOfParamStack rest) =
+        param :: rest
+      rw [ih]
+
+theorem layoutOfParamStack_scratchSlots (params : List Name) :
+    SpillLayout.scratchSlots (layoutOfParamStack params) = [] := by
+  induction params with
+  | nil =>
+      rfl
+  | cons param rest ih =>
+      change SpillLayout.scratchSlots (layoutOfParamStack rest) = []
+      exact ih
+
+theorem layoutOfParamStack_binding_ok
+    (range : ScratchRange) :
+    ∀ {params : List Name} {binding : SpillLayout.Binding},
+      binding ∈ layoutOfParamStack params →
+        SpillLayout.BindingOk range params.reverse binding
+  | [], binding, hMem => by
+      simp [layoutOfParamStack] at hMem
+  | param :: rest, binding, hMem => by
+      rcases binding with ⟨name, location⟩
+      change
+        (name, location) ∈
+          (param, SpillLayout.LocalLocation.stack rest.length) ::
+            layoutOfParamStack rest at hMem
+      rw [List.mem_cons] at hMem
+      rcases hMem with hHead | hTail
+      · cases hHead
+        simp [SpillLayout.BindingOk, List.getElem?_append_right,
+          List.length_reverse]
+      · have hTailOk :=
+          layoutOfParamStack_binding_ok (range := range)
+            (params := rest) hTail
+        cases location with
+        | stack depth =>
+            have hTailLookup :
+                rest.reverse[depth]? = some name := by
+              simpa [SpillLayout.BindingOk] using hTailOk
+            have hDepthLt : depth < rest.reverse.length := by
+              exact (List.getElem?_eq_some_iff.mp hTailLookup).1
+            simp [SpillLayout.BindingOk, List.getElem?_append_left hDepthLt,
+              hTailLookup]
+        | scratch slot =>
+            have hSlotMem :
+                slot ∈ SpillLayout.scratchSlots (layoutOfParamStack rest) :=
+              SpillLayout.scratchSlot_mem_of_binding hTail
+            rw [layoutOfParamStack_scratchSlots] at hSlotMem
+            simp at hSlotMem
+
+theorem layoutOfParamStack_wellFormed
+    (range : ScratchRange) {params : List Name}
+    (hNoDup : params.Nodup) :
+    SpillLayout.WellFormed range params params.reverse
+      (layoutOfParamStack params) := by
+  refine
+    { names_eq := layoutOfParamStack_names params
+      names_nodup := ?_
+      bindings_ok := ?_
+      scratch_slots_nodup := ?_ }
+  · rw [layoutOfParamStack_names]
+    exact hNoDup
+  · intro binding hMem
+    exact layoutOfParamStack_binding_ok (range := range) hMem
+  · rw [layoutOfParamStack_scratchSlots]
+    exact List.nodup_nil
+
+theorem layoutOfParamStack_valueRel_of_insertMany
+    {range : ScratchRange} {params : List Name}
+    {values : List Word} {paramStore : Source.Store}
+    {machine : EvmYul.MachineState}
+    (hInsert :
+      Source.Store.insertMany params values Locals.Source.Store.empty =
+        some paramStore)
+    (hNoDup : params.Nodup) :
+    SpillLayout.ValueRel range paramStore machine values.reverse
+      (layoutOfParamStack params) := by
+  have hStackRel :
+      Locals.SourceLowering.StackStoreRel params.reverse paramStore
+        values.reverse :=
+    SourceDirect.StackStoreRel.insertMany_reverse_empty hInsert hNoDup
+  intro binding hMem
+  rcases binding with ⟨name, location⟩
+  cases location with
+  | stack depth =>
+      have hLookup :
+          params.reverse[depth]? = some name := by
+        have hOk :=
+          layoutOfParamStack_binding_ok (range := range)
+            (params := params) hMem
+        simpa [SpillLayout.BindingOk] using hOk
+      simpa [SpillLayout.BindingValueRel] using hStackRel.2 hLookup
+  | scratch slot =>
+      have hSlotMem :
+          slot ∈ SpillLayout.scratchSlots (layoutOfParamStack params) :=
+        SpillLayout.scratchSlot_mem_of_binding hMem
+      rw [layoutOfParamStack_scratchSlots] at hSlotMem
+      simp at hSlotMem
+
+theorem layoutOfParamStack_storeDefined_of_insertMany
+    {params : List Name} {values : List Word}
+    {paramStore : Source.Store}
+    (hInsert :
+      Source.Store.insertMany params values Locals.Source.Store.empty =
+        some paramStore)
+    (hNoDup : params.Nodup) :
+    SpillLayout.StoreDefined paramStore (layoutOfParamStack params) := by
+  have hStackRel :
+      Locals.SourceLowering.StackStoreRel params.reverse paramStore
+        values.reverse :=
+    SourceDirect.StackStoreRel.insertMany_reverse_empty hInsert hNoDup
+  intro name location hMem
+  cases location with
+  | stack depth =>
+      have hLookup :
+          params.reverse[depth]? = some name := by
+        have hOk :=
+          layoutOfParamStack_binding_ok
+            (range := { base := 0, words := 0 })
+            (params := params) hMem
+        simpa [SpillLayout.BindingOk] using hOk
+      have hStackValue :
+          ∃ value, values.reverse[depth]? = some value := by
+        rcases List.getElem?_eq_some_iff.mp hLookup with ⟨hDepth, hName⟩
+        have hLen : values.reverse.length = params.reverse.length :=
+          hStackRel.1
+        have hDepthValues : depth < values.reverse.length := by
+          omega
+        exact
+          ⟨values.reverse[depth]'hDepthValues,
+            List.getElem?_eq_some_iff.mpr ⟨hDepthValues, rfl⟩⟩
+      rcases hStackValue with ⟨value, hValue⟩
+      refine ⟨value, ?_⟩
+      have hStore := hStackRel.2 hLookup
+      rw [hValue] at hStore
+      exact hStore.symm
+  | scratch slot =>
+      have hSlotMem :
+          slot ∈ SpillLayout.scratchSlots (layoutOfParamStack params) :=
+        SpillLayout.scratchSlot_mem_of_binding hMem
+      rw [layoutOfParamStack_scratchSlots] at hSlotMem
+      simp at hSlotMem
+
+theorem layoutOfParamStack_spillStateRel_of_insertMany
+    {range : ScratchRange} {params : List Name}
+    {values : List Word} {paramStore : Source.Store}
+    {shared : EvmYul.SharedState .EVM} {target : EVMState}
+    (hInsert :
+      Source.Store.insertMany params values Locals.Source.Store.empty =
+        some paramStore)
+    (hNoDup : params.Nodup)
+    (hShared :
+      SharedStateEqOutsideScratch range shared target.toSharedState)
+    (hReady :
+      ScratchRegionReady target.toMachineState range.base range.words)
+    (hStack : target.stack = values.reverse) :
+    SpillStateRel range params params.reverse (layoutOfParamStack params)
+      { shared := shared, vars := paramStore } target := by
+  refine
+    { shared := hShared
+      scratchReady := hReady
+      layoutWellFormed :=
+        layoutOfParamStack_wellFormed (range := range) hNoDup
+      values := ?_ }
+  simpa [hStack] using
+    layoutOfParamStack_valueRel_of_insertMany
+      (range := range) (machine := target.toMachineState)
+      hInsert hNoDup
+
+theorem layoutOfParamStack_spillStateRel_of_prefix
+    {range : ScratchRange} {params : List Name}
+    {values savedValues : List Word} {paramStore : Source.Store}
+    {sourceAfterArgs : Source.State}
+    {afterArgsEVM : EVMState}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout}
+    (hInsert :
+      Source.Store.insertMany params values Locals.Source.Store.empty =
+        some paramStore)
+    (hNoDup : params.Nodup)
+    (hPrefix :
+      SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+        (values.reverse ++ savedValues.reverse) afterArgsEVM) :
+    SpillStateRel range params params.reverse (layoutOfParamStack params)
+      { shared := sourceAfterArgs.shared, vars := paramStore }
+      { afterArgsEVM with stack := values.reverse } := by
+  refine
+    layoutOfParamStack_spillStateRel_of_insertMany
+      (range := range) (params := params) (values := values)
+      (paramStore := paramStore)
+      (shared := sourceAfterArgs.shared)
+      (target := { afterArgsEVM with stack := values.reverse })
+      hInsert hNoDup ?_ ?_ ?_
+  · simpa using SpillStackPrefixRel.shared hPrefix
+  · simpa using SpillStackPrefixRel.scratchReady hPrefix
+  · simp
+
+def initReturnsInSourceScopeOrder (returns : List Name) : List Locals.Stmt :=
+  Lower.initReturns returns.reverse
+
+theorem initReturns_outEnv (names env : List Name) :
+    Locals.Scope.StmtList.outEnv env (Lower.initReturns names) =
+      names.reverse ++ env := by
+  induction names generalizing env with
+  | nil =>
+      simp [Lower.initReturns, Locals.Scope.StmtList.outEnv]
+  | cons name rest ih =>
+      simp [Lower.initReturns, Locals.Scope.StmtList.outEnv,
+        Locals.Scope.Stmt.outEnv, ih, List.append_assoc]
+
+theorem initReturnsInSourceScopeOrder_outEnv
+    (returns env : List Name) :
+    Locals.Scope.Block.outEnv env
+        { stmts := initReturnsInSourceScopeOrder returns } =
+      returns ++ env := by
+  simp [initReturnsInSourceScopeOrder, Locals.Scope.Block.outEnv,
+    initReturns_outEnv]
+
+theorem sourceStore_initReturns_apply
+    (names : List Name) (store : Source.Store) (key : Name) :
+    Source.Store.initReturns names store key =
+      if key ∈ names then some Source.zero else store key := by
+  induction names generalizing store with
+  | nil =>
+      simp [Source.Store.initReturns]
+  | cons name rest ih =>
+      by_cases hMemRest : key ∈ rest
+      · simp [Source.Store.initReturns, ih, hMemRest]
+      · by_cases hKey : key = name
+        · subst key
+          simp [Source.Store.initReturns, ih, hMemRest,
+            Locals.Source.Store.insert_self]
+        · have hNotMem : key ∉ name :: rest := by
+            simp [hKey, hMemRest]
+          simp [Source.Store.initReturns, ih, hMemRest, hKey, hNotMem,
+            Locals.Source.Store.insert_of_ne hKey]
+
+theorem sourceStore_initReturns_reverse_eq
+    (names : List Name) (store : Source.Store) :
+    Source.Store.initReturns names.reverse store =
+      Source.Store.initReturns names store := by
+  funext key
+  rw [sourceStore_initReturns_apply, sourceStore_initReturns_apply]
+  simp
+
+theorem lower_initReturns_runOpen
+    (program : Locals.Program) :
+    ∀ (names : List Name) (ctx : Locals.Source.Ctx)
+      (source : Locals.Source.State),
+      Locals.Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+          program ctx (names.length + 1)
+          { stmts := Lower.initReturns names } source =
+        .ok
+          (Locals.Source.Outcome.regular
+            (source.withVars
+              (Source.Store.initReturns names source.vars)),
+            { ctx with scope := names.reverse ++ ctx.scope }) := by
+  intro names
+  induction names with
+  | nil =>
+      intro ctx source
+      simp [Lower.initReturns, Locals.Source.Block.runOpen,
+        Source.Store.initReturns, Locals.Source.State.withVars]
+  | cons name rest ih =>
+      intro ctx source
+      have hTail := ih { ctx with scope := name :: ctx.scope }
+        (source.insert name Lower.zero)
+      simpa [Lower.initReturns, Locals.Source.Block.runOpen,
+        Locals.Source.Stmt.run, Locals.Source.Expr.eval,
+        Locals.Source.Expr.evalOne, Locals.Source.Outcome.regular,
+        Source.Store.initReturns,
+        Locals.Source.State.insert, Locals.Source.State.withVars,
+        Lower.zero, Source.zero, List.append_assoc] using hTail
+
+theorem initReturnsInSourceScopeOrder_runOpen
+    (program : Locals.Program) (returns : List Name)
+    (ctx : Locals.Source.Ctx) (source : Locals.Source.State) :
+    Locals.Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+        program ctx (returns.length + 1)
+        { stmts := initReturnsInSourceScopeOrder returns } source =
+      .ok
+        (Locals.Source.Outcome.regular
+          (source.withVars
+            (Source.Store.initReturns returns source.vars)),
+          { ctx with scope := returns ++ ctx.scope }) := by
+  have hRun :=
+    lower_initReturns_runOpen program returns.reverse ctx source
+  simpa [initReturnsInSourceScopeOrder,
+    sourceStore_initReturns_reverse_eq, List.length_reverse] using hRun
+
+def planOfSpillPlan
+    (plan : Locals.SourceLowering.StateRel.SpillScratch.SpillPlan) : Plan :=
+  { sourceScope := plan.sourceScope
+    stackLayout := plan.stackLayout
+    layout := plan.layout
+    block := SpillStmtCode.toExpressionsBlock plan.code }
+
+def appendSpillPlan (plan : Plan)
+    (spill : Locals.SourceLowering.StateRel.SpillScratch.SpillPlan) : Plan :=
+  { sourceScope := spill.sourceScope
+    stackLayout := spill.stackLayout
+    layout := spill.layout
+    block :=
+      ExpressionsBlock.append plan.block
+        (SpillStmtCode.toExpressionsBlock spill.code) }
+
+def compileLocalsBlockSpan? (range : ScratchRange)
+    (sourceScope stackLayout : List Name)
+    (layout : SpillLayout.Layout) (block : Locals.Block) :
+    Option Plan :=
+  match
+      Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.compileBlockOpenWithAdaptiveSpill?
+        range sourceScope stackLayout layout block with
+  | some plan => some (planOfSpillPlan plan)
+  | none => do
+      let plan ←
+        Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.compileBlockOpenWithConservativeScopedSpill?
+          range sourceScope stackLayout layout block
+      some (planOfSpillPlan plan)
+
+theorem compileLocalsBlockSpan?_expressionsBlock_sound_of_source_run
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Locals.Block} {plan : Plan}
+    {program : Locals.Program} {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+    {fuel : Nat} {source : Locals.Source.State}
+    {sourceOutcome : Locals.Source.Outcome}
+    {target : Expressions.RunState}
+    (hCompile :
+      compileLocalsBlockSpan? range sourceScope stackLayout layout block =
+        some plan)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hSourceRun :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program sourceCtx fuel
+          block source =
+        .ok (sourceOutcome, sourceCtxAfter)) :
+    ∃ result exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (SpillStmtCode.toExpressionsOutcome target result) ∧
+      SpillOutcomeRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceOutcome result := by
+  unfold compileLocalsBlockSpan? at hCompile
+  cases hAdaptive :
+      SpillPlan.compileBlockOpenWithAdaptiveSpill? range sourceScope
+        stackLayout layout block with
+  | some adaptivePlan =>
+      simp [hAdaptive, planOfSpillPlan] at hCompile
+      subst plan
+      exact
+        SpillPlan.compileBlockOpenWithAdaptiveSpill?_expressionsBlock_sound_of_source_run
+          hSpec hWordBytes hAdaptive hRel hDefined hSourceRun
+  | none =>
+      simp [hAdaptive] at hCompile
+      cases hConservative :
+          SpillPlan.compileBlockOpenWithConservativeScopedSpill? range
+            sourceScope stackLayout layout block with
+      | none =>
+          simp [hConservative] at hCompile
+      | some conservativePlan =>
+          simp [hConservative, planOfSpillPlan] at hCompile
+          subst plan
+          exact
+            SpillPlan.compileBlockOpenWithConservativeScopedSpill?_expressionsBlock_sound_of_source_run
+              hSpec hWordBytes hConservative hScope hRel hDefined
+              hSourceRun
+
+theorem compileLocalsBlockSpan?_sourceScope_outEnv
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Locals.Block} {plan : Plan}
+    (hCompile :
+      compileLocalsBlockSpan? range sourceScope stackLayout layout block =
+        some plan) :
+    plan.sourceScope = Locals.Scope.Block.outEnv sourceScope block := by
+  unfold compileLocalsBlockSpan? at hCompile
+  cases hAdaptive :
+      SpillPlan.compileBlockOpenWithAdaptiveSpill? range sourceScope
+        stackLayout layout block with
+  | some adaptivePlan =>
+      simp [hAdaptive, planOfSpillPlan] at hCompile
+      subst plan
+      exact
+        SpillPlan.compileBlockOpenWithAdaptiveSpill?_sourceScope_outEnv
+          hAdaptive
+  | none =>
+      simp [hAdaptive] at hCompile
+      cases hConservative :
+          SpillPlan.compileBlockOpenWithConservativeScopedSpill? range
+            sourceScope stackLayout layout block with
+      | none =>
+          simp [hConservative] at hCompile
+      | some conservativePlan =>
+          simp [hConservative, planOfSpillPlan] at hCompile
+          subst plan
+          exact
+            SpillPlan.compileBlockOpenWithConservativeScopedSpill?_sourceScope_outEnv
+              hConservative
+
+theorem compileLocalsBlockSpan?_noCallCreate
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Locals.Block} {plan : Plan}
+    (hCompile :
+      compileLocalsBlockSpan? range sourceScope stackLayout layout block =
+        some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileLocalsBlockSpan? at hCompile
+  cases hAdaptive :
+      SpillPlan.compileBlockOpenWithAdaptiveSpill? range sourceScope
+        stackLayout layout block with
+  | some adaptivePlan =>
+      simp [hAdaptive, planOfSpillPlan] at hCompile
+      subst plan
+      exact
+        SpillStmtCode.toExpressionsBlock_noCallCreate
+          (SpillPlan.compileBlockOpenWithAdaptiveSpill?_noCallCreate
+            hAdaptive)
+  | none =>
+      simp [hAdaptive] at hCompile
+      cases hConservative :
+          SpillPlan.compileBlockOpenWithConservativeScopedSpill? range
+            sourceScope stackLayout layout block with
+      | none =>
+          simp [hConservative] at hCompile
+      | some conservativePlan =>
+          simp [hConservative, planOfSpillPlan] at hCompile
+          subst plan
+          exact
+            SpillStmtCode.toExpressionsBlock_noCallCreate
+              (SpillPlan.compileBlockOpenWithConservativeScopedSpill?_noCallCreate
+                hConservative)
+
+theorem compileLocalsBlockSpan?_regular_storeDefined_of_source_run
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Locals.Block} {plan : Plan}
+    {program : Locals.Program} {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+    {fuel : Nat} {source sourceMid : Locals.Source.State}
+    (hCompile :
+      compileLocalsBlockSpan? range sourceScope stackLayout layout block =
+        some plan)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hSourceRun :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program sourceCtx fuel
+          block source =
+        .ok (Locals.Source.Outcome.regular sourceMid, sourceCtxAfter)) :
+    SpillLayout.StoreDefined sourceMid.vars plan.layout := by
+  unfold compileLocalsBlockSpan? at hCompile
+  cases hAdaptive :
+      SpillPlan.compileBlockOpenWithAdaptiveSpill? range sourceScope
+        stackLayout layout block with
+  | some adaptivePlan =>
+      simp [hAdaptive, planOfSpillPlan] at hCompile
+      subst plan
+      exact
+        SpillPlan.compileBlockOpenWithAdaptiveSpill?_regular_storeDefined_of_source_run
+          hAdaptive hDefined hSourceRun
+  | none =>
+      simp [hAdaptive] at hCompile
+      cases hConservative :
+          SpillPlan.compileBlockOpenWithConservativeScopedSpill? range
+            sourceScope stackLayout layout block with
+      | none =>
+          simp [hConservative] at hCompile
+      | some conservativePlan =>
+          simp [hConservative, planOfSpillPlan] at hCompile
+          subst plan
+          exact
+            SpillPlan.compileBlockOpenWithConservativeScopedSpill?_regular_storeDefined_of_source_run
+              hSpec hWordBytes hConservative hScope hDefined hSourceRun
+
+theorem compileLocalsBlockSpan?_sourceRun_privateScratchInvariant
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Locals.Block} {plan : Plan}
+    {program : Locals.Program} {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+    {fuel : Nat} {source target : Locals.Source.State}
+    {sourceOutcome : Locals.Source.Outcome}
+    (hCompile :
+      compileLocalsBlockSpan? range sourceScope stackLayout layout block =
+        some plan)
+    (hRel :
+      SourceStatePrivateScratchInvariant source target)
+    (hSourceRun :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program sourceCtx fuel
+          block source =
+        .ok (sourceOutcome, sourceCtxAfter)) :
+    ∃ targetOutcome,
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program sourceCtx fuel
+          block target =
+        .ok (targetOutcome, sourceCtxAfter) ∧
+      SourceOutcomePrivateScratchInvariant sourceOutcome targetOutcome := by
+  unfold compileLocalsBlockSpan? at hCompile
+  cases hAdaptive :
+      SpillPlan.compileBlockOpenWithAdaptiveSpill? range sourceScope
+        stackLayout layout block with
+  | some adaptivePlan =>
+      simp [hAdaptive, planOfSpillPlan] at hCompile
+      exact
+        SpillPlan.compileBlockOpenWithAdaptiveSpill?_sourceRun_privateScratchInvariant
+          hAdaptive hRel hSourceRun
+  | none =>
+      simp [hAdaptive] at hCompile
+      cases hConservative :
+          SpillPlan.compileBlockOpenWithConservativeScopedSpill? range
+            sourceScope stackLayout layout block with
+      | none =>
+          simp [hConservative] at hCompile
+      | some conservativePlan =>
+          simp [hConservative, planOfSpillPlan] at hCompile
+          exact
+            SpillPlan.compileBlockOpenWithConservativeScopedSpill?_sourceRun_privateScratchInvariant
+              hConservative hRel hSourceRun
+
+theorem compileLocalsBlockSpan?_sourceNoMemoryTouch
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Locals.Block} {plan : Plan}
+    (hCompile :
+      compileLocalsBlockSpan? range sourceScope stackLayout layout block =
+        some plan) :
+    SourceNoMemoryTouch.BlockSafe block := by
+  unfold compileLocalsBlockSpan? at hCompile
+  cases hAdaptive :
+      SpillPlan.compileBlockOpenWithAdaptiveSpill? range sourceScope
+        stackLayout layout block with
+  | some adaptivePlan =>
+      simp [hAdaptive, planOfSpillPlan] at hCompile
+      exact
+        SpillPlan.compileBlockOpenWithAdaptiveSpill?_sourceNoMemoryTouch
+          hAdaptive
+  | none =>
+      simp [hAdaptive] at hCompile
+      cases hConservative :
+          SpillPlan.compileBlockOpenWithConservativeScopedSpill? range
+            sourceScope stackLayout layout block with
+      | none =>
+          simp [hConservative] at hCompile
+      | some conservativePlan =>
+          simp [hConservative, planOfSpillPlan] at hCompile
+          exact
+            SpillPlan.compileBlockOpenWithConservativeScopedSpill?_sourceNoMemoryTouch
+              hConservative
+
+theorem source_runOpen_singleton_of_stmt_run
+    {prim : Source.PrimitiveSemantics}
+    {program : Program} {ctx ctx' : Source.Ctx}
+    {fuel : Nat} {stmt : Stmt} {state : Source.State}
+    {outcome : Source.Outcome}
+    (hRun :
+      Source.Stmt.run prim program ctx fuel stmt state =
+        .ok (outcome, ctx')) :
+    Source.Block.runOpen prim program ctx (fuel + 2) { stmts := [stmt] }
+        state =
+      .ok (outcome, ctx') := by
+  have hRun' :
+      Source.Stmt.run prim program ctx (fuel + 1) stmt state =
+        .ok (outcome, ctx') :=
+    Source.Stmt.run_mono prim program (Nat.le_succ fuel) hRun
+  cases outcome with
+  | mk outcomeState mode =>
+      cases mode
+      · simp [Source.Block.runOpen, hRun', Source.Outcome.regular,
+          Locals.Source.Outcome.regular]
+      · have hCtx : ctx' = ctx :=
+          Source.Stmt.run_nonregular_ctx hRun (by simp)
+        subst ctx'
+        simp [Source.Block.runOpen, hRun']
+      · have hCtx : ctx' = ctx :=
+          Source.Stmt.run_nonregular_ctx hRun (by simp)
+        subst ctx'
+        simp [Source.Block.runOpen, hRun']
+      · have hCtx : ctx' = ctx :=
+          Source.Stmt.run_nonregular_ctx hRun (by simp)
+        subst ctx'
+        simp [Source.Block.runOpen, hRun']
+      · have hCtx : ctx' = ctx :=
+          Source.Stmt.run_nonregular_ctx hRun (by simp)
+        subst ctx'
+        simp [Source.Block.runOpen, hRun']
+
+def compileNonCallStmtSpan? (range : ScratchRange)
+    (returns sourceScope stackLayout : List Name)
+    (layout : SpillLayout.Layout) (stmt : Stmt) :
+    Option Plan :=
+  compileLocalsBlockSpan? range sourceScope stackLayout layout
+    { stmts := Stmt.toLocals returns stmt }
+
+theorem compileNonCallStmtSpan?_noCallCreate
+    {range : ScratchRange} {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    (hCompile :
+      compileNonCallStmtSpan? range returns sourceScope stackLayout layout stmt =
+        some plan) :
+    plan.block.usesCallCreate = false :=
+  compileLocalsBlockSpan?_noCallCreate hCompile
+
+theorem compileNonCallStmtSpan?_expressionsBlock_sound_of_source_run
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    {program : Program} {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source : Source.State}
+    {sourceOutcome : Source.Outcome}
+    {target : Expressions.RunState}
+    (hCompile :
+      compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+          stmt =
+        some plan)
+    (hOwned : SourceLowering.SourceToLocals.Stmt.SourceOwned returns stmt)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel stmt source =
+        .ok (sourceOutcome, sourceCtxAfter)) :
+    ∃ result exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (SpillStmtCode.toExpressionsOutcome target result) ∧
+      SpillOutcomeRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceOutcome result := by
+  have hBlockRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx (fuel + 2) { stmts := [stmt] } source =
+        .ok (sourceOutcome, sourceCtxAfter) :=
+    source_runOpen_singleton_of_stmt_run hSourceRun
+  have hBlockOwned :
+      SourceLowering.SourceToLocals.Block.SourceOwned returns
+        { stmts := [stmt] } := by
+    simpa [SourceLowering.SourceToLocals.Block.SourceOwned,
+      SourceLowering.SourceToLocals.StmtList.SourceOwned] using
+      And.intro hOwned trivial
+  have hLowerRun :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program.toLocals
+          (SourceLowering.Ctx.toLocals sourceCtx) (fuel + 2)
+          (Block.toLocals returns { stmts := [stmt] }) source =
+        .ok (sourceOutcome,
+          SourceLowering.Ctx.toLocals sourceCtxAfter) :=
+    SourceLowering.SourceToLocals.sourceOwnedBlock_runOpen_toLocals_of_run
+      (lowerProgram := program.toLocals) hBlockOwned hBlockRun
+  have hLowerRun' :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program.toLocals
+          (SourceLowering.Ctx.toLocals sourceCtx) (fuel + 2)
+          { stmts := Stmt.toLocals returns stmt } source =
+        .ok (sourceOutcome,
+          SourceLowering.Ctx.toLocals sourceCtxAfter) := by
+    simpa [Block.toLocals, StmtList.toLocals] using hLowerRun
+  exact
+    compileLocalsBlockSpan?_expressionsBlock_sound_of_source_run
+      hSpec hWordBytes hCompile
+      (by simpa [SourceLowering.Ctx.toLocals, hScope])
+      hRel hDefined hLowerRun'
+
+theorem compileNonCallStmtSpan?_regular_storeDefined_of_source_run
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    {program : Program} {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    (hCompile :
+      compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+          stmt =
+        some plan)
+    (hOwned : SourceLowering.SourceToLocals.Stmt.SourceOwned returns stmt)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel stmt source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    SpillLayout.StoreDefined sourceAfter.vars plan.layout := by
+  have hBlockRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx (fuel + 2) { stmts := [stmt] } source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter) :=
+    source_runOpen_singleton_of_stmt_run hSourceRun
+  have hBlockOwned :
+      SourceLowering.SourceToLocals.Block.SourceOwned returns
+        { stmts := [stmt] } := by
+    simpa [SourceLowering.SourceToLocals.Block.SourceOwned,
+      SourceLowering.SourceToLocals.StmtList.SourceOwned] using
+      And.intro hOwned trivial
+  have hLowerRun :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program.toLocals
+          (SourceLowering.Ctx.toLocals sourceCtx) (fuel + 2)
+          (Block.toLocals returns { stmts := [stmt] }) source =
+        .ok (Source.Outcome.regular sourceAfter,
+          SourceLowering.Ctx.toLocals sourceCtxAfter) :=
+    SourceLowering.SourceToLocals.sourceOwnedBlock_runOpen_toLocals_of_run
+      (lowerProgram := program.toLocals) hBlockOwned hBlockRun
+  have hLowerRun' :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program.toLocals
+          (SourceLowering.Ctx.toLocals sourceCtx) (fuel + 2)
+          { stmts := Stmt.toLocals returns stmt } source =
+        .ok (Source.Outcome.regular sourceAfter,
+          SourceLowering.Ctx.toLocals sourceCtxAfter) := by
+    simpa [Block.toLocals, StmtList.toLocals] using hLowerRun
+  intro name location hMem
+  exact
+    compileLocalsBlockSpan?_regular_storeDefined_of_source_run
+      hSpec hWordBytes hCompile
+      (by simpa [SourceLowering.Ctx.toLocals, hScope])
+      hDefined hLowerRun' hMem
+
+theorem compileNonCallStmtSpan?_regular_sourceScope_of_source_run
+    {range : ScratchRange} {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    {program : Program} {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    (hCompile :
+      compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+          stmt =
+        some plan)
+    (hOwned : SourceLowering.SourceToLocals.Stmt.SourceOwned returns stmt)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel stmt source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    sourceCtxAfter.scope = plan.sourceScope := by
+  have hBlockRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx (fuel + 2) { stmts := [stmt] } source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter) :=
+    source_runOpen_singleton_of_stmt_run hSourceRun
+  have hBlockOwned :
+      SourceLowering.SourceToLocals.Block.SourceOwned returns
+        { stmts := [stmt] } := by
+    simpa [SourceLowering.SourceToLocals.Block.SourceOwned,
+      SourceLowering.SourceToLocals.StmtList.SourceOwned] using
+      And.intro hOwned trivial
+  have hLowerRun :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program.toLocals
+          (SourceLowering.Ctx.toLocals sourceCtx) (fuel + 2)
+          (Block.toLocals returns { stmts := [stmt] }) source =
+        .ok (Source.Outcome.regular sourceAfter,
+          SourceLowering.Ctx.toLocals sourceCtxAfter) :=
+    SourceLowering.SourceToLocals.sourceOwnedBlock_runOpen_toLocals_of_run
+      (lowerProgram := program.toLocals) hBlockOwned hBlockRun
+  have hLowerRun' :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program.toLocals
+          (SourceLowering.Ctx.toLocals sourceCtx) (fuel + 2)
+          { stmts := Stmt.toLocals returns stmt } source =
+        .ok (Source.Outcome.regular sourceAfter,
+          SourceLowering.Ctx.toLocals sourceCtxAfter) := by
+    simpa [Block.toLocals, StmtList.toLocals] using hLowerRun
+  have hLowerScope :
+      (SourceLowering.Ctx.toLocals sourceCtxAfter).scope =
+        Locals.Scope.Block.outEnv
+          (SourceLowering.Ctx.toLocals sourceCtx).scope
+          { stmts := Stmt.toLocals returns stmt } :=
+    Locals.Source.Block.runOpen_regular_scope hLowerRun'
+  have hPlanScope :
+      plan.sourceScope =
+        Locals.Scope.Block.outEnv sourceScope
+          { stmts := Stmt.toLocals returns stmt } :=
+    compileLocalsBlockSpan?_sourceScope_outEnv hCompile
+  rw [hPlanScope]
+  simpa [SourceLowering.Ctx.toLocals, hScope] using hLowerScope
+
+theorem compileNonCallStmtSpan?_regular_sound_meta_of_source_run
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    {program : Program} {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    (hCompile :
+      compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+          stmt =
+        some plan)
+    (hOwned : SourceLowering.SourceToLocals.Stmt.SourceOwned returns stmt)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel stmt source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      sourceCtxAfter.scope = plan.sourceScope := by
+  rcases
+      compileNonCallStmtSpan?_expressionsBlock_sound_of_source_run
+        hSpec hWordBytes hCompile hOwned hScope hRel hDefined hSourceRun with
+    ⟨result, exprFuel, hRun, hOutcomeRel⟩
+  rcases SpillOutcomeRel.regular_inv hOutcomeRel with
+    ⟨final, hResult, hFinalRel⟩
+  subst result
+  have hStoreDefined :
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout :=
+    compileNonCallStmtSpan?_regular_storeDefined_of_source_run
+      hSpec hWordBytes hCompile hOwned hScope hDefined hSourceRun
+  have hScopeAfter :
+      sourceCtxAfter.scope = plan.sourceScope :=
+    compileNonCallStmtSpan?_regular_sourceScope_of_source_run
+      hCompile hOwned hScope hSourceRun
+  exact
+    ⟨final, exprFuel,
+      by simpa [SpillStmtCode.toExpressionsOutcome] using hRun,
+      hFinalRel, hStoreDefined, hScopeAfter⟩
+
+def storeReturnedTargetsCode? (range : ScratchRange)
+    (layout : SpillLayout.Layout) : List Name → Option Structured.Code
+  | [] => some []
+  | target :: rest => do
+      match SpillLayout.lookup? target layout with
+      | some (.scratch slot) =>
+          let tail ← storeReturnedTargetsCode? range layout rest
+          some
+                (Locals.SourceLowering.StateRel.SpillScratch.spillStoreTopCode
+                (range.word slot) ++ tail)
+      | _ => none
+
+def callerSaveEntries (targets : List Name) :
+    SpillLayout.Layout → List (Name × Nat)
+  | [] => []
+  | (name, .scratch slot) :: rest =>
+      if name ∈ targets then
+        callerSaveEntries targets rest
+      else
+        (name, slot) :: callerSaveEntries targets rest
+  | (_name, .stack _depth) :: rest =>
+      callerSaveEntries targets rest
+
+def saveScratchCode (range : ScratchRange) :
+    List (Name × Nat) → Structured.Code
+  | [] => []
+  | (_name, slot) :: rest =>
+      spillLoadCode (range.word slot) ++ saveScratchCode range rest
+
+def restoreScratchCode (range : ScratchRange) :
+    List (Name × Nat) → Structured.Code
+  | [] => []
+  | (_name, slot) :: rest =>
+      restoreScratchCode range rest ++ spillStoreTopCode (range.word slot)
+
+theorem expressionsStmtList_usesCallCreate_append_eq_false :
+    ∀ {left right : List Expressions.Stmt},
+      Expressions.StmtList.usesCallCreate left = false →
+      Expressions.StmtList.usesCallCreate right = false →
+      Expressions.StmtList.usesCallCreate (left ++ right) = false
+  | [], right, _hLeft, hRight => by
+      simpa [Expressions.StmtList.usesCallCreate] using hRight
+  | head :: tail, right, hLeft, hRight => by
+      have hParts :
+          head.usesCallCreate = false ∧
+            Expressions.StmtList.usesCallCreate tail = false := by
+        simpa [Expressions.StmtList.usesCallCreate] using hLeft
+      simp [Expressions.StmtList.usesCallCreate, hParts.1,
+        expressionsStmtList_usesCallCreate_append_eq_false hParts.2 hRight]
+
+theorem expressionsBlock_append_noCallCreate
+    {left right : Expressions.Block}
+    (hLeft : left.usesCallCreate = false)
+    (hRight : right.usesCallCreate = false) :
+    (ExpressionsBlock.append left right).usesCallCreate = false := by
+  cases left
+  cases right
+  simpa [ExpressionsBlock.append, Expressions.Block.usesCallCreate] using
+    expressionsStmtList_usesCallCreate_append_eq_false hLeft hRight
+
+theorem expressionsBlock_ofCode_noCallCreate {code : Structured.Code}
+    (hCode : code.usesCallCreate = false) :
+    (ExpressionsBlock.ofCode code).usesCallCreate = false := by
+  simpa [ExpressionsBlock.ofCode, Expressions.Block.usesCallCreate,
+    Expressions.StmtList.usesCallCreate, Expressions.Stmt.usesCallCreate]
+    using hCode
+
+theorem expressionsBlock_ofCall_noCallCreate {name : Name} :
+    (ExpressionsBlock.ofCall name).usesCallCreate = false := by
+  simp [ExpressionsBlock.ofCall, Expressions.Block.usesCallCreate,
+    Expressions.StmtList.usesCallCreate, Expressions.Stmt.usesCallCreate]
+
+theorem expressionsBlock_empty_noCallCreate :
+    ({ stmts := [] } : Expressions.Block).usesCallCreate = false := by
+  simp [Expressions.Block.usesCallCreate, Expressions.StmtList.usesCallCreate]
+
+theorem expressionsBlock_seqList_noCallCreate :
+    ∀ {blocks : List Expressions.Block},
+      (∀ block, block ∈ blocks → block.usesCallCreate = false) →
+      (ExpressionsBlock.seqList blocks).usesCallCreate = false
+  | [], _hBlocks => by
+      simp [ExpressionsBlock.seqList, Expressions.Block.usesCallCreate,
+        Expressions.StmtList.usesCallCreate]
+  | head :: tail, hBlocks => by
+      apply expressionsBlock_append_noCallCreate
+      · exact hBlocks head (by simp)
+      · exact
+          expressionsBlock_seqList_noCallCreate
+            (by
+              intro block hMem
+              exact hBlocks block (by simp [hMem]))
+
+theorem saveScratchCode_noCallCreate (range : ScratchRange) :
+    ∀ entries,
+      (saveScratchCode range entries).usesCallCreate = false
+  | [] => by
+      simp [saveScratchCode, Structured.Code.usesCallCreate]
+  | (_name, slot) :: rest => by
+      exact
+        Locals.CompilerFacts.Structured.Code.usesCallCreate_append_eq_false
+          (spillLoadCode_noCallCreate (range.word slot))
+          (saveScratchCode_noCallCreate range rest)
+
+theorem restoreScratchCode_noCallCreate (range : ScratchRange) :
+    ∀ entries,
+      (restoreScratchCode range entries).usesCallCreate = false
+  | [] => by
+      simp [restoreScratchCode, Structured.Code.usesCallCreate]
+  | (_name, slot) :: rest => by
+      exact
+        Locals.CompilerFacts.Structured.Code.usesCallCreate_append_eq_false
+          (restoreScratchCode_noCallCreate range rest)
+          (spillStoreTopCode_noCallCreate (range.word slot))
+
+theorem storeReturnedTargetsCode?_noCallCreate {range : ScratchRange}
+    {layout : SpillLayout.Layout} :
+    ∀ {targets : List Name} {code : Structured.Code},
+      storeReturnedTargetsCode? range layout targets = some code →
+      code.usesCallCreate = false
+  | [], code, hStore => by
+      simp [storeReturnedTargetsCode?] at hStore
+      cases hStore
+      simp [Structured.Code.usesCallCreate]
+  | target :: rest, code, hStore => by
+      unfold storeReturnedTargetsCode? at hStore
+      cases hLookup : SpillLayout.lookup? target layout with
+      | none =>
+          simp [hLookup] at hStore
+      | some location =>
+          cases location with
+          | stack depth =>
+              simp [hLookup] at hStore
+          | scratch slot =>
+              simp [hLookup] at hStore
+              cases hTail : storeReturnedTargetsCode? range layout rest with
+              | none =>
+                  simp [hTail] at hStore
+              | some tailCode =>
+                  simp [hTail] at hStore
+                  cases hStore
+                  exact
+                    Locals.CompilerFacts.Structured.Code.usesCallCreate_append_eq_false
+                      (spillStoreTopCode_noCallCreate (range.word slot))
+                      (storeReturnedTargetsCode?_noCallCreate hTail)
+
+def SavedEntriesRel :
+    List (Name × Nat) → Source.Store → List Word → Prop
+  | [], _store, [] => True
+  | (_name, _slot) :: _rest, _store, [] => False
+  | (name, _slot) :: rest, store, value :: values =>
+      store name = some value ∧ SavedEntriesRel rest store values
+  | [], _store, _value :: _values => False
+
+theorem source_store_insert_eq_of_apply
+    {store : Source.Store} {name : Name} {value : Word}
+    (hValue : store name = some value) :
+    Locals.Source.Store.insert store name value = store := by
+  funext key
+  by_cases hKey : key = name
+  · subst key
+    simp [Locals.Source.Store.insert, hValue]
+  · simp [Locals.Source.Store.insert, hKey]
+
+theorem assignMany_apply_of_not_mem :
+    ∀ {names : List Name} {values : List Word}
+      {store store' : Source.Store} {name : Name},
+      Source.Store.assignMany names values store = some store' →
+        name ∉ names →
+          store' name = store name
+  | [], [], store, store', name, hAssign, _hNotMem => by
+      simp [Source.Store.assignMany] at hAssign
+      cases hAssign
+      rfl
+  | [], _value :: _values, _store, _store', _name, hAssign, _hNotMem => by
+      simp [Source.Store.assignMany] at hAssign
+  | _head :: _tail, [], _store, _store', _name, hAssign, _hNotMem => by
+      simp [Source.Store.assignMany] at hAssign
+  | head :: tail, value :: values, store, store', name, hAssign,
+      hNotMem => by
+      unfold Source.Store.assignMany at hAssign
+      by_cases hContains : store.contains head
+      · simp [hContains] at hAssign
+        have hNameNe : name ≠ head := by
+          intro hEq
+          subst head
+          exact hNotMem (by simp)
+        have hTailNotMem : name ∉ tail := by
+          intro hMem
+          exact hNotMem (by simp [hMem])
+        have hTail :=
+          assignMany_apply_of_not_mem
+            (names := tail) (values := values)
+            (store := Locals.Source.Store.insert store head value)
+            (store' := store') (name := name) hAssign hTailNotMem
+        calc
+          store' name =
+              Locals.Source.Store.insert store head value name := hTail
+          _ = store name := by
+            simp [Locals.Source.Store.insert, hNameNe]
+      · simp [hContains] at hAssign
+
+theorem assignMany_storeDefined_same_layout :
+    ∀ {names : List Name} {values : List Word}
+      {store store' : Source.Store} {layout : SpillLayout.Layout},
+      Source.Store.assignMany names values store = some store' →
+        SpillLayout.StoreDefined store layout →
+          SpillLayout.StoreDefined store' layout
+  | [], [], store, store', layout, hAssign, hDefined => by
+      simp [Source.Store.assignMany] at hAssign
+      cases hAssign
+      exact hDefined
+  | [], _value :: _values, _store, _store', _layout, hAssign, _hDefined => by
+      simp [Source.Store.assignMany] at hAssign
+  | _head :: _tail, [], _store, _store', _layout, hAssign, _hDefined => by
+      simp [Source.Store.assignMany] at hAssign
+  | head :: tail, value :: values, store, store', layout, hAssign,
+      hDefined => by
+      unfold Source.Store.assignMany at hAssign
+      by_cases hContains : store.contains head
+      · simp [hContains] at hAssign
+        exact
+          assignMany_storeDefined_same_layout hAssign
+            (SpillLayout.StoreDefined.insert_same_layout hDefined)
+      · simp [hContains] at hAssign
+
+theorem callerSaveEntries_sound
+    {targets : List Name} {layout : SpillLayout.Layout}
+    {name : Name} {slot : Nat}
+    (hMem : (name, slot) ∈ callerSaveEntries targets layout) :
+    (name, SpillLayout.LocalLocation.scratch slot) ∈ layout ∧
+      name ∉ targets := by
+  induction layout with
+  | nil =>
+      simp [callerSaveEntries] at hMem
+  | cons binding rest ih =>
+      rcases binding with ⟨headName, location⟩
+      cases location with
+      | stack depth =>
+          simp [callerSaveEntries] at hMem
+          rcases ih hMem with ⟨hBinding, hNotMem⟩
+          exact ⟨by simp [hBinding], hNotMem⟩
+      | scratch headSlot =>
+          by_cases hHeadTarget : headName ∈ targets
+          · simp [callerSaveEntries, hHeadTarget] at hMem
+            rcases ih hMem with ⟨hBinding, hNotMem⟩
+            exact ⟨by simp [hBinding], hNotMem⟩
+          · simp [callerSaveEntries, hHeadTarget] at hMem
+            rcases hMem with hHead | hTail
+            · rcases hHead with ⟨hName, hSlot⟩
+              subst name
+              subst slot
+              exact ⟨by simp, hHeadTarget⟩
+            · rcases ih hTail with ⟨hBinding, hNotMem⟩
+              exact ⟨by simp [hBinding], hNotMem⟩
+
+theorem callerSaveEntries_complete
+    {targets : List Name} {layout : SpillLayout.Layout}
+    {name : Name} {slot : Nat}
+    (hBinding :
+      (name, SpillLayout.LocalLocation.scratch slot) ∈ layout)
+    (hNotTarget : name ∉ targets) :
+    (name, slot) ∈ callerSaveEntries targets layout := by
+  induction layout with
+  | nil =>
+      simp at hBinding
+  | cons binding rest ih =>
+      rcases binding with ⟨headName, location⟩
+      cases location with
+      | stack depth =>
+          change
+            (name, SpillLayout.LocalLocation.scratch slot) ∈
+              (headName, SpillLayout.LocalLocation.stack depth) :: rest
+            at hBinding
+          rw [List.mem_cons] at hBinding
+          rcases hBinding with hHead | hTail
+          · cases hHead
+          · simp [callerSaveEntries]
+            exact ih hTail
+      | scratch headSlot =>
+          change
+            (name, SpillLayout.LocalLocation.scratch slot) ∈
+              (headName, SpillLayout.LocalLocation.scratch headSlot) :: rest
+            at hBinding
+          rw [List.mem_cons] at hBinding
+          by_cases hHeadTarget : headName ∈ targets
+          · simp [callerSaveEntries, hHeadTarget]
+            rcases hBinding with hHead | hTail
+            · cases hHead
+              exact False.elim (hNotTarget hHeadTarget)
+            · exact ih hTail
+          · simp [callerSaveEntries, hHeadTarget]
+            rcases hBinding with hHead | hTail
+            · have hPair : name = headName ∧ slot = headSlot := by
+                cases hHead
+                exact ⟨rfl, rfl⟩
+              exact Or.inl hPair
+            · exact Or.inr (ih hTail)
+
+theorem SavedEntriesRel.length_eq :
+    ∀ {entries : List (Name × Nat)} {store : Source.Store}
+      {values : List Word},
+      SavedEntriesRel entries store values →
+        values.length = entries.length
+  | [], _store, [], _hRel => by
+      rfl
+  | [], _store, _value :: _values, hRel => by
+      cases hRel
+  | (_name, _slot) :: _rest, _store, [], hRel => by
+      cases hRel
+  | (_name, _slot) :: rest, store, _value :: values, hRel => by
+      exact by
+        simp [SavedEntriesRel.length_eq hRel.2]
+
+theorem SavedEntriesRel.reverse_cons_inv :
+    ∀ {entries : List (Name × Nat)} {store : Source.Store}
+      {values : List Word} {name : Name} {slot : Nat},
+      SavedEntriesRel ((name, slot) :: entries) store values →
+        ∃ value tailValues,
+          values = value :: tailValues ∧
+            store name = some value ∧
+            SavedEntriesRel entries store tailValues
+  | _entries, _store, [], _name, _slot, hRel => by
+      cases hRel
+  | entries, store, value :: values, name, slot, hRel => by
+      exact ⟨value, values, rfl, hRel.1, hRel.2⟩
+
+theorem SavedEntriesRel.transfer_of_apply_eq :
+    ∀ {entries : List (Name × Nat)} {oldStore newStore : Source.Store}
+      {values : List Word},
+      SavedEntriesRel entries oldStore values →
+        (∀ {name slot}, (name, slot) ∈ entries →
+          newStore name = oldStore name) →
+          SavedEntriesRel entries newStore values
+  | [], _oldStore, _newStore, [], _hRel, _hApply => by
+      trivial
+  | [], _oldStore, _newStore, _value :: _values, hRel, _hApply => by
+      cases hRel
+  | (headName, headSlot) :: rest, oldStore, newStore, [], hRel, _hApply => by
+      cases hRel
+  | (headName, headSlot) :: rest, oldStore, newStore, value :: values, hRel,
+      hApply => by
+      constructor
+      · rw [hApply (name := headName) (slot := headSlot) (by simp)]
+        exact hRel.1
+      · exact
+          SavedEntriesRel.transfer_of_apply_eq hRel.2
+            (fun {name} {slot} hMem =>
+              hApply (name := name) (slot := slot)
+                (by
+                  rw [List.mem_cons]
+                  exact Or.inr hMem))
+
+def ScratchValueRelOn (range : ScratchRange)
+    (layout : SpillLayout.Layout) (store : Source.Store)
+    (machine : EvmYul.MachineState) (covered : Name → Prop) : Prop :=
+  ∀ {name slot},
+    (name, SpillLayout.LocalLocation.scratch slot) ∈ layout →
+      covered name →
+        ∃ value,
+          store name = some value ∧
+            (machine.mload (range.word slot)).1 = value
+
+def EntryNameCovered (entries : List (Name × Nat)) (name : Name) : Prop :=
+  ∃ slot, (name, slot) ∈ entries
+
+namespace ScratchValueRelOn
+
+theorem of_false {range : ScratchRange}
+    {layout : SpillLayout.Layout} {store : Source.Store}
+    {machine : EvmYul.MachineState} :
+    ScratchValueRelOn range layout store machine (fun _ => False) := by
+  intro name slot _hBinding hCovered
+  cases hCovered
+
+theorem weaken {range : ScratchRange}
+    {layout : SpillLayout.Layout} {store : Source.Store}
+    {machine : EvmYul.MachineState} {covered covered' : Name → Prop}
+    (hRel : ScratchValueRelOn range layout store machine covered)
+    (hImp : ∀ name, covered' name → covered name) :
+    ScratchValueRelOn range layout store machine covered' := by
+  intro name slot hBinding hCovered
+  exact hRel hBinding (hImp name hCovered)
+
+theorem mstore_insert_add
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {store : Source.Store}
+    {machine : EvmYul.MachineState} {covered : Name → Prop}
+    {writeName : Name} {writeSlot : Nat} {value : Word}
+    (hLayout :
+      SpillLayout.WellFormed range sourceScope stackLayout layout)
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hRel : ScratchValueRelOn range layout store machine covered)
+    (hWriteBinding :
+      (writeName, SpillLayout.LocalLocation.scratch writeSlot) ∈ layout) :
+    ScratchValueRelOn range layout
+      (Locals.Source.Store.insert store writeName value)
+      (machine.mstore (range.word writeSlot) value)
+      (fun name => covered name ∨ name = writeName) := by
+  intro readName readSlot hReadBinding hCovered
+  have hWriteSlot : writeSlot < range.words :=
+    hLayout.scratch_binding hWriteBinding
+  rcases hCovered with hCoveredOld | hReadName
+  · by_cases hSlotEq : readSlot = writeSlot
+    · subst readSlot
+      have hName : readName = writeName :=
+        hLayout.scratch_binding_name_eq hReadBinding hWriteBinding
+      subst readName
+      refine ⟨value, ?_, ?_⟩
+      · simp [Locals.Source.Store.insert]
+      · exact ScratchRegionReady.mload_mstore_range_slot_value
+          hSpec hWordBytes hReady hWriteSlot
+    · rcases hRel hReadBinding hCoveredOld with
+        ⟨storedValue, hStore, hLoad⟩
+      have hReadSlot : readSlot < range.words :=
+        hLayout.scratch_binding hReadBinding
+      have hNameNe : readName ≠ writeName := by
+        intro hEq
+        subst readName
+        have hLoc :=
+          hLayout.binding_location_eq_of_same_name hReadBinding hWriteBinding
+        cases hLoc
+        exact hSlotEq rfl
+      refine ⟨storedValue, ?_, ?_⟩
+      · simp [Locals.Source.Store.insert, hNameNe, hStore]
+      · rw [ScratchRegionReady.mload_mstore_range_other_slot_value
+          hSpec hWordBytes hReady hWriteSlot hReadSlot hSlotEq]
+        exact hLoad
+  · subst readName
+    have hLoc :=
+      hLayout.binding_location_eq_of_same_name hReadBinding hWriteBinding
+    cases hLoc
+    refine ⟨value, ?_, ?_⟩
+    · simp [Locals.Source.Store.insert]
+    · exact ScratchRegionReady.mload_mstore_range_slot_value
+        hSpec hWordBytes hReady hWriteSlot
+
+theorem mstore_existing_add
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {store : Source.Store}
+    {machine : EvmYul.MachineState} {covered : Name → Prop}
+    {writeName : Name} {writeSlot : Nat} {value : Word}
+    (hLayout :
+      SpillLayout.WellFormed range sourceScope stackLayout layout)
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hRel : ScratchValueRelOn range layout store machine covered)
+    (hWriteBinding :
+      (writeName, SpillLayout.LocalLocation.scratch writeSlot) ∈ layout)
+    (hStoreValue : store writeName = some value) :
+    ScratchValueRelOn range layout store
+      (machine.mstore (range.word writeSlot) value)
+      (fun name => covered name ∨ name = writeName) := by
+  have hInsert :
+      Locals.Source.Store.insert store writeName value = store :=
+    source_store_insert_eq_of_apply hStoreValue
+  have hAdded :
+      ScratchValueRelOn range layout
+        (Locals.Source.Store.insert store writeName value)
+        (machine.mstore (range.word writeSlot) value)
+        (fun name => covered name ∨ name = writeName) :=
+    mstore_insert_add hSpec hWordBytes hLayout hReady hRel hWriteBinding
+  intro name slot hBinding hCovered
+  simpa [hInsert] using hAdded hBinding hCovered
+
+theorem to_valueRel_stackLayout_nil {range : ScratchRange}
+    {sourceScope : List Name} {layout : SpillLayout.Layout}
+    {store : Source.Store} {machine : EvmYul.MachineState}
+    {baseStack : EvmYul.Stack Word} {covered : Name → Prop}
+    (hLayout : SpillLayout.WellFormed range sourceScope [] layout)
+    (hRel : ScratchValueRelOn range layout store machine covered)
+    (hCovered :
+      ∀ {name slot},
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ layout →
+          covered name) :
+    SpillLayout.ValueRel range store machine baseStack layout := by
+  intro binding hMem
+  rcases binding with ⟨name, location⟩
+  cases location with
+  | stack depth =>
+      have hDepth := hLayout.stack_binding hMem
+      simp at hDepth
+  | scratch slot =>
+      exact hRel hMem (hCovered hMem)
+
+end ScratchValueRelOn
+
+theorem run_spillStoreTopCode_scratch_partial_insert_add
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {store : Source.Store}
+    {target : EVMState} {covered : Name → Prop}
+    {sourceShared : EvmYul.SharedState .EVM}
+    {writeName : Name} {writeSlot : Nat} {value : Word}
+    {stackPrefix : List Word}
+    (hShared :
+      SharedStateEqOutsideScratch range sourceShared target.toSharedState)
+    (hReady :
+      ScratchRegionReady target.toMachineState range.base range.words)
+    (hLayout :
+      SpillLayout.WellFormed range sourceScope stackLayout layout)
+    (hRel :
+      ScratchValueRelOn range layout store target.toMachineState covered)
+    (hWriteBinding :
+      (writeName, SpillLayout.LocalLocation.scratch writeSlot) ∈ layout)
+    (hStack : target.stack = value :: stackPrefix) :
+    ∃ final,
+      Structured.Code.run (spillStoreTopCode (range.word writeSlot)) target =
+        .ok final ∧
+      final.stack = stackPrefix ∧
+      SharedStateEqOutsideScratch range sourceShared final.toSharedState ∧
+      ScratchRegionReady final.toMachineState range.base range.words ∧
+      ScratchValueRelOn range layout
+        (Locals.Source.Store.insert store writeName value)
+        final.toMachineState
+        (fun name => covered name ∨ name = writeName) := by
+  have hStartEq :
+      ({ target with stack := value :: stackPrefix } : EVMState) =
+        target := by
+    cases target
+    simpa using hStack.symm
+  have hSlot : writeSlot < range.words :=
+    hLayout.scratch_binding hWriteBinding
+  rcases run_spillStoreTopCode_shared target stackPrefix
+      (range.word writeSlot) value with
+    ⟨final, hRun, hFinalStack, hMachine, hSharedRun⟩
+  have hRunTarget :
+      Structured.Code.run (spillStoreTopCode (range.word writeSlot)) target =
+        .ok final := by
+    simpa [hStartEq] using hRun
+  have hSharedStored :
+      SharedStateEqOutsideScratch range sourceShared
+        ({ target with
+          toMachineState := target.toMachineState.mstore
+            (range.word writeSlot) value } : EVMState).toSharedState :=
+    SharedStateEqOutsideScratch.mstore_target_scratch_slot
+      hSpec hWordBytes hShared hReady hSlot
+  have hReadyStored :
+      ScratchRegionReady
+        (target.toMachineState.mstore (range.word writeSlot) value)
+        range.base range.words := by
+    simpa [ScratchRange.word_eq_scratchRegionWord] using
+      ScratchRegionReady.mstore_slot hSpec hWordBytes hReady hSlot
+  have hRelStored :
+      ScratchValueRelOn range layout
+        (Locals.Source.Store.insert store writeName value)
+        (target.toMachineState.mstore (range.word writeSlot) value)
+        (fun name => covered name ∨ name = writeName) :=
+    ScratchValueRelOn.mstore_insert_add hSpec hWordBytes hLayout hReady
+      hRel hWriteBinding
+  exact
+    ⟨final, hRunTarget, hFinalStack,
+      by
+        rw [hSharedRun]
+        exact hSharedStored,
+      by
+        rw [hMachine]
+        exact hReadyStored,
+      by
+        rw [hMachine]
+        exact hRelStored⟩
+
+theorem run_spillLoadCode_scratch_prefix
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {source : Source.State} {target : EVMState}
+    {name : Name} {slot : Nat} {stackPrefix : List Word}
+    (hRel : SpillStackPrefixRel range sourceScope stackLayout layout
+      source stackPrefix target)
+    (hBinding :
+      (name, SpillLayout.LocalLocation.scratch slot) ∈ layout) :
+    ∃ value final,
+      source.vars name = some value ∧
+        Structured.Code.run (spillLoadCode (range.word slot)) target =
+          .ok final ∧
+        SpillStackPrefixRel range sourceScope stackLayout layout
+          source (value :: stackPrefix) final := by
+  rcases hRel with
+    ⟨hShared, hReady, hLayout, baseStack, hStack, hValues⟩
+  have hSlot : slot < range.words :=
+    hLayout.scratch_binding hBinding
+  rcases
+      SpillLayout.ValueRel.scratch_binding hValues hBinding with
+    ⟨value, hStoreValue, hMloadValue⟩
+  rcases run_spillLoadCode_shared target (range.word slot) with
+    ⟨final, hRun, hFinalStack, hMachine, hSharedRun⟩
+  have hReserved :
+      ScratchWordReserved target.toMachineState (range.word slot) := by
+    simpa [ScratchRange.word_eq_scratchRegionWord] using
+      ScratchRegionReady.scratchWordReserved hReady hSlot
+  have hMloadMachine :
+      (target.toMachineState.mload (range.word slot)).2 =
+        target.toMachineState :=
+    mload_machine_eq hReserved
+  refine ⟨value, final, hStoreValue, hRun, ?_⟩
+  refine ⟨?_, ?_, hLayout, baseStack, ?_, ?_⟩
+  · rw [hSharedRun, hMloadMachine]
+    exact hShared
+  · rw [hMachine, hMloadMachine]
+    exact hReady
+  · rw [hFinalStack, hMloadValue, hStack]
+    simp [List.cons_append]
+  · rw [hMachine, hMloadMachine]
+    exact hValues
+
+theorem saveScratchCode_sound :
+    ∀ {entries : List (Name × Nat)} {range : ScratchRange}
+      {sourceScope stackLayout : List Name}
+      {layout : SpillLayout.Layout}
+      {source : Source.State} {target : EVMState}
+      {stackPrefix : List Word},
+      (∀ {name slot}, (name, slot) ∈ entries →
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ layout) →
+      SpillStackPrefixRel range sourceScope stackLayout layout
+        source stackPrefix target →
+      ∃ values final,
+        SavedEntriesRel entries source.vars values ∧
+          Structured.Code.run (saveScratchCode range entries) target =
+            .ok final ∧
+          SpillStackPrefixRel range sourceScope stackLayout layout
+            source (values.reverse ++ stackPrefix) final
+  | [], range, sourceScope, stackLayout, layout, source, target,
+      stackPrefix, _hEntries, hRel => by
+      exact
+        ⟨[], target, trivial, by simp [saveScratchCode, Structured.Code.run],
+          by simpa using hRel⟩
+  | (name, slot) :: rest, range, sourceScope, stackLayout, layout, source,
+      target, stackPrefix, hEntries, hRel => by
+      have hHeadBinding :
+          (name, SpillLayout.LocalLocation.scratch slot) ∈ layout :=
+        hEntries (by simp)
+      rcases
+          run_spillLoadCode_scratch_prefix hRel hHeadBinding with
+        ⟨value, afterHead, hValue, hHeadRun, hHeadRel⟩
+      have hTailEntries :
+          ∀ {tailName tailSlot},
+            (tailName, tailSlot) ∈ rest →
+              (tailName, SpillLayout.LocalLocation.scratch tailSlot) ∈
+                layout := by
+        intro tailName tailSlot hMem
+        exact hEntries (by simp [hMem])
+      rcases
+          saveScratchCode_sound
+            (entries := rest) (range := range)
+            (sourceScope := sourceScope) (stackLayout := stackLayout)
+            (layout := layout) (source := source) (target := afterHead)
+            (stackPrefix := value :: stackPrefix)
+            hTailEntries hHeadRel with
+        ⟨tailValues, final, hTailSaved, hTailRun, hFinalRel⟩
+      refine
+        ⟨value :: tailValues, final, ⟨hValue, hTailSaved⟩, ?_, ?_⟩
+      · simp [saveScratchCode]
+        rw [Locals.Direct.code_run_append]
+        simp [hHeadRun, hTailRun]
+      · simpa [List.append_assoc] using hFinalRel
+
+theorem storeReturnedTargetsCode?_lookup_scratch
+    {range : ScratchRange} {layout : SpillLayout.Layout}
+    {targets : List Name} {code : Structured.Code}
+    (hStore : storeReturnedTargetsCode? range layout targets = some code) :
+    ∀ target, target ∈ targets →
+      ∃ slot, SpillLayout.lookup? target layout = some (.scratch slot) := by
+  revert code
+  induction targets with
+  | nil =>
+      intro code _hStore target hMem
+      cases hMem
+  | cons head tail ih =>
+      intro code hStore target hMem
+      unfold storeReturnedTargetsCode? at hStore
+      cases hLookup : SpillLayout.lookup? head layout with
+      | none =>
+          simp [hLookup] at hStore
+      | some location =>
+          cases location with
+          | stack depth =>
+              simp [hLookup] at hStore
+          | scratch slot =>
+              cases hTail : storeReturnedTargetsCode? range layout tail with
+              | none =>
+                  simp [hLookup, hTail] at hStore
+              | some tailCode =>
+                  simp [hLookup, hTail] at hStore
+                  rcases hMem with hHead | hTailMem
+                  · exact ⟨slot, hLookup⟩
+                  · exact ih hTail target (by assumption)
+
+theorem storeReturnedTargetsCode?_partial_sound
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec) :
+    ∀ {range : ScratchRange}
+      {sourceScope stackLayout : List Name}
+      {layout : SpillLayout.Layout}
+      {values : List Word} {targetNames : List Name}
+      {code : Structured.Code}
+      {store returnStore : Source.Store}
+      {sourceShared : EvmYul.SharedState .EVM}
+      {target : EVMState}
+      {stackPrefix : List Word}
+      {covered : Name → Prop},
+      storeReturnedTargetsCode? range layout targetNames = some code →
+      Source.Store.assignMany targetNames values store = some returnStore →
+      SharedStateEqOutsideScratch range sourceShared target.toSharedState →
+      ScratchRegionReady target.toMachineState range.base range.words →
+      SpillLayout.WellFormed range sourceScope stackLayout layout →
+      ScratchValueRelOn range layout store target.toMachineState covered →
+      target.stack = values ++ stackPrefix →
+      ∃ final,
+        Structured.Code.run code target = .ok final ∧
+        final.stack = stackPrefix ∧
+        SharedStateEqOutsideScratch range sourceShared final.toSharedState ∧
+        ScratchRegionReady final.toMachineState range.base range.words ∧
+        ScratchValueRelOn range layout returnStore final.toMachineState
+          (fun name => covered name ∨ name ∈ targetNames)
+  | range, sourceScope, stackLayout, layout, values, [], code, store,
+      returnStore, sourceShared, target, stackPrefix, covered,
+      hStoreCode, hAssign, hShared, hReady, _hLayout, hRel, hStack => by
+      simp [storeReturnedTargetsCode?] at hStoreCode
+      cases hStoreCode
+      cases values with
+      | nil =>
+          simp [Source.Store.assignMany] at hAssign
+          cases hAssign
+          exact
+            ⟨target, by simp [Structured.Code.run],
+              by simpa using hStack, hShared, hReady,
+              by
+                apply ScratchValueRelOn.weaken hRel
+                intro name hCovered
+                simpa using hCovered⟩
+      | cons value rest =>
+          simp [Source.Store.assignMany] at hAssign
+  | range, sourceScope, stackLayout, layout, values, targetName :: restNames,
+      code, store, returnStore, sourceShared, target, stackPrefix, covered,
+      hStoreCode, hAssign, hShared, hReady, hLayout, hRel, hStack => by
+      unfold storeReturnedTargetsCode? at hStoreCode
+      cases hLookup : SpillLayout.lookup? targetName layout with
+      | none =>
+          simp [hLookup] at hStoreCode
+      | some location =>
+          cases location with
+          | stack depth =>
+              simp [hLookup] at hStoreCode
+          | scratch slot =>
+              cases hTailCode :
+                  storeReturnedTargetsCode? range layout restNames with
+              | none =>
+                  simp [hLookup, hTailCode] at hStoreCode
+              | some tailCode =>
+                  simp [hLookup, hTailCode] at hStoreCode
+                  cases hStoreCode
+                  cases values with
+                  | nil =>
+                      simp [Source.Store.assignMany] at hAssign
+                  | cons value valueRest =>
+                      unfold Source.Store.assignMany at hAssign
+                      by_cases hContains : store.contains targetName
+                      · simp [hContains] at hAssign
+                        have hBinding :
+                            (targetName,
+                                SpillLayout.LocalLocation.scratch slot) ∈
+                              layout :=
+                          SpillLayout.lookup?_sound hLookup
+                        have hStackHead :
+                            target.stack =
+                              value :: (valueRest ++ stackPrefix) := by
+                          simpa [List.cons_append] using hStack
+                        rcases
+                            run_spillStoreTopCode_scratch_partial_insert_add
+                              hSpec hWordBytes hShared hReady hLayout hRel
+                              hBinding hStackHead with
+                          ⟨afterHead, hHeadRun, hHeadStack, hHeadShared,
+                            hHeadReady, hHeadRel⟩
+                        rcases
+                            storeReturnedTargetsCode?_partial_sound
+                              hSpec hWordBytes
+                              (range := range) (sourceScope := sourceScope)
+                              (stackLayout := stackLayout) (layout := layout)
+                              (values := valueRest)
+                              (targetNames := restNames) (code := tailCode)
+                              (store :=
+                                Locals.Source.Store.insert store targetName
+                                  value)
+                              (returnStore := returnStore)
+                              (sourceShared := sourceShared)
+                              (target := afterHead)
+                              (stackPrefix := stackPrefix)
+                              (covered :=
+                                fun name => covered name ∨ name = targetName)
+                              hTailCode hAssign hHeadShared hHeadReady hLayout
+                              hHeadRel hHeadStack with
+                          ⟨final, hTailRun, hFinalStack, hFinalShared,
+                            hFinalReady, hFinalRelRaw⟩
+                        have hFinalRel :
+                            ScratchValueRelOn range layout returnStore
+                              final.toMachineState
+                              (fun name =>
+                                covered name ∨
+                                  name ∈ targetName :: restNames) := by
+                          apply ScratchValueRelOn.weaken hFinalRelRaw
+                          intro name hCovered
+                          rcases hCovered with hCoveredOld | hMem
+                          · exact Or.inl (Or.inl hCoveredOld)
+                          · rw [List.mem_cons] at hMem
+                            rcases hMem with hEq | hTailMem
+                            · exact Or.inl (Or.inr hEq)
+                            · exact Or.inr hTailMem
+                        exact
+                          ⟨final, by
+                            rw [Locals.Direct.code_run_append]
+                            simp [hHeadRun, hTailRun],
+                            hFinalStack, hFinalShared, hFinalReady,
+                            hFinalRel⟩
+                      · simp [hContains] at hAssign
+
+theorem restoreScratchCode_partial_sound
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec) :
+    ∀ {entries : List (Name × Nat)} {range : ScratchRange}
+      {sourceScope stackLayout : List Name}
+      {layout : SpillLayout.Layout}
+      {store : Source.Store} {target : EVMState}
+      {sourceShared : EvmYul.SharedState .EVM}
+      {stackPrefix values : List Word}
+      {covered : Name → Prop},
+      (∀ {name slot}, (name, slot) ∈ entries →
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ layout) →
+      SavedEntriesRel entries store values →
+      SharedStateEqOutsideScratch range sourceShared target.toSharedState →
+      ScratchRegionReady target.toMachineState range.base range.words →
+      SpillLayout.WellFormed range sourceScope stackLayout layout →
+      ScratchValueRelOn range layout store target.toMachineState covered →
+      target.stack = values.reverse ++ stackPrefix →
+      ∃ final,
+        Structured.Code.run (restoreScratchCode range entries) target =
+          .ok final ∧
+        final.stack = stackPrefix ∧
+        SharedStateEqOutsideScratch range sourceShared final.toSharedState ∧
+        ScratchRegionReady final.toMachineState range.base range.words ∧
+        ScratchValueRelOn range layout store final.toMachineState
+          (fun name => covered name ∨ EntryNameCovered entries name)
+  | [], range, sourceScope, stackLayout, layout, store, target, sourceShared,
+      stackPrefix, [], covered, _hEntries, _hSaved, hShared, hReady,
+      _hLayout, hRel, hStack => by
+      exact
+        ⟨target, by simp [restoreScratchCode, Structured.Code.run],
+          by simpa using hStack, hShared, hReady,
+          by
+            apply ScratchValueRelOn.weaken hRel
+            intro name hCovered
+            simpa [EntryNameCovered] using hCovered⟩
+  | [], range, sourceScope, stackLayout, layout, store, target, sourceShared,
+      stackPrefix, _value :: _values, covered, _hEntries, hSaved, _hShared,
+      _hReady, _hLayout, _hRel, _hStack => by
+      cases hSaved
+  | (name, slot) :: rest, range, sourceScope, stackLayout, layout, store,
+      target, sourceShared, stackPrefix, [], covered, _hEntries, hSaved,
+      _hShared, _hReady, _hLayout, _hRel, _hStack => by
+      cases hSaved
+  | (name, slot) :: rest, range, sourceScope, stackLayout, layout, store,
+      target, sourceShared, stackPrefix, value :: values, covered, hEntries,
+      hSaved, hShared, hReady, hLayout, hRel, hStack => by
+      have hHeadValue : store name = some value := hSaved.1
+      have hTailSaved : SavedEntriesRel rest store values := hSaved.2
+      have hTailEntries :
+          ∀ {tailName tailSlot},
+            (tailName, tailSlot) ∈ rest →
+              (tailName, SpillLayout.LocalLocation.scratch tailSlot) ∈
+                layout := by
+        intro tailName tailSlot hMem
+        exact hEntries (by simp [hMem])
+      have hStackTail :
+          target.stack = values.reverse ++ value :: stackPrefix := by
+        simpa [List.append_assoc] using hStack
+      rcases
+          restoreScratchCode_partial_sound hSpec hWordBytes
+            (entries := rest) (range := range)
+            (sourceScope := sourceScope) (stackLayout := stackLayout)
+            (layout := layout) (store := store) (target := target)
+            (sourceShared := sourceShared)
+            (stackPrefix := value :: stackPrefix) (values := values)
+            (covered := covered)
+            hTailEntries hTailSaved hShared hReady hLayout hRel hStackTail with
+        ⟨afterTail, hTailRun, hTailStack, hTailShared, hTailReady,
+          hTailRel⟩
+      have hHeadBinding :
+          (name, SpillLayout.LocalLocation.scratch slot) ∈ layout :=
+        hEntries (by simp)
+      rcases
+          run_spillStoreTopCode_scratch_partial_insert_add hSpec hWordBytes
+            hTailShared hTailReady hLayout hTailRel hHeadBinding hTailStack with
+        ⟨final, hHeadRun, hFinalStack, hFinalShared, hFinalReady,
+          hFinalRelRaw⟩
+      have hStoreEq :
+          Locals.Source.Store.insert store name value = store :=
+        source_store_insert_eq_of_apply hHeadValue
+      have hFinalRelRewritten :
+          ScratchValueRelOn range layout store final.toMachineState
+            (fun coveredName =>
+              (covered coveredName ∨ EntryNameCovered rest coveredName) ∨
+                coveredName = name) := by
+        intro coveredName coveredSlot hBinding hCovered
+        simpa [hStoreEq] using hFinalRelRaw hBinding hCovered
+      have hFinalRel :
+          ScratchValueRelOn range layout store final.toMachineState
+            (fun coveredName =>
+              covered coveredName ∨
+                EntryNameCovered ((name, slot) :: rest) coveredName) := by
+        apply ScratchValueRelOn.weaken hFinalRelRewritten
+        intro coveredName hCovered
+        rcases hCovered with hCoveredOld | hEntry
+        · exact Or.inl (Or.inl hCoveredOld)
+        · rcases hEntry with ⟨entrySlot, hMem⟩
+          rw [List.mem_cons] at hMem
+          rcases hMem with hHead | hTail
+          · cases hHead
+            exact Or.inr rfl
+          · exact Or.inl (Or.inr ⟨entrySlot, hTail⟩)
+      exact
+        ⟨final, by
+          simp [restoreScratchCode]
+          rw [Locals.Direct.code_run_append]
+          simp [hTailRun, hHeadRun],
+          hFinalStack, hFinalShared, hFinalReady, hFinalRel⟩
+
+theorem storeReturnedTargetsCode?_restoreScratchCode_sound
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope : List Name}
+    {layout : SpillLayout.Layout}
+    {returnValues savedValues : List Word}
+    {targetNames : List Name}
+    {saved : List (Name × Nat)}
+    {storeCode : Structured.Code}
+    {source : Source.State} {target : EVMState}
+    {returnStore : Source.Store}
+    {baseStack : EvmYul.Stack Word}
+    (hStoreCode :
+      storeReturnedTargetsCode? range layout targetNames.reverse =
+        some storeCode)
+    (hAssign :
+      Source.Store.assignMany targetNames returnValues source.vars =
+        some returnStore)
+    (hTargetsNodup : targetNames.Nodup)
+    (hSavedEq : saved = callerSaveEntries targetNames layout)
+    (hSavedRel : SavedEntriesRel saved source.vars savedValues)
+    (hShared :
+      SharedStateEqOutsideScratch range source.shared target.toSharedState)
+    (hReady :
+      ScratchRegionReady target.toMachineState range.base range.words)
+    (hLayout :
+      SpillLayout.WellFormed range sourceScope [] layout)
+    (hStack :
+      target.stack = returnValues.reverse ++ savedValues.reverse ++ baseStack) :
+    ∃ final,
+      Structured.Code.run
+          (storeCode ++ restoreScratchCode range saved) target =
+        .ok final ∧
+      SpillStateRel range sourceScope [] layout
+        (source.withVars returnStore) final := by
+  have hAssignReverse :
+      Source.Store.assignMany targetNames.reverse returnValues.reverse
+          source.vars =
+        some returnStore :=
+    Source.Store.assignMany_reverse_of_run hAssign hTargetsNodup
+  have hStackStore :
+      target.stack =
+        returnValues.reverse ++ (savedValues.reverse ++ baseStack) := by
+    simpa [List.append_assoc] using hStack
+  rcases
+      storeReturnedTargetsCode?_partial_sound hSpec hWordBytes
+        (range := range) (sourceScope := sourceScope)
+        (stackLayout := []) (layout := layout)
+        (values := returnValues.reverse)
+        (targetNames := targetNames.reverse) (code := storeCode)
+        (store := source.vars) (returnStore := returnStore)
+        (sourceShared := source.shared) (target := target)
+        (stackPrefix := savedValues.reverse ++ baseStack)
+        (covered := fun _ => False)
+        hStoreCode hAssignReverse hShared hReady hLayout
+        ScratchValueRelOn.of_false hStackStore with
+    ⟨afterStore, hStoreRun, hAfterStoreStack, hAfterStoreShared,
+      hAfterStoreReady, hAfterStoreRel⟩
+  have hSavedRelReturn :
+      SavedEntriesRel saved returnStore savedValues := by
+    apply SavedEntriesRel.transfer_of_apply_eq hSavedRel
+    intro name slot hMem
+    have hCallerMem :
+        (name, slot) ∈ callerSaveEntries targetNames layout := by
+      simpa [hSavedEq] using hMem
+    rcases callerSaveEntries_sound hCallerMem with
+      ⟨_hBinding, hNotTarget⟩
+    exact assignMany_apply_of_not_mem hAssign hNotTarget
+  rcases
+      restoreScratchCode_partial_sound hSpec hWordBytes
+        (entries := saved) (range := range)
+        (sourceScope := sourceScope) (stackLayout := [])
+        (layout := layout) (store := returnStore)
+        (target := afterStore) (sourceShared := source.shared)
+        (stackPrefix := baseStack) (values := savedValues)
+        (covered := fun name => False ∨ name ∈ targetNames.reverse)
+        (by
+          intro name slot hMem
+          have hCallerMem :
+              (name, slot) ∈ callerSaveEntries targetNames layout := by
+            simpa [hSavedEq] using hMem
+          exact (callerSaveEntries_sound hCallerMem).1)
+        hSavedRelReturn hAfterStoreShared hAfterStoreReady hLayout
+        hAfterStoreRel hAfterStoreStack with
+    ⟨final, hRestoreRun, hFinalStack, hFinalShared, hFinalReady,
+      hFinalScratchRel⟩
+  have hCoveredAll :
+      ∀ {name slot},
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ layout →
+          (False ∨ name ∈ targetNames.reverse) ∨
+            EntryNameCovered saved name := by
+    intro name slot hBinding
+    by_cases hTarget : name ∈ targetNames
+    · exact Or.inl (Or.inr (List.mem_reverse.mpr hTarget))
+    · have hSavedMem : (name, slot) ∈ saved := by
+        rw [hSavedEq]
+        exact callerSaveEntries_complete hBinding hTarget
+      exact Or.inr ⟨slot, hSavedMem⟩
+  have hValueRel :
+      SpillLayout.ValueRel range returnStore final.toMachineState
+        baseStack layout :=
+    ScratchValueRelOn.to_valueRel_stackLayout_nil hLayout hFinalScratchRel
+      hCoveredAll
+  exact
+    ⟨final, by
+      rw [Locals.Direct.code_run_append]
+      simp [hStoreRun, hRestoreRun],
+      { shared := by
+          simpa [Locals.Source.State.withVars] using hFinalShared
+        scratchReady := hFinalReady
+        layoutWellFormed := hLayout
+        values := by
+          rw [hFinalStack]
+          simpa [Locals.Source.State.withVars] using hValueRel }⟩
+
+theorem storeReturnedTargetsCode?_restoreScratchCode_steps_sound
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope : List Name}
+    {layout : SpillLayout.Layout}
+    {returnValues savedValues : List Word}
+    {targetNames : List Name}
+    {saved : List (Name × Nat)}
+    {storeCode : Structured.Code}
+    {source : Source.State} {target : EVMState}
+    {returnStore : Source.Store}
+    {baseStack : EvmYul.Stack Word}
+    (hStoreCode :
+      storeReturnedTargetsCode? range layout targetNames.reverse =
+        some storeCode)
+    (hAssign :
+      Source.Store.assignMany targetNames returnValues source.vars =
+        some returnStore)
+    (hTargetsNodup : targetNames.Nodup)
+    (hSavedEq : saved = callerSaveEntries targetNames layout)
+    (hSavedRel : SavedEntriesRel saved source.vars savedValues)
+    (hShared :
+      SharedStateEqOutsideScratch range source.shared target.toSharedState)
+    (hReady :
+      ScratchRegionReady target.toMachineState range.base range.words)
+    (hLayout :
+      SpillLayout.WellFormed range sourceScope [] layout)
+    (hStack :
+      target.stack = returnValues.reverse ++ savedValues.reverse ++ baseStack) :
+    ∃ afterStore final,
+      Structured.Code.run storeCode target = .ok afterStore ∧
+      Structured.Code.run (restoreScratchCode range saved) afterStore =
+        .ok final ∧
+      SpillStateRel range sourceScope [] layout
+        (source.withVars returnStore) final := by
+  have hAssignReverse :
+      Source.Store.assignMany targetNames.reverse returnValues.reverse
+          source.vars =
+        some returnStore :=
+    Source.Store.assignMany_reverse_of_run hAssign hTargetsNodup
+  have hStackStore :
+      target.stack =
+        returnValues.reverse ++ (savedValues.reverse ++ baseStack) := by
+    simpa [List.append_assoc] using hStack
+  rcases
+      storeReturnedTargetsCode?_partial_sound hSpec hWordBytes
+        (range := range) (sourceScope := sourceScope)
+        (stackLayout := []) (layout := layout)
+        (values := returnValues.reverse)
+        (targetNames := targetNames.reverse) (code := storeCode)
+        (store := source.vars) (returnStore := returnStore)
+        (sourceShared := source.shared) (target := target)
+        (stackPrefix := savedValues.reverse ++ baseStack)
+        (covered := fun _ => False)
+        hStoreCode hAssignReverse hShared hReady hLayout
+        ScratchValueRelOn.of_false hStackStore with
+    ⟨afterStore, hStoreRun, hAfterStoreStack, hAfterStoreShared,
+      hAfterStoreReady, hAfterStoreRel⟩
+  have hSavedRelReturn :
+      SavedEntriesRel saved returnStore savedValues := by
+    apply SavedEntriesRel.transfer_of_apply_eq hSavedRel
+    intro name slot hMem
+    have hCallerMem :
+        (name, slot) ∈ callerSaveEntries targetNames layout := by
+      simpa [hSavedEq] using hMem
+    rcases callerSaveEntries_sound hCallerMem with
+      ⟨_hBinding, hNotTarget⟩
+    exact assignMany_apply_of_not_mem hAssign hNotTarget
+  rcases
+      restoreScratchCode_partial_sound hSpec hWordBytes
+        (entries := saved) (range := range)
+        (sourceScope := sourceScope) (stackLayout := [])
+        (layout := layout) (store := returnStore)
+        (target := afterStore) (sourceShared := source.shared)
+        (stackPrefix := baseStack) (values := savedValues)
+        (covered := fun name => False ∨ name ∈ targetNames.reverse)
+        (by
+          intro name slot hMem
+          have hCallerMem :
+              (name, slot) ∈ callerSaveEntries targetNames layout := by
+            simpa [hSavedEq] using hMem
+          exact (callerSaveEntries_sound hCallerMem).1)
+        hSavedRelReturn hAfterStoreShared hAfterStoreReady hLayout
+        hAfterStoreRel hAfterStoreStack with
+    ⟨final, hRestoreRun, hFinalStack, hFinalShared, hFinalReady,
+      hFinalScratchRel⟩
+  have hCoveredAll :
+      ∀ {name slot},
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ layout →
+          (False ∨ name ∈ targetNames.reverse) ∨
+            EntryNameCovered saved name := by
+    intro name slot hBinding
+    by_cases hTarget : name ∈ targetNames
+    · exact Or.inl (Or.inr (List.mem_reverse.mpr hTarget))
+    · have hSavedMem : (name, slot) ∈ saved := by
+        rw [hSavedEq]
+        exact callerSaveEntries_complete hBinding hTarget
+      exact Or.inr ⟨slot, hSavedMem⟩
+  have hValueRel :
+      SpillLayout.ValueRel range returnStore final.toMachineState
+        baseStack layout :=
+    ScratchValueRelOn.to_valueRel_stackLayout_nil hLayout hFinalScratchRel
+      hCoveredAll
+  exact
+    ⟨afterStore, final, hStoreRun, hRestoreRun,
+      { shared := by
+          simpa [Locals.Source.State.withVars] using hFinalShared
+        scratchReady := hFinalReady
+        layoutWellFormed := hLayout
+        values := by
+          rw [hFinalStack]
+          simpa [Locals.Source.State.withVars] using hValueRel }⟩
+
+theorem storeReturnedTargetsCode?_restoreScratchCode_steps_sound_exact_stack
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope : List Name}
+    {layout : SpillLayout.Layout}
+    {returnValues savedValues : List Word}
+    {targetNames : List Name}
+    {saved : List (Name × Nat)}
+    {storeCode : Structured.Code}
+    {source : Source.State} {target : EVMState}
+    {returnStore : Source.Store}
+    {baseStack : EvmYul.Stack Word}
+    (hStoreCode :
+      storeReturnedTargetsCode? range layout targetNames.reverse =
+        some storeCode)
+    (hAssign :
+      Source.Store.assignMany targetNames returnValues source.vars =
+        some returnStore)
+    (hTargetsNodup : targetNames.Nodup)
+    (hSavedEq : saved = callerSaveEntries targetNames layout)
+    (hSavedRel : SavedEntriesRel saved source.vars savedValues)
+    (hShared :
+      SharedStateEqOutsideScratch range source.shared target.toSharedState)
+    (hReady :
+      ScratchRegionReady target.toMachineState range.base range.words)
+    (hLayout :
+      SpillLayout.WellFormed range sourceScope [] layout)
+    (hStack :
+      target.stack = returnValues.reverse ++ savedValues.reverse ++ baseStack) :
+    ∃ afterStore final,
+      Structured.Code.run storeCode target = .ok afterStore ∧
+      afterStore.stack = savedValues.reverse ++ baseStack ∧
+      Structured.Code.run (restoreScratchCode range saved) afterStore =
+        .ok final ∧
+      final.stack = baseStack ∧
+      SpillStateRel range sourceScope [] layout
+        (source.withVars returnStore) final := by
+  have hAssignReverse :
+      Source.Store.assignMany targetNames.reverse returnValues.reverse
+          source.vars =
+        some returnStore :=
+    Source.Store.assignMany_reverse_of_run hAssign hTargetsNodup
+  have hStackStore :
+      target.stack =
+        returnValues.reverse ++ (savedValues.reverse ++ baseStack) := by
+    simpa [List.append_assoc] using hStack
+  rcases
+      storeReturnedTargetsCode?_partial_sound hSpec hWordBytes
+        (range := range) (sourceScope := sourceScope)
+        (stackLayout := []) (layout := layout)
+        (values := returnValues.reverse)
+        (targetNames := targetNames.reverse) (code := storeCode)
+        (store := source.vars) (returnStore := returnStore)
+        (sourceShared := source.shared) (target := target)
+        (stackPrefix := savedValues.reverse ++ baseStack)
+        (covered := fun _ => False)
+        hStoreCode hAssignReverse hShared hReady hLayout
+        ScratchValueRelOn.of_false hStackStore with
+    ⟨afterStore, hStoreRun, hAfterStoreStack, hAfterStoreShared,
+      hAfterStoreReady, hAfterStoreRel⟩
+  have hSavedRelReturn :
+      SavedEntriesRel saved returnStore savedValues := by
+    apply SavedEntriesRel.transfer_of_apply_eq hSavedRel
+    intro name slot hMem
+    have hCallerMem :
+        (name, slot) ∈ callerSaveEntries targetNames layout := by
+      simpa [hSavedEq] using hMem
+    rcases callerSaveEntries_sound hCallerMem with
+      ⟨_hBinding, hNotTarget⟩
+    exact assignMany_apply_of_not_mem hAssign hNotTarget
+  rcases
+      restoreScratchCode_partial_sound hSpec hWordBytes
+        (entries := saved) (range := range)
+        (sourceScope := sourceScope) (stackLayout := [])
+        (layout := layout) (store := returnStore)
+        (target := afterStore) (sourceShared := source.shared)
+        (stackPrefix := baseStack) (values := savedValues)
+        (covered := fun name => False ∨ name ∈ targetNames.reverse)
+        (by
+          intro name slot hMem
+          have hCallerMem :
+              (name, slot) ∈ callerSaveEntries targetNames layout := by
+            simpa [hSavedEq] using hMem
+          exact (callerSaveEntries_sound hCallerMem).1)
+        hSavedRelReturn hAfterStoreShared hAfterStoreReady hLayout
+        hAfterStoreRel hAfterStoreStack with
+    ⟨final, hRestoreRun, hFinalStack, hFinalShared, hFinalReady,
+      hFinalScratchRel⟩
+  have hCoveredAll :
+      ∀ {name slot},
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ layout →
+          (False ∨ name ∈ targetNames.reverse) ∨
+            EntryNameCovered saved name := by
+    intro name slot hBinding
+    by_cases hTarget : name ∈ targetNames
+    · exact Or.inl (Or.inr (List.mem_reverse.mpr hTarget))
+    · have hSavedMem : (name, slot) ∈ saved := by
+        rw [hSavedEq]
+        exact callerSaveEntries_complete hBinding hTarget
+      exact Or.inr ⟨slot, hSavedMem⟩
+  have hValueRel :
+      SpillLayout.ValueRel range returnStore final.toMachineState
+        baseStack layout :=
+    ScratchValueRelOn.to_valueRel_stackLayout_nil hLayout hFinalScratchRel
+      hCoveredAll
+  exact
+    ⟨afterStore, final, hStoreRun, hAfterStoreStack, hRestoreRun,
+      hFinalStack,
+      { shared := by
+          simpa [Locals.Source.State.withVars] using hFinalShared
+        scratchReady := hFinalReady
+        layoutWellFormed := hLayout
+        values := by
+          rw [hFinalStack]
+          simpa [Locals.Source.State.withVars] using hValueRel }⟩
+
+theorem run_spillStoreTopCode_scratch_assign_prefix
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {source : Source.State} {target : EVMState}
+    {name : Name} {slot : Nat} {value : Word}
+    {stackPrefix : List Word}
+    (hRel : SpillStackPrefixRel range sourceScope stackLayout layout
+      source (value :: stackPrefix) target)
+    (hBinding :
+      (name, SpillLayout.LocalLocation.scratch slot) ∈ layout) :
+    ∃ final,
+      Structured.Code.run (spillStoreTopCode (range.word slot)) target =
+        .ok final ∧
+      SpillStackPrefixRel range sourceScope stackLayout layout
+        (source.withVars (Locals.Source.Store.insert source.vars name value))
+        stackPrefix final := by
+  rcases hRel with
+    ⟨hShared, hReady, hLayout, baseStack, hStack, hValues⟩
+  let restStack : EvmYul.Stack Word := stackPrefix ++ baseStack
+  have hStackTop : target.stack = value :: restStack := by
+    simpa [restStack, List.cons_append] using hStack
+  have hStartEq :
+      ({ target with stack := value :: restStack } : EVMState) = target := by
+    cases target
+    simpa using hStackTop.symm
+  have hSlot : slot < range.words :=
+    hLayout.scratch_binding hBinding
+  rcases run_spillStoreTopCode_shared target restStack
+      (range.word slot) value with
+    ⟨final, hRun, hFinalStack, hMachine, hSharedRun⟩
+  have hRunTarget :
+      Structured.Code.run (spillStoreTopCode (range.word slot)) target =
+        .ok final := by
+    simpa [hStartEq] using hRun
+  refine ⟨final, hRunTarget, ?_⟩
+  have hSharedStored :
+      SharedStateEqOutsideScratch range source.shared
+        ({ target with
+          toMachineState := target.toMachineState.mstore
+            (range.word slot) value } : EVMState).toSharedState :=
+    SharedStateEqOutsideScratch.mstore_target_scratch_slot
+      hSpec hWordBytes hShared hReady hSlot
+  have hReadyStored :
+      ScratchRegionReady
+        (target.toMachineState.mstore (range.word slot) value)
+        range.base range.words := by
+    simpa [ScratchRange.word_eq_scratchRegionWord] using
+      ScratchRegionReady.mstore_slot hSpec hWordBytes hReady hSlot
+  have hValuesStored :
+      SpillLayout.ValueRel range
+        (Locals.Source.Store.insert source.vars name value)
+        (target.toMachineState.mstore (range.word slot) value)
+        baseStack layout :=
+    SpillLayout.ValueRel.mstore_target_scratch_slot_assign
+      hSpec hWordBytes hLayout hValues hReady hBinding
+  exact
+    ⟨ by
+        rw [hSharedRun]
+        simpa [Locals.Source.State.withVars] using hSharedStored
+    , by
+        rw [hMachine]
+        exact hReadyStored
+    , hLayout
+    , baseStack
+    , by
+        simpa [restStack] using hFinalStack
+    , by
+        rw [hMachine]
+        simpa [Locals.Source.State.withVars] using hValuesStored ⟩
+
+theorem restoreScratchCode_sound
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec) :
+    ∀ {entries : List (Name × Nat)} {range : ScratchRange}
+      {sourceScope stackLayout : List Name}
+      {layout : SpillLayout.Layout}
+      {source : Source.State} {target : EVMState}
+      {stackPrefix values : List Word},
+      (∀ {name slot}, (name, slot) ∈ entries →
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ layout) →
+      SavedEntriesRel entries source.vars values →
+      SpillStackPrefixRel range sourceScope stackLayout layout
+        source (values.reverse ++ stackPrefix) target →
+      ∃ final,
+        Structured.Code.run (restoreScratchCode range entries) target =
+          .ok final ∧
+        SpillStackPrefixRel range sourceScope stackLayout layout
+          source stackPrefix final
+  | [], range, sourceScope, stackLayout, layout, source, target, stackPrefix,
+      [], _hEntries, _hSaved, hRel => by
+      exact ⟨target, by simp [restoreScratchCode, Structured.Code.run],
+        by simpa using hRel⟩
+  | [], range, sourceScope, stackLayout, layout, source, target, stackPrefix,
+      _value :: _values, _hEntries, hSaved, _hRel => by
+      cases hSaved
+  | (name, slot) :: rest, range, sourceScope, stackLayout, layout, source,
+      target, stackPrefix, [], _hEntries, hSaved, _hRel => by
+      cases hSaved
+  | (name, slot) :: rest, range, sourceScope, stackLayout, layout, source,
+      target, stackPrefix, value :: values, hEntries, hSaved, hRel => by
+      have hHeadValue : source.vars name = some value := hSaved.1
+      have hTailSaved : SavedEntriesRel rest source.vars values := hSaved.2
+      have hTailEntries :
+          ∀ {tailName tailSlot},
+            (tailName, tailSlot) ∈ rest →
+              (tailName, SpillLayout.LocalLocation.scratch tailSlot) ∈
+                layout := by
+        intro tailName tailSlot hMem
+        exact hEntries (by simp [hMem])
+      have hRelTail :
+          SpillStackPrefixRel range sourceScope stackLayout layout
+            source (values.reverse ++ value :: stackPrefix) target := by
+        simpa [List.append_assoc] using hRel
+      rcases
+          restoreScratchCode_sound hSpec hWordBytes
+            (entries := rest) (range := range)
+            (sourceScope := sourceScope) (stackLayout := stackLayout)
+            (layout := layout) (source := source) (target := target)
+            (stackPrefix := value :: stackPrefix) (values := values)
+            hTailEntries hTailSaved hRelTail with
+        ⟨afterTail, hTailRun, hTailRel⟩
+      have hHeadBinding :
+          (name, SpillLayout.LocalLocation.scratch slot) ∈ layout :=
+        hEntries (by simp)
+      rcases
+          run_spillStoreTopCode_scratch_assign_prefix
+            hSpec hWordBytes hTailRel hHeadBinding with
+        ⟨final, hHeadRun, hFinalRelRaw⟩
+      have hStoreEq :
+          Locals.Source.Store.insert source.vars name value = source.vars :=
+        source_store_insert_eq_of_apply hHeadValue
+      have hFinalRel :
+          SpillStackPrefixRel range sourceScope stackLayout layout
+            source stackPrefix final := by
+        cases source
+        simpa [Locals.Source.State.withVars, hStoreEq] using hFinalRelRaw
+      refine ⟨final, ?_, hFinalRel⟩
+      · simp [restoreScratchCode]
+        rw [Locals.Direct.code_run_append]
+        simp [hTailRun, hHeadRun]
+
+theorem storeReturnedTargetsCode?_sound
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {values : List Word}
+    {code : Structured.Code}
+    {source : Source.State} {target : EVMState}
+    {returnStore : Source.Store}
+    (hStoreCode :
+      storeReturnedTargetsCode? range layout targets = some code)
+    (hAssign :
+      Source.Store.assignMany targets values source.vars = some returnStore)
+    (hRel :
+      SpillStackPrefixRel range sourceScope stackLayout layout
+        source values target) :
+    ∃ final,
+      Structured.Code.run code target = .ok final ∧
+      SpillStateRel range sourceScope stackLayout layout
+        (source.withVars returnStore) final := by
+  revert values code source target returnStore
+  induction targets with
+  | nil =>
+      intro values code source target returnStore hStoreCode hAssign hRel
+      simp [storeReturnedTargetsCode?] at hStoreCode
+      cases hStoreCode
+      cases values with
+      | nil =>
+          simp [Source.Store.assignMany] at hAssign
+          cases hAssign
+          exact
+            ⟨target, by simp [Structured.Code.run],
+              by
+                simpa [Locals.Source.State.withVars] using
+                  SpillStackPrefixRel.to_spillStateRel_nil hRel⟩
+      | cons value rest =>
+          simp [Source.Store.assignMany] at hAssign
+  | cons targetName rest ih =>
+      intro values code source target returnStore hStoreCode hAssign hRel
+      unfold storeReturnedTargetsCode? at hStoreCode
+      cases hLookup : SpillLayout.lookup? targetName layout with
+      | none =>
+          simp [hLookup] at hStoreCode
+      | some location =>
+          cases location with
+          | stack depth =>
+              simp [hLookup] at hStoreCode
+          | scratch slot =>
+              cases hTailCode :
+                  storeReturnedTargetsCode? range layout rest with
+              | none =>
+                  simp [hLookup, hTailCode] at hStoreCode
+              | some tailCode =>
+                  simp [hLookup, hTailCode] at hStoreCode
+                  cases hStoreCode
+                  cases values with
+                  | nil =>
+                      simp [Source.Store.assignMany] at hAssign
+                  | cons value valueRest =>
+                      unfold Source.Store.assignMany at hAssign
+                      by_cases hContains :
+                          source.vars.contains targetName
+                      · simp [hContains] at hAssign
+                        have hBinding :
+                            (targetName,
+                                SpillLayout.LocalLocation.scratch slot) ∈
+                              layout :=
+                          SpillLayout.lookup?_sound hLookup
+                        rcases
+                            run_spillStoreTopCode_scratch_assign_prefix
+                              hSpec hWordBytes hRel hBinding with
+                          ⟨afterHead, hHeadRun, hHeadRel⟩
+                        rcases
+                            ih
+                              (values := valueRest) (code := tailCode)
+                              (source :=
+                                source.withVars
+                                  (Locals.Source.Store.insert source.vars
+                                    targetName value))
+                              (target := afterHead)
+                              (returnStore := returnStore)
+                              hTailCode hAssign hHeadRel with
+                          ⟨final, hTailRun, hTailRel⟩
+                        refine ⟨final, ?_, ?_⟩
+                        · rw [Locals.Direct.code_run_append]
+                          simp [hHeadRun, hTailRun]
+                        · simpa [Locals.Source.State.withVars] using hTailRel
+                      · simp [hContains] at hAssign
+
+theorem expr_eval_of_evalOne
+    {prim : Source.PrimitiveSemantics}
+    {expr : Expr 1} {source sourceAfter : Source.State}
+    {value : Word}
+    (hEvalOne :
+      Source.Expr.evalOne prim expr source = .ok (sourceAfter, value)) :
+    Source.Expr.eval prim expr source = .ok (sourceAfter, [value]) := by
+  unfold Source.Expr.evalOne Locals.Source.Expr.evalOne at hEvalOne
+  cases hEval : Source.Expr.eval prim expr source with
+  | error err =>
+      simp [hEval] at hEvalOne
+  | ok result =>
+      rcases result with ⟨stateAfterEval, values⟩
+      cases values with
+      | nil =>
+          simp [hEval, Source.invalid, Structured.invalid] at hEvalOne
+      | cons head tail =>
+          cases tail with
+          | nil =>
+              simp [hEval] at hEvalOne
+              rcases hEvalOne with ⟨hState, hValue⟩
+              subst stateAfterEval
+              subst head
+              simpa using hEval
+          | cons second rest =>
+              simp [hEval, Structured.invalid] at hEvalOne
+
+@[simp] theorem exprSeq_eval_eq_mpr_congrArg
+    {prim : Source.PrimitiveSemantics}
+    {m n : Nat} (h : m = n) (exprs : Locals.ExprSeq n)
+    (source : Source.State) :
+    Locals.Source.Expr.ExprSeq.eval prim
+        (Eq.mpr (congrArg Locals.ExprSeq h) exprs) source =
+      Locals.Source.Expr.ExprSeq.eval prim exprs source := by
+  subst n
+  rfl
+
+@[simp] theorem exprSeq_eval_eq_mp_congrArg
+    {prim : Source.PrimitiveSemantics}
+    {m n : Nat} (h : m = n) (exprs : Locals.ExprSeq m)
+    (source : Source.State) :
+    Locals.Source.Expr.ExprSeq.eval prim
+        (Eq.mp (congrArg Locals.ExprSeq h) exprs) source =
+      Locals.Source.Expr.ExprSeq.eval prim exprs source := by
+  subst n
+  rfl
+
+@[simp] theorem compileSeqFullCode_eq_mpr_congrArg
+    {range : ScratchRange} {offset : Nat}
+    {layout : SpillLayout.Layout}
+    {m n : Nat} (h : m = n) (exprs : Locals.ExprSeq n) :
+    SpillExpr.compileSeqFullCode? range offset layout
+        (Eq.mpr (congrArg Locals.ExprSeq h) exprs) =
+      SpillExpr.compileSeqFullCode? range offset layout exprs := by
+  subst n
+  rfl
+
+@[simp] theorem compileSeqFullCode_eq_mp_congrArg
+    {range : ScratchRange} {offset : Nat}
+    {layout : SpillLayout.Layout}
+    {m n : Nat} (h : m = n) (exprs : Locals.ExprSeq m) :
+    SpillExpr.compileSeqFullCode? range offset layout
+        (Eq.mp (congrArg Locals.ExprSeq h) exprs) =
+      SpillExpr.compileSeqFullCode? range offset layout exprs := by
+  subst n
+  rfl
+
+@[simp] theorem exprSeqSafe_eq_mpr_congrArg
+    {m n : Nat} (h : m = n) (exprs : Locals.ExprSeq n) :
+    SourceNoMemoryTouch.ExprSeqSafe
+        (Eq.mpr (congrArg Locals.ExprSeq h) exprs) =
+      SourceNoMemoryTouch.ExprSeqSafe exprs := by
+  subst n
+  rfl
+
+@[simp] theorem exprSeqSafe_eq_mp_congrArg
+    {m n : Nat} (h : m = n) (exprs : Locals.ExprSeq m) :
+    SourceNoMemoryTouch.ExprSeqSafe
+        (Eq.mp (congrArg Locals.ExprSeq h) exprs) =
+      SourceNoMemoryTouch.ExprSeqSafe exprs := by
+  subst n
+  rfl
+
+@[simp] theorem exprSeqSafe_cast_congrArg
+    {m n : Nat} (h : m = n) (exprs : Locals.ExprSeq m) :
+    SourceNoMemoryTouch.ExprSeqSafe
+        (cast (congrArg Locals.ExprSeq h) exprs) =
+      SourceNoMemoryTouch.ExprSeqSafe exprs := by
+  subst n
+  rfl
+
+theorem lower_argExprs_cons_exprSeqSafe
+    {arg : Expr 1} {rest : List (Expr 1)} :
+    SourceNoMemoryTouch.ExprSeqSafe (Lower.argExprs (arg :: rest)) ↔
+      SourceNoMemoryTouch.ExprSafe arg ∧
+        SourceNoMemoryTouch.ExprSeqSafe (Lower.argExprs rest) := by
+  conv_lhs =>
+    rw [Lower.argExprs]
+  rw [exprSeqSafe_eq_mpr_congrArg
+    (h := Nat.add_comm rest.length 1)
+    (exprs := Locals.ExprSeq.cons (left := 1) (right := rest.length)
+      arg (Lower.argExprs rest))]
+  simp [SourceNoMemoryTouch.ExprSeqSafe]
+
+theorem argList_eval_lower_argExprs_of_eval
+    {prim : Source.PrimitiveSemantics} :
+    ∀ {args : List (Expr 1)} {source sourceAfter : Source.State}
+      {values : List Word},
+      Source.ArgList.eval prim args source = .ok (sourceAfter, values) →
+        Locals.Source.Expr.ExprSeq.eval prim (Lower.argExprs args) source =
+          .ok (sourceAfter, values)
+  | [], source, sourceAfter, values, hEval => by
+      simp [Source.ArgList.eval] at hEval
+      rcases hEval with ⟨hState, hValues⟩
+      subst sourceAfter
+      subst values
+      simp [Lower.argExprs, Locals.Source.Expr.ExprSeq.eval]
+  | arg :: rest, source, sourceAfter, values, hEval => by
+      unfold Source.ArgList.eval at hEval
+      cases hArg :
+          Source.Expr.evalOne prim arg source with
+      | error err =>
+          simp [hArg] at hEval
+      | ok argResult =>
+          rcases argResult with ⟨sourceAfterArg, value⟩
+          simp [hArg] at hEval
+          cases hRest :
+              Source.ArgList.eval prim rest sourceAfterArg with
+          | error err =>
+              simp [hRest] at hEval
+          | ok restResult =>
+              rcases restResult with ⟨sourceAfterRest, restValues⟩
+              simp [hRest] at hEval
+              rcases hEval with ⟨hState, hValues⟩
+              subst sourceAfter
+              subst values
+              have hArgEval :
+                  Source.Expr.eval prim arg source =
+                    .ok (sourceAfterArg, [value]) :=
+                expr_eval_of_evalOne hArg
+              have hRestEval :
+                  Locals.Source.Expr.ExprSeq.eval prim
+                      (Lower.argExprs rest) sourceAfterArg =
+                    .ok (sourceAfterRest, restValues) :=
+                argList_eval_lower_argExprs_of_eval hRest
+              unfold Lower.argExprs
+              rw [exprSeq_eval_eq_mpr_congrArg (prim := prim)
+                (h := Nat.add_comm rest.length 1)
+                (exprs := Locals.ExprSeq.cons arg (Lower.argExprs rest))]
+              simp [Locals.Source.Expr.ExprSeq.eval, hArgEval, hRestEval]
+
+theorem argList_eval_vars_eq
+    {prim : Source.PrimitiveSemantics}
+    {args : List (Expr 1)} {source sourceAfter : Source.State}
+    {values : List Word}
+    (hEval : Source.ArgList.eval prim args source = .ok (sourceAfter, values)) :
+    sourceAfter.vars = source.vars := by
+  have hLower :
+      Locals.Source.Expr.ExprSeq.eval prim (Lower.argExprs args) source =
+        .ok (sourceAfter, values) :=
+    argList_eval_lower_argExprs_of_eval hEval
+  exact Locals.Source.Expr.evalSeq_vars_eq hLower
+
+theorem argList_eval_privateScratchInvariant :
+    ∀ {args : List (Expr 1)} {source target sourceAfter : Source.State}
+      {values : List Word},
+      SourceNoMemoryTouch.ExprSeqSafe (Lower.argExprs args) →
+      SourceStatePrivateScratchInvariant source target →
+      Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured args
+          source =
+        .ok (sourceAfter, values) →
+      ∃ targetAfter,
+        Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured args
+            target =
+          .ok (targetAfter, values) ∧
+        SourceStatePrivateScratchInvariant sourceAfter targetAfter
+  | [], source, target, sourceAfter, values, _hSafe, hRel, hEval => by
+      simp [Source.ArgList.eval] at hEval
+      rcases hEval with ⟨rfl, rfl⟩
+      exact ⟨target, by simp [Source.ArgList.eval], hRel⟩
+  | arg :: rest, source, target, sourceAfter, values, hSafe, hRel,
+      hEval => by
+      have hSafeParts :
+          SourceNoMemoryTouch.ExprSafe arg ∧
+            SourceNoMemoryTouch.ExprSeqSafe (Lower.argExprs rest) := by
+        exact lower_argExprs_cons_exprSeqSafe.mp hSafe
+      unfold Source.ArgList.eval at hEval
+      cases hArg :
+          Source.Expr.evalOne Locals.Source.PrimitiveSemantics.structured arg
+            source with
+      | error err =>
+          simp [hArg] at hEval
+      | ok argResult =>
+          rcases argResult with ⟨sourceAfterArg, value⟩
+          simp [hArg] at hEval
+          cases hRest :
+              Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+                rest sourceAfterArg with
+          | error err =>
+              simp [hRest] at hEval
+          | ok restResult =>
+              rcases restResult with ⟨sourceAfterRest, restValues⟩
+              simp [hRest] at hEval
+              rcases hEval with ⟨hState, hValues⟩
+              subst sourceAfter
+              subst values
+              rcases
+                  Locals.SourceLowering.PrimitiveSemantics.sourceExpr_evalOne_privateScratchInvariant
+                    hSafeParts.1 hRel hArg with
+                ⟨targetAfterArg, hTargetArg, hArgRel⟩
+              rcases
+                  argList_eval_privateScratchInvariant hSafeParts.2
+                    hArgRel hRest with
+                ⟨targetAfterRest, hTargetRest, hRestRel⟩
+              exact
+                ⟨targetAfterRest,
+                  by simp [Source.ArgList.eval, hTargetArg, hTargetRest],
+                  hRestRel⟩
+
+theorem sourceExpr_evalCondition_privateScratchInvariant
+    {expr : Expr 1} {source source' target : Source.State}
+    {cond : Bool}
+    (hSafe : SourceNoMemoryTouch.ExprSafe expr)
+    (hRel : SourceStatePrivateScratchInvariant source target)
+    (hEval :
+      Source.Expr.evalCondition Locals.Source.PrimitiveSemantics.structured
+          expr source =
+        .ok (source', cond)) :
+    ∃ target',
+      Source.Expr.evalCondition Locals.Source.PrimitiveSemantics.structured
+          expr target =
+        .ok (target', cond) ∧
+      SourceStatePrivateScratchInvariant source' target' := by
+  simp only [Source.Expr.evalCondition, Locals.Source.Expr.evalCondition]
+    at hEval ⊢
+  cases hEvalOne :
+      Source.Expr.evalOne Locals.Source.PrimitiveSemantics.structured expr
+        source with
+  | error err =>
+      simp [Locals.Source.Expr.evalCondition, hEvalOne] at hEval
+  | ok evalResult =>
+      rcases evalResult with ⟨sourceAfter, value⟩
+      simp [Locals.Source.Expr.evalCondition, hEvalOne] at hEval
+      rcases hEval with ⟨rfl, rfl⟩
+      rcases
+          Locals.SourceLowering.PrimitiveSemantics.sourceExpr_evalOne_privateScratchInvariant
+            hSafe hRel hEvalOne with
+        ⟨targetAfter, hTargetEval, hTargetRel⟩
+      exact ⟨targetAfter, by simp [hTargetEval], hTargetRel⟩
+
+namespace SourceOutcomePrivateScratchInvariant
+
+theorem brk {source target : Source.State}
+    (hRel : SourceStatePrivateScratchInvariant source target) :
+    SourceOutcomePrivateScratchInvariant
+      (Source.Outcome.brk source) (Source.Outcome.brk target) where
+  state := hRel
+  mode_eq := rfl
+
+theorem cont {source target : Source.State}
+    (hRel : SourceStatePrivateScratchInvariant source target) :
+    SourceOutcomePrivateScratchInvariant
+      (Source.Outcome.cont source) (Source.Outcome.cont target) where
+  state := hRel
+  mode_eq := rfl
+
+theorem leave {source target : Source.State}
+    (hRel : SourceStatePrivateScratchInvariant source target) :
+    SourceOutcomePrivateScratchInvariant
+      (Source.Outcome.leave source) (Source.Outcome.leave target) where
+  state := hRel
+  mode_eq := rfl
+
+end SourceOutcomePrivateScratchInvariant
+
+theorem returnExprs_eval_of_lookupMany
+    {prim : Source.PrimitiveSemantics}
+    {returns : List Name} {source : Source.State} {values : List Word}
+    (hLookup :
+      Source.Store.lookupMany returns source.vars = some values) :
+    Locals.Source.Expr.ExprSeq.eval prim (Lower.returnExprs returns) source =
+      .ok (source, values) := by
+  induction returns generalizing values source with
+  | nil =>
+      simp [Lower.returnExprs, Source.Store.lookupMany] at hLookup
+      subst values
+      simp [Lower.returnExprs, Locals.Source.Expr.ExprSeq.eval]
+  | cons name rest ih =>
+      unfold Source.Store.lookupMany at hLookup
+      cases hHead : source.vars name with
+      | none =>
+          simp [hHead] at hLookup
+      | some value =>
+          simp [hHead] at hLookup
+          cases hTail : Source.Store.lookupMany rest source.vars with
+          | none =>
+              simp [hTail] at hLookup
+          | some tailValues =>
+              simp [hTail] at hLookup
+              cases hLookup
+              have hTailEval :
+                  Locals.Source.Expr.ExprSeq.eval prim
+                      (Lower.returnExprs rest) source =
+                    .ok (source, tailValues) :=
+                ih hTail
+              unfold Lower.returnExprs
+              change
+                Locals.Source.Expr.ExprSeq.eval prim
+                    (Eq.mp
+                      (congrArg Locals.ExprSeq
+                        (Nat.add_comm 1 rest.length))
+                      (Locals.ExprSeq.cons (left := 1)
+                        (right := rest.length) (.var name)
+                        (Lower.returnExprs rest))) source =
+                  .ok (source, value :: tailValues)
+              rw [exprSeq_eval_eq_mp_congrArg (prim := prim)
+                (h := Nat.add_comm 1 rest.length)
+                (exprs := Locals.ExprSeq.cons (left := 1)
+                  (right := rest.length) (.var name)
+                  (Lower.returnExprs rest))]
+              simp [Locals.Source.Expr.ExprSeq.eval,
+                Locals.Source.Expr.eval, hHead, hTailEval]
+
+def compileReturnCode? (range : ScratchRange)
+    (layout : SpillLayout.Layout) (returns : List Name) :
+    Option Structured.Code := do
+  if SourceNoMemoryTouch.exprSeq? (Lower.returnExprs returns) then
+    SpillExpr.compileSeqFullCode? range 0 layout (Lower.returnExprs returns)
+  else
+    none
+
+theorem compileReturnCode?_eq_some
+    {range : ScratchRange} {layout : SpillLayout.Layout}
+    {returns : List Name} {code : Structured.Code}
+    (hCompile :
+      compileReturnCode? range layout returns = some code) :
+    SourceNoMemoryTouch.ExprSeqSafe (Lower.returnExprs returns) ∧
+      SpillExpr.compileSeqFullCode? range 0 layout
+          (Lower.returnExprs returns) =
+        some code := by
+  unfold compileReturnCode? at hCompile
+  cases hSafe : SourceNoMemoryTouch.exprSeq? (Lower.returnExprs returns)
+  · simp [hSafe] at hCompile
+  · simp [hSafe] at hCompile
+    exact ⟨SourceNoMemoryTouch.exprSeq?_sound hSafe, hCompile⟩
+
+theorem compileReturnCode?_noCallCreate
+    {range : ScratchRange} {layout : SpillLayout.Layout}
+    {returns : List Name} {code : Structured.Code}
+    (hCompile :
+      compileReturnCode? range layout returns = some code) :
+    code.usesCallCreate = false := by
+  rcases compileReturnCode?_eq_some hCompile with ⟨hSafe, hCode⟩
+  exact SpillExpr.compileSeqFullCode?_noCallCreate hSafe hCode
+
+theorem run_spillLoadCode_scratch_exact_prefix
+    {range : ScratchRange}
+    {sourceScope : List Name}
+    {layout : SpillLayout.Layout}
+    {source : Source.State} {target : EVMState}
+    {name : Name} {slot : Nat} {stackPrefix : List Word}
+    (hRel :
+      SpillStackPrefixRel range sourceScope [] layout source stackPrefix
+        target)
+    (hStack : target.stack = stackPrefix)
+    (hBinding :
+      (name, SpillLayout.LocalLocation.scratch slot) ∈ layout) :
+    ∃ value final,
+      source.vars name = some value ∧
+        Structured.Code.run (spillLoadCode (range.word slot)) target =
+          .ok final ∧
+        final.stack = value :: stackPrefix ∧
+        SpillStackPrefixRel range sourceScope [] layout source
+          (value :: stackPrefix) final := by
+  rcases hRel with
+    ⟨hShared, hReady, hLayout, _baseStack, _hStackRel, hValues⟩
+  have hSlot : slot < range.words :=
+    hLayout.scratch_binding hBinding
+  rcases SpillLayout.ValueRel.scratch_binding hValues hBinding with
+    ⟨value, hStore, hMload⟩
+  rcases run_spillLoadCode_shared target (range.word slot) with
+    ⟨final, hRun, hFinalStack, hMachine, hSharedRun⟩
+  have hReserved :
+      ScratchWordReserved target.toMachineState (range.word slot) := by
+    simpa [ScratchRange.word_eq_scratchRegionWord] using
+      ScratchRegionReady.scratchWordReserved hReady hSlot
+  have hMloadMachine :
+      (target.toMachineState.mload (range.word slot)).2 =
+        target.toMachineState :=
+    mload_machine_eq hReserved
+  refine ⟨value, final, hStore, hRun, ?_, ?_⟩
+  · rw [hFinalStack, hMload, hStack]
+  · refine ⟨?_, ?_, hLayout, [], ?_, ?_⟩
+    · rw [hSharedRun, hMloadMachine]
+      exact hShared
+    · rw [hMachine, hMloadMachine]
+      exact hReady
+    · rw [hFinalStack, hMload, hStack]
+      simp
+    · rw [hMachine, hMloadMachine]
+      intro binding hMem
+      rcases binding with ⟨bindingName, location⟩
+      cases location with
+      | stack depth =>
+          have hDepth := hLayout.stack_binding hMem
+          simp at hDepth
+      | scratch scratchSlot =>
+          exact hValues
+            (bindingName, SpillLayout.LocalLocation.scratch scratchSlot)
+            hMem
+
+theorem saveScratchCode_sound_exact_prefix :
+    ∀ {entries : List (Name × Nat)} {range : ScratchRange}
+      {sourceScope : List Name}
+      {layout : SpillLayout.Layout}
+      {source : Source.State} {target : EVMState}
+      {stackPrefix : List Word},
+      (∀ {name slot}, (name, slot) ∈ entries →
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ layout) →
+      SpillStackPrefixRel range sourceScope [] layout
+        source stackPrefix target →
+      target.stack = stackPrefix →
+      ∃ values final,
+        SavedEntriesRel entries source.vars values ∧
+          Structured.Code.run (saveScratchCode range entries) target =
+            .ok final ∧
+          final.stack = values.reverse ++ stackPrefix ∧
+          SpillStackPrefixRel range sourceScope [] layout
+            source (values.reverse ++ stackPrefix) final
+  | [], range, sourceScope, layout, source, target, stackPrefix,
+      _hEntries, hRel, hStack => by
+      exact
+        ⟨[], target, trivial, by simp [saveScratchCode, Structured.Code.run],
+          by simpa using hStack, by simpa using hRel⟩
+  | (name, slot) :: rest, range, sourceScope, layout, source, target,
+      stackPrefix, hEntries, hRel, hStack => by
+      have hHeadBinding :
+          (name, SpillLayout.LocalLocation.scratch slot) ∈ layout :=
+        hEntries (by simp)
+      rcases
+          run_spillLoadCode_scratch_exact_prefix hRel hStack hHeadBinding with
+        ⟨value, afterHead, hValue, hHeadRun, hHeadStack, hHeadRel⟩
+      have hTailEntries :
+          ∀ {tailName tailSlot},
+            (tailName, tailSlot) ∈ rest →
+              (tailName, SpillLayout.LocalLocation.scratch tailSlot) ∈
+                layout := by
+        intro tailName tailSlot hMem
+        exact hEntries (by simp [hMem])
+      rcases
+          saveScratchCode_sound_exact_prefix
+            (entries := rest) (range := range)
+            (sourceScope := sourceScope)
+            (layout := layout) (source := source) (target := afterHead)
+            (stackPrefix := value :: stackPrefix)
+            hTailEntries hHeadRel hHeadStack with
+        ⟨tailValues, final, hTailSaved, hTailRun, hFinalStack,
+          hFinalRel⟩
+      refine
+        ⟨value :: tailValues, final, ⟨hValue, hTailSaved⟩, ?_, ?_, ?_⟩
+      · simp [saveScratchCode]
+        rw [Locals.Direct.code_run_append]
+        simp [hHeadRun, hTailRun]
+      · simpa [List.append_assoc] using hFinalStack
+      · simpa [List.append_assoc] using hFinalRel
+
+theorem valueRel_stackLayout_nil_change_stack
+    {range : ScratchRange} {sourceScope : List Name}
+    {layout : SpillLayout.Layout} {store : Source.Store}
+    {machine : EvmYul.MachineState}
+    {oldStack newStack : EvmYul.Stack Word}
+    (hLayout : SpillLayout.WellFormed range sourceScope [] layout)
+    (hValues :
+      SpillLayout.ValueRel range store machine oldStack layout) :
+    SpillLayout.ValueRel range store machine newStack layout := by
+  intro binding hMem
+  rcases binding with ⟨bindingName, location⟩
+  cases location with
+  | stack depth =>
+      have hDepth := hLayout.stack_binding hMem
+      simp at hDepth
+  | scratch slot =>
+      exact hValues
+        (bindingName, SpillLayout.LocalLocation.scratch slot) hMem
+
+theorem spillStackPrefixRel_valueRel_of_stack_eq
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {source : Source.State} {target : EVMState}
+    {stackPrefix baseStack : EvmYul.Stack Word}
+    (hRel :
+      SpillStackPrefixRel range sourceScope stackLayout layout source
+        stackPrefix target)
+    (hStack : target.stack = stackPrefix ++ baseStack) :
+    SpillLayout.ValueRel range source.vars target.toMachineState baseStack
+      layout := by
+  rcases hRel with
+    ⟨_hShared, _hReady, _hLayout, relBaseStack, hRelStack, hValues⟩
+  have hBase : relBaseStack = baseStack :=
+    List.append_cancel_left (by rw [← hRelStack, hStack])
+  simpa [hBase] using hValues
+
+mutual
+
+theorem compileCode_exact_prefix_structured
+    {results : Nat} {expr : Locals.Expr results}
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {source source' : Source.State} {target : EVMState}
+    {stackPrefix baseStack : List Word} {offset : Nat}
+    {values : List Word} {code : Structured.Code}
+    (hSafe : SourceNoMemoryTouch.ExprSafe expr)
+    (hRel :
+      SpillStackPrefixRel range sourceScope stackLayout layout source
+        stackPrefix target)
+    (hStack : target.stack = stackPrefix ++ baseStack)
+    (hPrefixLen : stackPrefix.length = offset)
+    (hCompile : SpillExpr.compileCode? range offset layout expr = some code)
+    (hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+          expr source =
+        .ok (source', values)) :
+    ∃ final,
+      Structured.Code.run code target = .ok final ∧
+        final.stack = (values.reverse ++ stackPrefix) ++ baseStack ∧
+        SpillStackPrefixRel range sourceScope stackLayout layout source'
+          (values.reverse ++ stackPrefix) final := by
+  subst offset
+  cases expr with
+  | lit value =>
+      simp [SpillExpr.compileCode?] at hCompile
+      cases hCompile
+      simp [Locals.Source.Expr.eval] at hEval
+      rcases hEval with ⟨rfl, rfl⟩
+      rcases hRel with
+        ⟨hShared, hReady, hLayout, relBaseStack, hRelStack, hValues⟩
+      have hBase : relBaseStack = baseStack :=
+        List.append_cancel_left (by rw [← hRelStack, hStack])
+      let final : EVMState :=
+        target.replaceStackAndIncrPC (value :: target.stack) (pcΔ := 33)
+      have hRun :
+          Structured.Code.run [Structured.BasicInstr.push value] target =
+            .ok final := by
+        simp [Structured.Code.run, Structured.BasicInstr.step,
+          Assembly.Target.stepInstr, final,
+          EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push]
+      refine ⟨final, hRun, ?_, ?_⟩
+      · simp [final, hStack, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      · refine ⟨?_, ?_, hLayout, baseStack, ?_, ?_⟩
+        · simpa [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hShared
+        · simpa [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hReady
+        · simp [final, hStack, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+        · simpa [hBase, final, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hValues
+  | var name =>
+      unfold Locals.Source.Expr.eval at hEval
+      cases hStore : source.vars name with
+      | none =>
+          simp [hStore, Source.invalid, Structured.invalid] at hEval
+      | some value =>
+          simp [hStore] at hEval
+          rcases hEval with ⟨rfl, rfl⟩
+          unfold SpillExpr.compileCode? at hCompile
+          cases hLookup : SpillLayout.lookup? name layout with
+          | none =>
+              simp [SpillExpr.compileOneCode?, SpillLayout.readCode?,
+                hLookup] at hCompile
+          | some location =>
+              cases location with
+              | stack depth =>
+                  cases hDup :
+                      Locals.StackOp.dup?
+                        (stackPrefix.length + depth + 1) with
+                  | none =>
+                      simp [SpillExpr.compileOneCode?,
+                        SpillLayout.readCode?, hLookup, hDup] at hCompile
+                  | some op =>
+                      simp [SpillExpr.compileOneCode?,
+                        SpillLayout.readCode?, hLookup, hDup] at hCompile
+                      cases hCompile
+                      have hBinding :
+                          (name, SpillLayout.LocalLocation.stack depth) ∈
+                            layout :=
+                        SpillLayout.lookup?_sound hLookup
+                      have hValuesBase :
+                          SpillLayout.ValueRel range source.vars
+                            target.toMachineState baseStack layout :=
+                        spillStackPrefixRel_valueRel_of_stack_eq hRel hStack
+                      have hBaseAt :
+                          baseStack[depth]? = some value := by
+                        have hStackValue :=
+                          SpillLayout.ValueRel.stack_binding hValuesBase
+                            hBinding
+                        simpa [hStore] using hStackValue
+                      have hTargetAt :
+                          target.stack[stackPrefix.length + depth]? =
+                            some value := by
+                        rw [hStack]
+                        rw [List.getElem?_append_right]
+                        · simpa using hBaseAt
+                        · simp
+                      have hOne :
+                          1 ≤ stackPrefix.length + depth + 1 := by
+                        omega
+                      have hBound :
+                          stackPrefix.length + depth + 1 ≤ 16 :=
+                        (stackOp_dup?_some_bound hDup).2
+                      rcases Locals.Direct.stackOp_dup?_step_eq_dup
+                          (n := stackPrefix.length + depth + 1) hOne
+                          hBound target with
+                        ⟨derivedOp, hDerivedDup, hDerivedStep⟩
+                      rw [hDup] at hDerivedDup
+                      cases hDerivedDup
+                      let final : EVMState :=
+                        target.replaceStackAndIncrPC (value :: target.stack)
+                      have hDupValue :
+                          EvmYul.dup (stackPrefix.length + depth + 1)
+                              target =
+                            .ok final := by
+                        have hDupValue' :=
+                          Locals.Direct.evm_dup_succ_get? (state := target)
+                            (idx := stackPrefix.length + depth) hTargetAt
+                        simpa [final, Nat.add_assoc, Nat.add_comm,
+                          Nat.add_left_comm] using hDupValue'
+                      have hOpStep :
+                          Structured.BasicOp.step op target = .ok final := by
+                        rw [hDerivedStep, hDupValue]
+                      have hRun :
+                          Structured.Code.run [Structured.BasicInstr.op op]
+                              target =
+                            .ok final := by
+                        simp [Structured.Code.run,
+                          Structured.BasicInstr.step, hOpStep]
+                      refine ⟨final, hRun, ?_, ?_⟩
+                      · simp [final, hStack,
+                          EvmYul.EVM.State.replaceStackAndIncrPC,
+                          EvmYul.EVM.State.incrPC]
+                      · refine ⟨?_, ?_, SpillStackPrefixRel.layout hRel,
+                            baseStack, ?_, ?_⟩
+                        · simpa [final,
+                            EvmYul.EVM.State.replaceStackAndIncrPC,
+                            EvmYul.EVM.State.incrPC] using
+                            SpillStackPrefixRel.shared hRel
+                        · simpa [final,
+                            EvmYul.EVM.State.replaceStackAndIncrPC,
+                            EvmYul.EVM.State.incrPC] using
+                            SpillStackPrefixRel.scratchReady hRel
+                        · simp [final, hStack,
+                            EvmYul.EVM.State.replaceStackAndIncrPC,
+                            EvmYul.EVM.State.incrPC]
+                        · simpa [final,
+                            EvmYul.EVM.State.replaceStackAndIncrPC,
+                            EvmYul.EVM.State.incrPC] using hValuesBase
+              | scratch slot =>
+                  simp [SpillExpr.compileOneCode?, SpillLayout.readCode?,
+                    hLookup] at hCompile
+                  cases hCompile
+                  have hBinding :
+                      (name, SpillLayout.LocalLocation.scratch slot) ∈
+                        layout :=
+                    SpillLayout.lookup?_sound hLookup
+                  rcases hRel with
+                    ⟨hShared, hReady, hLayout, relBaseStack, hRelStack,
+                      hValues⟩
+                  have hBase : relBaseStack = baseStack :=
+                    List.append_cancel_left (by rw [← hRelStack, hStack])
+                  have hValuesBase :
+                      SpillLayout.ValueRel range source.vars
+                        target.toMachineState baseStack layout := by
+                    simpa [hBase] using hValues
+                  have hSlot : slot < range.words :=
+                    hLayout.scratch_binding hBinding
+                  rcases SpillLayout.ValueRel.scratch_binding hValuesBase
+                      hBinding with
+                    ⟨loadedValue, hLoadedStore, hMload⟩
+                  rcases run_spillLoadCode_shared target (range.word slot) with
+                    ⟨final, hRun, hFinalStack, hMachine, hSharedRun⟩
+                  have hReserved :
+                      ScratchWordReserved target.toMachineState
+                        (range.word slot) := by
+                    simpa [ScratchRange.word_eq_scratchRegionWord] using
+                      ScratchRegionReady.scratchWordReserved hReady hSlot
+                  have hMloadMachine :
+                      (target.toMachineState.mload (range.word slot)).2 =
+                        target.toMachineState :=
+                    mload_machine_eq hReserved
+                  have hLoadedEq : loadedValue = value := by
+                    rw [hStore] at hLoadedStore
+                    cases hLoadedStore
+                    rfl
+                  refine ⟨final, hRun, ?_, ?_⟩
+                  · rw [hFinalStack, hMload, hLoadedEq, hStack]
+                    simp
+                  · refine ⟨?_, ?_, hLayout, baseStack, ?_, ?_⟩
+                    · rw [hSharedRun, hMloadMachine]
+                      exact hShared
+                    · rw [hMachine, hMloadMachine]
+                      exact hReady
+                    · rw [hFinalStack, hMload, hLoadedEq, hStack]
+                      simp
+                    · rw [hMachine, hMloadMachine]
+                      exact hValuesBase
+  | code _code =>
+      simp [SourceNoMemoryTouch.ExprSafe] at hSafe
+  | prim op args =>
+      simp [SourceNoMemoryTouch.ExprSafe] at hSafe
+      rcases hSafe with ⟨hOpSafe, hArgsSafe⟩
+      unfold Locals.Source.Expr.eval at hEval
+      cases hArgs :
+          Locals.Source.Expr.ExprSeq.eval
+            Locals.Source.PrimitiveSemantics.structured args source with
+      | error err =>
+          simp [hArgs] at hEval
+      | ok argResult =>
+          rcases argResult with ⟨sourceAfterArgs, argValues⟩
+          simp [hArgs] at hEval
+          cases hPrimEval :
+              Locals.Source.PrimitiveSemantics.structured.eval op
+                sourceAfterArgs.shared argValues with
+          | error err =>
+              simp [hPrimEval] at hEval
+          | ok primResult =>
+              rcases primResult with ⟨shared', values'⟩
+              simp [hPrimEval] at hEval
+              rcases hEval with ⟨rfl, rfl⟩
+              simp [SpillExpr.compileCode?] at hCompile
+              cases hArgsCode :
+                  SpillExpr.compileSeqFullCode? range stackPrefix.length layout
+                    args with
+              | none =>
+                  simp [hArgsCode] at hCompile
+              | some argsCode =>
+                  simp [hArgsCode] at hCompile
+                  cases hCompile
+                  rcases compileSeqFullCode_exact_prefix_structured
+                      (exprs := args)
+                      (range := range) (sourceScope := sourceScope)
+                      (stackLayout := stackLayout)
+                      (layout := layout) (source := source)
+                      (source' := sourceAfterArgs) (target := target)
+                      (stackPrefix := stackPrefix)
+                      (baseStack := baseStack)
+                      (offset := stackPrefix.length)
+                      (values := argValues) (code := argsCode)
+                      hArgsSafe hRel hStack rfl hArgsCode hArgs with
+                    ⟨targetAfterArgs, hRunArgs, hArgsStack, hArgsRel⟩
+                  rcases hArgsRel with
+                    ⟨hSharedArgs, hReadyArgs, hLayoutArgs, relBaseStack,
+                      hRelStackArgs, hValuesArgs⟩
+                  have hBaseArgs : relBaseStack = baseStack :=
+                    List.append_cancel_left
+                      (by rw [← hRelStackArgs, hArgsStack])
+                  have hValuesBase :
+                      SpillLayout.ValueRel range sourceAfterArgs.vars
+                        targetAfterArgs.toMachineState baseStack layout := by
+                    simpa [hBaseArgs] using hValuesArgs
+                  have hArgsStackPrim :
+                      targetAfterArgs.stack =
+                        argValues.reverse ++ (stackPrefix ++ baseStack) := by
+                    simpa [List.append_assoc] using hArgsStack
+                  rcases Locals.SourceLowering.PrimitiveSemantics.structuredScratchSound.eval_step_exists
+                      (range := range) (op := op)
+                      (sourceShared := sourceAfterArgs.shared)
+                      (sourceShared' := shared')
+                      (targetShared := targetAfterArgs.toSharedState)
+                      (values := argValues) (values' := values')
+                      (evm := targetAfterArgs)
+                      (baseStack := stackPrefix ++ baseStack)
+                      hOpSafe hPrimEval hSharedArgs hReadyArgs rfl
+                      hArgsStackPrim with
+                    ⟨targetAfterPrim, hStep, hSharedPrim, hReadyPrim,
+                      hMachinePrim, hStackPrim⟩
+                  refine ⟨targetAfterPrim, ?_, ?_, ?_⟩
+                  · rw [Locals.Direct.code_run_append]
+                    simp [hRunArgs, Structured.Code.run,
+                      Structured.BasicInstr.step, hStep]
+                  · simpa [List.append_assoc] using hStackPrim
+                  · refine ⟨?_, ?_, hLayoutArgs, baseStack, ?_, ?_⟩
+                    · simpa [Locals.Source.State.withShared] using
+                        hSharedPrim
+                    · exact hReadyPrim
+                    · simpa [List.append_assoc] using hStackPrim
+                    · rw [hMachinePrim]
+                      simpa [Locals.Source.State.withShared] using
+                        hValuesBase
+
+theorem compileSeqFullCode_exact_prefix_structured
+    {results : Nat} {exprs : Locals.ExprSeq results}
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {source source' : Source.State} {target : EVMState}
+    {stackPrefix baseStack : List Word} {offset : Nat}
+    {values : List Word} {code : Structured.Code}
+    (hSafe : SourceNoMemoryTouch.ExprSeqSafe exprs)
+    (hRel :
+      SpillStackPrefixRel range sourceScope stackLayout layout source
+        stackPrefix target)
+    (hStack : target.stack = stackPrefix ++ baseStack)
+    (hPrefixLen : stackPrefix.length = offset)
+    (hCompile :
+      SpillExpr.compileSeqFullCode? range offset layout exprs = some code)
+    (hEval :
+      Locals.Source.Expr.ExprSeq.eval
+          Locals.Source.PrimitiveSemantics.structured exprs source =
+        .ok (source', values)) :
+    ∃ final,
+      Structured.Code.run code target = .ok final ∧
+        final.stack = (values.reverse ++ stackPrefix) ++ baseStack ∧
+        SpillStackPrefixRel range sourceScope stackLayout layout source'
+          (values.reverse ++ stackPrefix) final := by
+  subst offset
+  cases exprs with
+  | nil =>
+      simp [SpillExpr.compileSeqFullCode?] at hCompile
+      cases hCompile
+      simp [Locals.Source.Expr.ExprSeq.eval] at hEval
+      rcases hEval with ⟨rfl, rfl⟩
+      exact ⟨target, by simp [Structured.Code.run],
+        by simpa using hStack, by simpa using hRel⟩
+  | @cons left right head tail =>
+      simp [SourceNoMemoryTouch.ExprSeqSafe] at hSafe
+      rcases hSafe with ⟨hHeadSafe, hTailSafe⟩
+      unfold Locals.Source.Expr.ExprSeq.eval at hEval
+      cases hHead :
+          Locals.Source.Expr.eval
+            Locals.Source.PrimitiveSemantics.structured head source with
+      | error err =>
+          simp [hHead] at hEval
+      | ok headResult =>
+          rcases headResult with ⟨sourceAfterHead, headValues⟩
+          simp [hHead] at hEval
+          cases hTail :
+              Locals.Source.Expr.ExprSeq.eval
+                Locals.Source.PrimitiveSemantics.structured tail
+                sourceAfterHead with
+          | error err =>
+              simp [hTail] at hEval
+          | ok tailResult =>
+              rcases tailResult with ⟨sourceAfterTail, tailValues⟩
+              simp [hTail] at hEval
+              rcases hEval with ⟨rfl, rfl⟩
+              simp [SpillExpr.compileSeqFullCode?] at hCompile
+              cases hHeadCode :
+                  SpillExpr.compileCode? range stackPrefix.length layout
+                    head with
+              | none =>
+                  simp [hHeadCode] at hCompile
+              | some headCode =>
+                  cases hTailCode :
+                      SpillExpr.compileSeqFullCode? range
+                        (stackPrefix.length + left) layout tail with
+                  | none =>
+                      simp [hHeadCode, hTailCode] at hCompile
+                  | some tailCode =>
+                      simp [hHeadCode, hTailCode] at hCompile
+                      cases hCompile
+                      rcases compileCode_exact_prefix_structured
+                          (expr := head)
+                          (range := range) (sourceScope := sourceScope)
+                          (stackLayout := stackLayout)
+                          (layout := layout) (source := source)
+                          (source' := sourceAfterHead) (target := target)
+                          (stackPrefix := stackPrefix)
+                          (baseStack := baseStack)
+                          (offset := stackPrefix.length)
+                          (values := headValues) (code := headCode)
+                          hHeadSafe hRel hStack rfl hHeadCode hHead with
+                        ⟨targetAfterHead, hRunHead, hHeadStack,
+                          hHeadRel⟩
+                      have hHeadLen :
+                          headValues.length = left :=
+                        SpillStackPrefixRel.eval_length_of_exprSafe
+                          Locals.SourceLowering.PrimitiveSemantics.structuredScratchSound
+                          hHeadSafe hHead
+                      have hNextPrefixLen :
+                          (headValues.reverse ++ stackPrefix).length =
+                            stackPrefix.length + left := by
+                        simp [List.length_reverse, hHeadLen, Nat.add_comm]
+                      rcases compileSeqFullCode_exact_prefix_structured
+                          (exprs := tail)
+                          (range := range) (sourceScope := sourceScope)
+                          (stackLayout := stackLayout)
+                          (layout := layout) (source := sourceAfterHead)
+                          (source' := sourceAfterTail)
+                          (target := targetAfterHead)
+                          (stackPrefix := headValues.reverse ++ stackPrefix)
+                          (baseStack := baseStack)
+                          (offset := stackPrefix.length + left)
+                          (values := tailValues) (code := tailCode)
+                          hTailSafe hHeadRel hHeadStack hNextPrefixLen
+                          hTailCode hTail with
+                        ⟨targetAfterTail, hRunTail, hTailStack,
+                          hTailRel⟩
+                      refine ⟨targetAfterTail, ?_, ?_, ?_⟩
+                      · rw [Locals.Direct.code_run_append]
+                        simp [hRunHead, hRunTail]
+                      · simpa [List.reverse_append, List.append_assoc] using
+                          hTailStack
+                      · simpa [List.reverse_append, List.append_assoc] using
+                          hTailRel
+
+end
+
+theorem compileCode_exact_length_structured
+    {results : Nat} {expr : Locals.Expr results}
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {source source' : Source.State} {target final : EVMState}
+    {stackPrefix : List Word} {offset : Nat}
+    {values : List Word} {code : Structured.Code}
+    (hSafe : SourceNoMemoryTouch.ExprSafe expr)
+    (hRel :
+      SpillStackPrefixRel range sourceScope stackLayout layout source
+        stackPrefix target)
+    (hLength :
+      target.stack.length = stackPrefix.length + stackLayout.length)
+    (hPrefixLen : stackPrefix.length = offset)
+    (hCompile : SpillExpr.compileCode? range offset layout expr = some code)
+    (hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+          expr source =
+        .ok (source', values))
+    (hRun : Structured.Code.run code target = .ok final) :
+    final.stack.length =
+      values.length + stackPrefix.length + stackLayout.length := by
+  rcases SpillStackPrefixRel.valueRel_base hRel with
+    ⟨baseStack, hStack, _hValues⟩
+  have hBaseLen : baseStack.length = stackLayout.length := by
+    have hLen := congrArg List.length hStack
+    simp [hLength] at hLen
+    omega
+  rcases compileCode_exact_prefix_structured
+      (expr := expr)
+      (range := range) (sourceScope := sourceScope)
+      (stackLayout := stackLayout)
+      (layout := layout) (source := source)
+      (source' := source') (target := target)
+      (stackPrefix := stackPrefix) (baseStack := baseStack)
+      (offset := offset) (values := values) (code := code)
+      hSafe hRel hStack hPrefixLen hCompile hEval with
+    ⟨exactFinal, hExactRun, hExactStack, _hExactRel⟩
+  have hFinal : exactFinal = final := by
+    rw [hRun] at hExactRun
+    cases hExactRun
+    rfl
+  subst final
+  rw [hExactStack]
+  simp [List.length_reverse, hBaseLen, Nat.add_assoc]
+
+theorem compileSeqFullCode_exact_length_structured
+    {results : Nat} {exprs : Locals.ExprSeq results}
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {source source' : Source.State} {target final : EVMState}
+    {stackPrefix : List Word} {offset : Nat}
+    {values : List Word} {code : Structured.Code}
+    (hSafe : SourceNoMemoryTouch.ExprSeqSafe exprs)
+    (hRel :
+      SpillStackPrefixRel range sourceScope stackLayout layout source
+        stackPrefix target)
+    (hLength :
+      target.stack.length = stackPrefix.length + stackLayout.length)
+    (hPrefixLen : stackPrefix.length = offset)
+    (hCompile :
+      SpillExpr.compileSeqFullCode? range offset layout exprs = some code)
+    (hEval :
+      Locals.Source.Expr.ExprSeq.eval
+          Locals.Source.PrimitiveSemantics.structured exprs source =
+        .ok (source', values))
+    (hRun : Structured.Code.run code target = .ok final) :
+    final.stack.length =
+      values.length + stackPrefix.length + stackLayout.length := by
+  rcases SpillStackPrefixRel.valueRel_base hRel with
+    ⟨baseStack, hStack, _hValues⟩
+  have hBaseLen : baseStack.length = stackLayout.length := by
+    have hLen := congrArg List.length hStack
+    simp [hLength] at hLen
+    omega
+  rcases compileSeqFullCode_exact_prefix_structured
+      (exprs := exprs)
+      (range := range) (sourceScope := sourceScope)
+      (stackLayout := stackLayout)
+      (layout := layout) (source := source)
+      (source' := source') (target := target)
+      (stackPrefix := stackPrefix) (baseStack := baseStack)
+      (offset := offset) (values := values) (code := code)
+      hSafe hRel hStack hPrefixLen hCompile hEval with
+    ⟨exactFinal, hExactRun, hExactStack, _hExactRel⟩
+  have hFinal : exactFinal = final := by
+    rw [hRun] at hExactRun
+    cases hExactRun
+    rfl
+  subst final
+  rw [hExactStack]
+  simp [List.length_reverse, hBaseLen, Nat.add_assoc]
+
+theorem compileCode_zero_spillStateRel_structured_exact_length
+    {expr : Locals.Expr 0}
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {source source' : Source.State} {target : EVMState}
+    {values : List Word} {code : Structured.Code}
+    (hSafe : SourceNoMemoryTouch.ExprSafe expr)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target)
+    (hLength : target.stack.length = stackLayout.length)
+    (hCompile : SpillExpr.compileCode? range 0 layout expr = some code)
+    (hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+        expr source =
+        .ok (source', values)) :
+    ∃ final,
+      Structured.Code.run code target = .ok final ∧
+        SpillStateRel range sourceScope stackLayout layout source' final ∧
+        final.stack.length = stackLayout.length := by
+  rcases
+      SpillStackPrefixRel.compileCode_zero_spillStateRel_structured
+        (expr := expr) (range := range) (sourceScope := sourceScope)
+        (stackLayout := stackLayout) (layout := layout) (source := source)
+        (source' := source') (target := target) (values := values)
+        (code := code) hSafe hRel hCompile hEval with
+    ⟨final, hRun, hFinalRel⟩
+  have hEvalLen : values.length = 0 :=
+    SpillStackPrefixRel.eval_length_of_exprSafe
+      Locals.SourceLowering.PrimitiveSemantics.structuredScratchSound
+      hSafe hEval
+  have hFinalLen :
+      final.stack.length = values.length + 0 + stackLayout.length :=
+    compileCode_exact_length_structured
+      (expr := expr) (range := range) (sourceScope := sourceScope)
+      (stackLayout := stackLayout) (layout := layout) (source := source)
+      (source' := source') (target := target) (final := final)
+      (stackPrefix := []) (offset := 0) (values := values) (code := code)
+      hSafe (SpillStackPrefixRel.of_spillStateRel hRel)
+      (by simpa using hLength) rfl hCompile hEval hRun
+  exact
+    ⟨final, hRun, hFinalRel, by
+      simpa [hEvalLen] using hFinalLen⟩
+
+theorem compileCode_one_letStack_spillStateRel_structured_exact_length
+    {expr : Locals.Expr 1}
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {source sourceAfterValue : Source.State} {target : EVMState}
+    {name : Name} {value : Word} {code : Structured.Code}
+    (hSafe : SourceNoMemoryTouch.ExprSafe expr)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target)
+    (hLength : target.stack.length = stackLayout.length)
+    (hFresh : name ∉ sourceScope)
+    (hCompile : SpillExpr.compileCode? range 0 layout expr = some code)
+    (hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+        expr source =
+        .ok (sourceAfterValue, [value])) :
+    ∃ final,
+      Structured.Code.run code target = .ok final ∧
+        SpillStateRel range (name :: sourceScope) (name :: stackLayout)
+          (SpillLayout.pushStackLayout name layout)
+          (sourceAfterValue.insert name value) final ∧
+        final.stack.length = (name :: stackLayout).length := by
+  rcases
+      SpillStackPrefixRel.compileCode_one_letStack_spillStateRel_structured
+        (expr := expr) (range := range) (sourceScope := sourceScope)
+        (stackLayout := stackLayout) (layout := layout) (source := source)
+        (sourceAfterValue := sourceAfterValue) (target := target)
+        (name := name) (value := value) (code := code)
+        hSafe hRel hFresh hCompile hEval with
+    ⟨final, hRun, hFinalRel⟩
+  have hFinalLen :
+      final.stack.length = [value].length + 0 + stackLayout.length :=
+    compileCode_exact_length_structured
+      (expr := expr) (range := range) (sourceScope := sourceScope)
+      (stackLayout := stackLayout) (layout := layout) (source := source)
+      (source' := sourceAfterValue) (target := target) (final := final)
+      (stackPrefix := []) (offset := 0) (values := [value]) (code := code)
+      hSafe (SpillStackPrefixRel.of_spillStateRel hRel)
+      (by simpa using hLength) rfl hCompile hEval hRun
+  exact
+    ⟨final, hRun, hFinalRel, by
+      calc
+        final.stack.length = 1 + stackLayout.length := by
+          simpa using hFinalLen
+        _ = (name :: stackLayout).length := by
+          simp [Nat.add_comm]⟩
+
+theorem compileCode_one_letScratch_spillStateRel_structured_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {expr : Locals.Expr 1}
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {source sourceAfterValue : Source.State} {target : EVMState}
+    {name : Name} {slot : Nat} {value : Word}
+    {code : Structured.Code}
+    (hSafe : SourceNoMemoryTouch.ExprSafe expr)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target)
+    (hLength : target.stack.length = stackLayout.length)
+    (hFresh : name ∉ sourceScope)
+    (hSlot : slot < range.words)
+    (hSlotFresh : slot ∉ SpillLayout.scratchSlots layout)
+    (hCompile : SpillExpr.compileCode? range 0 layout expr = some code)
+    (hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+        expr source =
+        .ok (sourceAfterValue, [value])) :
+    ∃ final,
+      Structured.Code.run
+          (code ++ spillStoreTopCode (range.word slot)) target =
+        .ok final ∧
+        SpillStateRel range (name :: sourceScope) stackLayout
+          (SpillLayout.pushScratchLayout name slot layout)
+          (sourceAfterValue.insert name value) final ∧
+        final.stack.length = stackLayout.length := by
+  rcases
+      SpillStackPrefixRel.compileCode_one_letScratch_spillStateRel_structured
+        hSpec hWordBytes
+        (expr := expr) (range := range) (sourceScope := sourceScope)
+        (stackLayout := stackLayout) (layout := layout) (source := source)
+        (sourceAfterValue := sourceAfterValue) (target := target)
+        (name := name) (slot := slot) (value := value) (code := code)
+        hSafe hRel hFresh hSlot hSlotFresh hCompile hEval with
+    ⟨final, hRun, hFinalRel⟩
+  rw [Locals.Direct.code_run_append] at hRun
+  cases hRunValue : Structured.Code.run code target with
+  | error err =>
+      simp [hRunValue] at hRun
+  | ok afterValue =>
+      simp [hRunValue] at hRun
+      rcases
+          compileCode_exact_prefix_structured
+            (expr := expr) (range := range) (sourceScope := sourceScope)
+            (stackLayout := stackLayout) (layout := layout)
+            (source := source) (source' := sourceAfterValue)
+            (target := target) (stackPrefix := []) (baseStack := target.stack)
+            (offset := 0) (values := [value]) (code := code)
+            hSafe (SpillStackPrefixRel.of_spillStateRel hRel)
+            (by simp) rfl hCompile hEval with
+        ⟨exactAfterValue, hExactRun, hExactStack, _hExactRel⟩
+      have hAfterEq : exactAfterValue = afterValue := by
+        rw [hRunValue] at hExactRun
+        cases hExactRun
+        rfl
+      have hAfterStack : afterValue.stack = value :: target.stack := by
+        rw [← hAfterEq]
+        simpa using hExactStack
+      have hStartEq :
+          ({ afterValue with stack := value :: target.stack } : EVMState) =
+            afterValue := by
+        cases afterValue
+        simpa using hAfterStack.symm
+      rcases run_spillStoreTopCode_shared afterValue target.stack
+          (range.word slot) value with
+        ⟨directFinal, hDirectRun, hDirectStack, _hDirectMachine,
+          _hDirectShared⟩
+      have hDirectRunAfter :
+          Structured.Code.run (spillStoreTopCode (range.word slot))
+              afterValue =
+            .ok directFinal := by
+        simpa [hStartEq] using hDirectRun
+      have hDirectEq : directFinal = final := by
+        rw [hRun] at hDirectRunAfter
+        cases hDirectRunAfter
+        rfl
+      exact
+        ⟨final, by
+          rw [Locals.Direct.code_run_append]
+          simp [hRunValue, hRun],
+          hFinalRel,
+          by
+            rw [← hDirectEq, hDirectStack]
+            exact hLength⟩
+
+theorem compileCode_one_assignScratch_spillStateRel_structured_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {expr : Locals.Expr 1}
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {source sourceAfterValue : Source.State} {target : EVMState}
+    {name : Name} {slot : Nat} {value : Word}
+    {code : Structured.Code}
+    (hSafe : SourceNoMemoryTouch.ExprSafe expr)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target)
+    (hLength : target.stack.length = stackLayout.length)
+    (hBinding :
+      (name, SpillLayout.LocalLocation.scratch slot) ∈ layout)
+    (hCompile : SpillExpr.compileCode? range 0 layout expr = some code)
+    (hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+        expr source =
+        .ok (sourceAfterValue, [value])) :
+    ∃ final,
+      Structured.Code.run
+          (code ++ spillStoreTopCode (range.word slot)) target =
+        .ok final ∧
+        SpillStateRel range sourceScope stackLayout layout
+          (sourceAfterValue.withVars
+            (Locals.Source.Store.insert sourceAfterValue.vars name value))
+          final ∧
+        final.stack.length = stackLayout.length := by
+  rcases
+      SpillStackPrefixRel.compileCode_one_assignScratch_spillStateRel_structured
+        hSpec hWordBytes
+        (expr := expr) (range := range) (sourceScope := sourceScope)
+        (stackLayout := stackLayout) (layout := layout) (source := source)
+        (sourceAfterValue := sourceAfterValue) (target := target)
+        (name := name) (slot := slot) (value := value) (code := code)
+        hSafe hRel hBinding hCompile hEval with
+    ⟨final, hRun, hFinalRel⟩
+  rw [Locals.Direct.code_run_append] at hRun
+  cases hRunValue : Structured.Code.run code target with
+  | error err =>
+      simp [hRunValue] at hRun
+  | ok afterValue =>
+      simp [hRunValue] at hRun
+      rcases
+          compileCode_exact_prefix_structured
+            (expr := expr) (range := range) (sourceScope := sourceScope)
+            (stackLayout := stackLayout) (layout := layout)
+            (source := source) (source' := sourceAfterValue)
+            (target := target) (stackPrefix := []) (baseStack := target.stack)
+            (offset := 0) (values := [value]) (code := code)
+            hSafe (SpillStackPrefixRel.of_spillStateRel hRel)
+            (by simp) rfl hCompile hEval with
+        ⟨exactAfterValue, hExactRun, hExactStack, _hExactRel⟩
+      have hAfterEq : exactAfterValue = afterValue := by
+        rw [hRunValue] at hExactRun
+        cases hExactRun
+        rfl
+      have hAfterStack : afterValue.stack = value :: target.stack := by
+        rw [← hAfterEq]
+        simpa using hExactStack
+      have hStartEq :
+          ({ afterValue with stack := value :: target.stack } : EVMState) =
+            afterValue := by
+        cases afterValue
+        simpa using hAfterStack.symm
+      rcases run_spillStoreTopCode_shared afterValue target.stack
+          (range.word slot) value with
+        ⟨directFinal, hDirectRun, hDirectStack, _hDirectMachine,
+          _hDirectShared⟩
+      have hDirectRunAfter :
+          Structured.Code.run (spillStoreTopCode (range.word slot))
+              afterValue =
+            .ok directFinal := by
+        simpa [hStartEq] using hDirectRun
+      have hDirectEq : directFinal = final := by
+        rw [hRun] at hDirectRunAfter
+        cases hDirectRunAfter
+        rfl
+      exact
+        ⟨final, by
+          rw [Locals.Direct.code_run_append]
+          simp [hRunValue, hRun],
+          hFinalRel,
+          by
+            rw [← hDirectEq, hDirectStack]
+            exact hLength⟩
+
+theorem compileCode_one_assignStack_spillStateRel_structured_exact_length
+    {expr : Locals.Expr 1}
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {source sourceAfterValue : Source.State} {target : EVMState}
+    {name : Name} {depth : Nat} {value : Word}
+    {swapOp : Structured.BasicOp} {code : Structured.Code}
+    (hSafe : SourceNoMemoryTouch.ExprSafe expr)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target)
+    (hLength : target.stack.length = stackLayout.length)
+    (hBinding :
+      (name, SpillLayout.LocalLocation.stack depth) ∈ layout)
+    (hContains :
+      sourceAfterValue.vars.contains name = true)
+    (hBound : depth + 1 ≤ 16)
+    (hSwap : Locals.StackOp.swap? (depth + 1) = some swapOp)
+    (hCompile : SpillExpr.compileCode? range 0 layout expr = some code)
+    (hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+        expr source =
+        .ok (sourceAfterValue, [value])) :
+    ∃ final,
+      Structured.Code.run
+          (code ++
+            [Structured.BasicInstr.op swapOp,
+              Structured.BasicInstr.op .pop]) target =
+        .ok final ∧
+        SpillStateRel range sourceScope stackLayout layout
+          (sourceAfterValue.withVars
+            (Locals.Source.Store.insert sourceAfterValue.vars name value))
+          final ∧
+        final.stack.length = stackLayout.length := by
+  rcases
+      SpillStackPrefixRel.compileCode_one_assignStack_spillStateRel_structured
+        (expr := expr) (range := range) (sourceScope := sourceScope)
+        (stackLayout := stackLayout) (layout := layout) (source := source)
+        (sourceAfterValue := sourceAfterValue) (target := target)
+        (name := name) (depth := depth) (value := value)
+        (swapOp := swapOp) (code := code)
+        hSafe hRel hBinding hContains hBound hSwap hCompile hEval with
+    ⟨final, hRun, hFinalRel⟩
+  rw [Locals.Direct.code_run_append] at hRun
+  cases hRunValue : Structured.Code.run code target with
+  | error err =>
+      simp [hRunValue] at hRun
+  | ok afterValue =>
+      simp [hRunValue] at hRun
+      rcases
+          compileCode_exact_prefix_structured
+            (expr := expr) (range := range) (sourceScope := sourceScope)
+            (stackLayout := stackLayout) (layout := layout)
+            (source := source) (source' := sourceAfterValue)
+            (target := target) (stackPrefix := []) (baseStack := target.stack)
+            (offset := 0) (values := [value]) (code := code)
+            hSafe (SpillStackPrefixRel.of_spillStateRel hRel)
+            (by simp) rfl hCompile hEval with
+        ⟨exactAfterValue, hExactRun, hExactStack, hExactRel⟩
+      have hAfterEq : exactAfterValue = afterValue := by
+        rw [hRunValue] at hExactRun
+        cases hExactRun
+        rfl
+      have hAfterStack : afterValue.stack = value :: target.stack := by
+        rw [← hAfterEq]
+        simpa using hExactStack
+      have hAfterLen :
+          afterValue.stack.length = stackLayout.length + 1 := by
+        rw [hAfterStack]
+        simp [hLength, Nat.add_comm]
+      cases hOldStore : sourceAfterValue.vars name with
+      | none =>
+          simp [Locals.Source.Store.contains, hOldStore] at hContains
+      | some old =>
+          rcases
+              SpillStackPrefixRel.run_assignStackCode_stack_binding_assign
+                (range := range) (sourceScope := sourceScope)
+                (stackLayout := stackLayout) (layout := layout)
+                (source := sourceAfterValue) (target := afterValue)
+                (name := name) (depth := depth) (old := old)
+                (value := value) (swapOp := swapOp)
+                (by
+                  rw [← hAfterEq]
+                  simpa using hExactRel)
+                hBinding hOldStore hBound hSwap with
+            ⟨directFinal, hDirectRun, _hDirectRel⟩
+          have hDirectEq : directFinal = final := by
+            rw [hRun] at hDirectRun
+            cases hDirectRun
+            rfl
+          have hAfterRel :
+              SpillStackPrefixRel range sourceScope stackLayout layout
+                sourceAfterValue [value] afterValue := by
+            rw [← hAfterEq]
+            simpa using hExactRel
+          rcases hAfterRel with
+            ⟨_hSharedAfter, _hReadyAfter, _hLayoutAfter, baseStack,
+              hStackRel, hValuesAfter⟩
+          have hBaseEq : baseStack = target.stack := by
+            have hCons :
+                value :: baseStack = value :: target.stack := by
+              calc
+                value :: baseStack = afterValue.stack := by
+                  simpa using hStackRel.symm
+                _ = value :: target.stack := hAfterStack
+            injection hCons with hTail
+          have hStackOld : baseStack[depth]? = some old := by
+            simpa [SpillLayout.BindingValueRel, hOldStore] using
+              hValuesAfter (name, SpillLayout.LocalLocation.stack depth)
+                hBinding
+          have hDepthLt : depth < stackLayout.length := by
+            have hDepthBase : depth < baseStack.length :=
+              (List.getElem?_eq_some_iff.mp hStackOld).1
+            rwa [hBaseEq, hLength] at hDepthBase
+          rcases
+              Locals.SourceLowering.Assignment.stackOp_swap?_step_eq_swap
+                  (n := depth + 1) (by omega) hBound afterValue with
+            ⟨derivedSwapOp, hDerivedSwap, hDerivedStep⟩
+          rw [hSwap] at hDerivedSwap
+          cases hDerivedSwap
+          let swapped : EVMState :=
+            afterValue.replaceStackAndIncrPC
+              (old :: baseStack.take depth ++ [value] ++
+                baseStack.drop (depth + 1))
+          let finalStack :=
+            baseStack.take depth ++ value :: baseStack.drop (depth + 1)
+          let explicitFinal : EVMState :=
+            swapped.replaceStackAndIncrPC finalStack
+          have hSwapRun :
+              EvmYul.swap (depth + 1) afterValue = .ok swapped := by
+            simpa [swapped] using
+              Locals.SourceLowering.Assignment.evm_swap_assign_get?
+                  (state := afterValue)
+                  (locals := baseStack) (idx := depth) (old := old)
+                  (value := value) (by simpa using hStackRel) hStackOld
+          have hSwapStep :
+              Structured.BasicInstr.step (Structured.BasicInstr.op swapOp)
+                  afterValue =
+                .ok swapped := by
+            simpa [Structured.BasicInstr.step] using
+              (by
+                rw [hDerivedStep, hSwapRun] :
+                  Structured.BasicOp.step swapOp afterValue = .ok swapped)
+          have hPop :
+              Structured.BasicInstr.step (Structured.BasicInstr.op .pop)
+                  swapped =
+                .ok explicitFinal := by
+            simp [Structured.BasicInstr.step, Structured.BasicOp.step,
+              Structured.BasicOp.toPrimOp, Assembly.Target.stepInstr,
+              Assembly.PrimOp.step, Assembly.PrimStep.run,
+              Assembly.PrimOp.continuingStep?, EvmYul.Stack.pop, swapped,
+              explicitFinal, finalStack,
+              EvmYul.EVM.State.replaceStackAndIncrPC,
+              EvmYul.EVM.State.incrPC, List.append_assoc]
+          have hExplicitRun :
+              Structured.Code.run
+                  [Structured.BasicInstr.op swapOp,
+                    Structured.BasicInstr.op .pop] afterValue =
+                .ok explicitFinal := by
+            simp [Structured.Code.run, hSwapStep, hPop]
+          have hExplicitEq : explicitFinal = directFinal := by
+            have hOk :
+                (Except.ok explicitFinal :
+                    Except Structured.EVMException EVMState) =
+                  Except.ok directFinal := by
+              simpa [hExplicitRun] using hDirectRun
+            exact Except.ok.inj hOk
+          have hFinalStackLen : finalStack.length = stackLayout.length := by
+            simp [finalStack]
+            rw [hBaseEq, hLength]
+            omega
+          have hDirectLen :
+              directFinal.stack.length = stackLayout.length := by
+            rw [← hExplicitEq]
+            simpa [explicitFinal, finalStack,
+              EvmYul.EVM.State.replaceStackAndIncrPC,
+              EvmYul.EVM.State.incrPC] using hFinalStackLen
+          exact
+            ⟨final, by
+              rw [Locals.Direct.code_run_append]
+              simp [hRunValue, hRun],
+              hFinalRel,
+              by
+                rw [← hDirectEq]
+                exact hDirectLen⟩
+
+theorem compileFreshAtom?_regular_sound_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {stmt : Locals.Stmt} {atom : SpillAtomPlan}
+    {program : Locals.Program}
+    {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Locals.Source.State}
+    {target : EVMState}
+    (hPlan :
+      SpillPlan.compileFreshAtom? range sourceScope stackLayout layout stmt =
+        some atom)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.stack.length = stackLayout.length)
+    (hSourceRun :
+      Locals.Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel stmt source =
+        .ok (Locals.Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    ∃ final,
+      SpillStmtCode.run atom.code target = .ok (.regular final) ∧
+        SpillStateRel range atom.sourceScope atom.stackLayout atom.layout
+          sourceAfter final ∧
+        SpillLayout.StoreDefined sourceAfter.vars atom.layout ∧
+        final.stack.length = atom.stackLayout.length := by
+  have hStoreDefined :
+      SpillLayout.StoreDefined sourceAfter.vars atom.layout :=
+    SpillPlan.compileFreshAtom?_regular_storeDefined_of_source_run hPlan
+      hDefined hSourceRun
+  cases stmt with
+  | @expr results expr =>
+      cases results with
+      | zero =>
+          unfold SpillPlan.compileFreshAtom? SpillAtomPlan.compile?
+            SpillAtomPlan.compileExpr0? at hPlan
+          cases hSafe : SourceNoMemoryTouch.expr? expr with
+          | false =>
+              simp [hSafe] at hPlan
+          | true =>
+              cases hCode :
+                  SpillExpr.compileCode? range 0 layout expr with
+              | none =>
+                  simp [hSafe, hCode] at hPlan
+              | some code =>
+                  simp [hSafe, hCode] at hPlan
+                  cases hPlan
+                  cases hEval :
+                      Locals.Source.Expr.eval
+                        Locals.Source.PrimitiveSemantics.structured expr
+                        source with
+                  | error err =>
+                      simp [Locals.Source.Stmt.run, hEval] at hSourceRun
+                  | ok evalResult =>
+                      rcases evalResult with ⟨sourceAfterExpr, values⟩
+                      simp [Locals.Source.Stmt.run, hEval] at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                      rcases
+                          compileCode_zero_spillStateRel_structured_exact_length
+                            (expr := expr) (range := range)
+                            (sourceScope := sourceScope)
+                            (stackLayout := stackLayout) (layout := layout)
+                            (source := source) (source' := sourceAfter)
+                            (target := target) (values := values)
+                            (code := code)
+                            (SourceNoMemoryTouch.expr?_sound hSafe)
+                            hRel hLength hCode hEval with
+                        ⟨final, hRun, hFinalRel, hFinalLen⟩
+                      exact
+                        ⟨final,
+                          by simp [SpillStmtCode.run, hRun],
+                          hFinalRel,
+                          hStoreDefined,
+                          hFinalLen⟩
+      | succ results =>
+          simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | exprs exprs =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | let_ name valueExpr =>
+      unfold SpillPlan.compileFreshAtom? at hPlan
+      by_cases hFresh : name ∈ sourceScope
+      · simp [hFresh] at hPlan
+      · simp [hFresh] at hPlan
+        unfold SpillAtomPlan.compileLet? at hPlan
+        cases hSafe : SourceNoMemoryTouch.expr? valueExpr with
+        | false =>
+            simp [hSafe] at hPlan
+        | true =>
+            cases hCode :
+                SpillExpr.compileCode? range 0 layout valueExpr with
+            | none =>
+                simp [hSafe, hCode] at hPlan
+            | some code =>
+                by_cases hStack : stackLayout.length < 16
+                · simp [hSafe, hCode, hStack] at hPlan
+                  cases hPlan
+                  cases hEvalOne :
+                      Locals.Source.Expr.evalOne
+                        Locals.Source.PrimitiveSemantics.structured valueExpr
+                        source with
+                  | error err =>
+                      simp [Locals.Source.Stmt.run, hEvalOne] at hSourceRun
+                  | ok evalResult =>
+                      rcases evalResult with ⟨sourceAfterValue, value⟩
+                      simp [Locals.Source.Stmt.run, hEvalOne] at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                      have hEval :
+                          Locals.Source.Expr.eval
+                              Locals.Source.PrimitiveSemantics.structured
+                              valueExpr source =
+                            .ok (sourceAfterValue, [value]) :=
+                        Locals.SourceLowering.Expr.eval_of_evalOne hEvalOne
+                      rcases
+                          compileCode_one_letStack_spillStateRel_structured_exact_length
+                            (expr := valueExpr) (range := range)
+                            (sourceScope := sourceScope)
+                            (stackLayout := stackLayout) (layout := layout)
+                            (source := source)
+                            (sourceAfterValue := sourceAfterValue)
+                            (target := target) (name := name)
+                            (value := value) (code := code)
+                            (SourceNoMemoryTouch.expr?_sound hSafe)
+                            hRel hLength hFresh hCode hEval with
+                        ⟨final, hRun, hFinalRel, hFinalLen⟩
+                      exact
+                        ⟨final,
+                          by simp [SpillStmtCode.run, hRun],
+                          hFinalRel,
+                          hStoreDefined,
+                          hFinalLen⟩
+                · cases hSlot :
+                    SpillLayout.firstFreeScratchSlot? range layout with
+                  | none =>
+                      simp [hSafe, hCode, hStack, hSlot] at hPlan
+                  | some slot =>
+                      simp [hSafe, hCode, hStack, hSlot] at hPlan
+                      cases hPlan
+                      cases hEvalOne :
+                          Locals.Source.Expr.evalOne
+                            Locals.Source.PrimitiveSemantics.structured
+                            valueExpr source with
+                      | error err =>
+                          simp [Locals.Source.Stmt.run, hEvalOne]
+                            at hSourceRun
+                      | ok evalResult =>
+                          rcases evalResult with ⟨sourceAfterValue, value⟩
+                          simp [Locals.Source.Stmt.run, hEvalOne]
+                            at hSourceRun
+                          rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
+                          have hEval :
+                              Locals.Source.Expr.eval
+                                  Locals.Source.PrimitiveSemantics.structured
+                                  valueExpr source =
+                                .ok (sourceAfterValue, [value]) :=
+                            Locals.SourceLowering.Expr.eval_of_evalOne hEvalOne
+                          have hSlotLt :
+                              slot < range.words :=
+                            (SpillLayout.firstFreeScratchSlot?_sound hSlot).1
+                          have hSlotFresh :
+                              slot ∉ SpillLayout.scratchSlots layout :=
+                            (SpillLayout.firstFreeScratchSlot?_sound hSlot).2
+                          rcases
+                              compileCode_one_letScratch_spillStateRel_structured_exact_length
+                                hSpec hWordBytes
+                                (expr := valueExpr) (range := range)
+                                (sourceScope := sourceScope)
+                                (stackLayout := stackLayout)
+                                (layout := layout)
+                                (source := source)
+                                (sourceAfterValue := sourceAfterValue)
+                                (target := target) (name := name)
+                                (slot := slot) (value := value)
+                                (code := code)
+                                (SourceNoMemoryTouch.expr?_sound hSafe)
+                                hRel hLength hFresh hSlotLt hSlotFresh
+                                hCode hEval with
+                            ⟨final, hRun, hFinalRel, hFinalLen⟩
+                          exact
+                            ⟨final,
+                              by simp [SpillStmtCode.run, hRun],
+                              hFinalRel,
+                              hStoreDefined,
+                              hFinalLen⟩
+  | assign name valueExpr =>
+      unfold SpillPlan.compileFreshAtom? SpillAtomPlan.compile?
+        SpillAtomPlan.compileAssign? at hPlan
+      cases hSafe : SourceNoMemoryTouch.expr? valueExpr with
+      | false =>
+          simp [hSafe] at hPlan
+      | true =>
+          cases hCode :
+              SpillExpr.compileCode? range 0 layout valueExpr with
+          | none =>
+              simp [hSafe, hCode] at hPlan
+          | some code =>
+              cases hLookup : SpillLayout.lookup? name layout with
+              | none =>
+                  simp [hSafe, hCode, hLookup] at hPlan
+              | some location =>
+                  cases location with
+                  | stack depth =>
+                      cases hSwap : Locals.StackOp.swap? (depth + 1) with
+                      | none =>
+                          simp [hSafe, hCode, hLookup, hSwap] at hPlan
+                      | some swapOp =>
+                          simp [hSafe, hCode, hLookup, hSwap] at hPlan
+                          cases hPlan
+                          cases hContains : source.vars.contains name with
+                          | false =>
+                              simp [Locals.Source.Stmt.run, hContains,
+                                Locals.Source.invalid, Structured.invalid]
+                                at hSourceRun
+                          | true =>
+                              cases hEvalOne :
+                                  Locals.Source.Expr.evalOne
+                                    Locals.Source.PrimitiveSemantics.structured
+                                    valueExpr source with
+                              | error err =>
+                                  simp [Locals.Source.Stmt.run, hContains,
+                                    hEvalOne] at hSourceRun
+                              | ok evalResult =>
+                                  rcases evalResult with
+                                    ⟨sourceAfterValue, value⟩
+                                  simp [Locals.Source.Stmt.run, hContains,
+                                    hEvalOne] at hSourceRun
+                                  rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                                  cases hOutcome
+                                  have hEval :
+                                      Locals.Source.Expr.eval
+                                          Locals.Source.PrimitiveSemantics.structured
+                                          valueExpr source =
+                                        .ok (sourceAfterValue, [value]) :=
+                                    Locals.SourceLowering.Expr.eval_of_evalOne
+                                      hEvalOne
+                                  have hContainsAfter :
+                                      sourceAfterValue.vars.contains name =
+                                        true := by
+                                    have hVars :
+                                        sourceAfterValue.vars = source.vars :=
+                                      Locals.Source.Expr.evalOne_vars_eq
+                                        hEvalOne
+                                    simpa [Locals.Source.Store.contains,
+                                      hVars] using hContains
+                                  have hBinding :
+                                      (name,
+                                        SpillLayout.LocalLocation.stack depth) ∈
+                                      layout :=
+                                    SpillLayout.lookup?_sound hLookup
+                                  rcases
+                                      compileCode_one_assignStack_spillStateRel_structured_exact_length
+                                        (expr := valueExpr) (range := range)
+                                        (sourceScope := sourceScope)
+                                        (stackLayout := stackLayout)
+                                        (layout := layout)
+                                        (source := source)
+                                        (sourceAfterValue := sourceAfterValue)
+                                        (target := target) (name := name)
+                                        (depth := depth) (value := value)
+                                        (swapOp := swapOp) (code := code)
+                                        (SourceNoMemoryTouch.expr?_sound hSafe)
+                                        hRel hLength hBinding hContainsAfter
+                                        (stackOp_swap?_some_bound hSwap).2
+                                        hSwap hCode hEval with
+                                    ⟨final, hRun, hFinalRel, hFinalLen⟩
+                                  exact
+                                    ⟨final,
+                                      by simp [SpillStmtCode.run, hRun],
+                                      hFinalRel,
+                                      hStoreDefined,
+                                      hFinalLen⟩
+                  | scratch slot =>
+                      simp [hSafe, hCode, hLookup] at hPlan
+                      cases hPlan
+                      cases hContains : source.vars.contains name with
+                      | false =>
+                          simp [Locals.Source.Stmt.run, hContains,
+                            Locals.Source.invalid, Structured.invalid]
+                            at hSourceRun
+                      | true =>
+                          cases hEvalOne :
+                              Locals.Source.Expr.evalOne
+                                Locals.Source.PrimitiveSemantics.structured
+                                valueExpr source with
+                          | error err =>
+                              simp [Locals.Source.Stmt.run, hContains,
+                                hEvalOne] at hSourceRun
+                          | ok evalResult =>
+                              rcases evalResult with
+                                ⟨sourceAfterValue, value⟩
+                              simp [Locals.Source.Stmt.run, hContains,
+                                hEvalOne] at hSourceRun
+                              rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                              cases hOutcome
+                              have hEval :
+                                  Locals.Source.Expr.eval
+                                      Locals.Source.PrimitiveSemantics.structured
+                                      valueExpr source =
+                                    .ok (sourceAfterValue, [value]) :=
+                                Locals.SourceLowering.Expr.eval_of_evalOne hEvalOne
+                              have hBinding :
+                                  (name,
+                                      SpillLayout.LocalLocation.scratch slot) ∈
+                                    layout :=
+                                SpillLayout.lookup?_sound hLookup
+                              rcases
+                                  compileCode_one_assignScratch_spillStateRel_structured_exact_length
+                                    hSpec hWordBytes
+                                    (expr := valueExpr) (range := range)
+                                    (sourceScope := sourceScope)
+                                    (stackLayout := stackLayout)
+                                    (layout := layout)
+                                    (source := source)
+                                    (sourceAfterValue := sourceAfterValue)
+                                    (target := target) (name := name)
+                                    (slot := slot) (value := value)
+                                    (code := code)
+                                    (SourceNoMemoryTouch.expr?_sound hSafe)
+                                    hRel hLength hBinding hCode hEval with
+                                ⟨final, hRun, hFinalRel, hFinalLen⟩
+                              exact
+                                ⟨final,
+                                  by simp [SpillStmtCode.run, hRun],
+                                  hFinalRel,
+                                  hStoreDefined,
+                                  hFinalLen⟩
+  | assignTop name =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | assignTopWithOffset offset name =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | promoteName name =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | cleanupTo targetLayout =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | block body =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | if_ cond body =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | switch scrutinee cases defaultBody =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | for_ init cond post body =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | brk =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | cont =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | leave =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | call name =>
+      simp [SpillPlan.compileFreshAtom?, SpillAtomPlan.compile?] at hPlan
+  | terminal kind =>
+      unfold SpillPlan.compileFreshAtom? SpillAtomPlan.compile?
+        SpillAtomPlan.compileTerminal? at hPlan
+      cases hNoMem : SourceNoMemoryTouch.haltKind? kind with
+      | false =>
+          simp [hNoMem] at hPlan
+      | true =>
+          simp [hNoMem] at hPlan
+          cases hPlan
+          cases hTerminal :
+              Locals.Source.PrimitiveSemantics.structured.terminal kind
+                source.shared [] with
+          | error err =>
+              simp [Locals.Source.Stmt.run, hTerminal] at hSourceRun
+          | ok shared' =>
+              simp [Locals.Source.Stmt.run, hTerminal] at hSourceRun
+              rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+              cases hOutcome
+  | terminalArgs kind args =>
+      unfold SpillPlan.compileFreshAtom? SpillAtomPlan.compile?
+        SpillAtomPlan.compileTerminalArgs? at hPlan
+      cases hCheck :
+          (SourceNoMemoryTouch.haltKind? kind &&
+            SourceNoMemoryTouch.exprSeq? args) with
+      | false =>
+          simp [hCheck] at hPlan
+      | true =>
+          cases hCode :
+              SpillExpr.compileSeqFullCode? range 0 layout args with
+          | none =>
+              simp [hCheck, hCode] at hPlan
+          | some code =>
+              simp [hCheck, hCode] at hPlan
+              cases hPlan
+              cases hEvalArgs :
+                  Locals.Source.Expr.ExprSeq.eval
+                    Locals.Source.PrimitiveSemantics.structured args source
+              with
+              | error err =>
+                  simp [Locals.Source.Stmt.run, hEvalArgs] at hSourceRun
+              | ok argResult =>
+                  rcases argResult with ⟨sourceAfterArgs, values⟩
+                  cases hTerminal :
+                      Locals.Source.PrimitiveSemantics.structured.terminal
+                        kind sourceAfterArgs.shared values with
+                  | error err =>
+                      simp [Locals.Source.Stmt.run, hEvalArgs, hTerminal]
+                        at hSourceRun
+                  | ok shared' =>
+                      simp [Locals.Source.Stmt.run, hEvalArgs, hTerminal]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+
+mutual
+
+theorem compileCode_exact_prefix_structured_nil
+    {results : Nat} {expr : Locals.Expr results}
+    {range : ScratchRange}
+    {sourceScope : List Name}
+    {layout : SpillLayout.Layout}
+    {source source' : Source.State} {target : EVMState}
+    {stackPrefix : List Word} {offset : Nat}
+    {values : List Word} {code : Structured.Code}
+    (hSafe : SourceNoMemoryTouch.ExprSafe expr)
+    (hRel :
+      SpillStackPrefixRel range sourceScope [] layout source stackPrefix
+        target)
+    (hStack : target.stack = stackPrefix)
+    (hPrefixLen : stackPrefix.length = offset)
+    (hCompile : SpillExpr.compileCode? range offset layout expr = some code)
+    (hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+          expr source =
+        .ok (source', values)) :
+    ∃ final,
+      Structured.Code.run code target = .ok final ∧
+        final.stack = values.reverse ++ stackPrefix ∧
+        SpillStackPrefixRel range sourceScope [] layout source'
+          (values.reverse ++ stackPrefix) final := by
+  subst offset
+  cases expr with
+  | lit value =>
+      simp [SpillExpr.compileCode?] at hCompile
+      cases hCompile
+      simp [Locals.Source.Expr.eval] at hEval
+      rcases hEval with ⟨rfl, rfl⟩
+      rcases hRel with
+        ⟨hShared, hReady, hLayout, _baseStack, _hStackRel, hValues⟩
+      let final : EVMState :=
+        target.replaceStackAndIncrPC (value :: target.stack) (pcΔ := 33)
+      have hRun :
+          Structured.Code.run [Structured.BasicInstr.push value] target =
+            .ok final := by
+        simp [Structured.Code.run, Structured.BasicInstr.step,
+          Assembly.Target.stepInstr, final,
+          EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push]
+      refine ⟨final, hRun, ?_, ?_⟩
+      · simp [final, hStack, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      · refine ⟨?_, ?_, hLayout, [], ?_, ?_⟩
+        · simpa [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hShared
+        · simpa [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hReady
+        · simp [final, hStack, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+        · simpa [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using
+            valueRel_stackLayout_nil_change_stack hLayout hValues
+  | var name =>
+      unfold Locals.Source.Expr.eval at hEval
+      cases hStore : source.vars name with
+      | none =>
+          simp [hStore, Source.invalid, Structured.invalid] at hEval
+      | some value =>
+          simp [hStore] at hEval
+          rcases hEval with ⟨rfl, rfl⟩
+          unfold SpillExpr.compileCode? at hCompile
+          cases hLookup : SpillLayout.lookup? name layout with
+          | none =>
+              simp [SpillExpr.compileOneCode?, SpillLayout.readCode?,
+                hLookup] at hCompile
+          | some location =>
+              cases location with
+              | stack depth =>
+                  have hBinding :
+                      (name, SpillLayout.LocalLocation.stack depth) ∈
+                        layout :=
+                    SpillLayout.lookup?_sound hLookup
+                  have hDepth := (SpillStackPrefixRel.layout hRel).stack_binding
+                    hBinding
+                  simp at hDepth
+              | scratch slot =>
+                  simp [SpillExpr.compileOneCode?, SpillLayout.readCode?,
+                    hLookup] at hCompile
+                  cases hCompile
+                  have hBinding :
+                      (name, SpillLayout.LocalLocation.scratch slot) ∈
+                        layout :=
+                    SpillLayout.lookup?_sound hLookup
+                  rcases run_spillLoadCode_scratch_exact_prefix
+                      hRel hStack hBinding with
+                    ⟨loadedValue, final, hLoadedStore, hRun, hFinalStack,
+                      hFinalRel⟩
+                  have hLoadedEq : loadedValue = value := by
+                    rw [hStore] at hLoadedStore
+                    cases hLoadedStore
+                    rfl
+                  subst loadedValue
+                  exact ⟨final, hRun, by simpa using hFinalStack,
+                    by simpa using hFinalRel⟩
+  | code _code =>
+      simp [SourceNoMemoryTouch.ExprSafe] at hSafe
+  | prim op args =>
+      simp [SourceNoMemoryTouch.ExprSafe] at hSafe
+      rcases hSafe with ⟨hOpSafe, hArgsSafe⟩
+      unfold Locals.Source.Expr.eval at hEval
+      cases hArgs :
+          Locals.Source.Expr.ExprSeq.eval
+            Locals.Source.PrimitiveSemantics.structured args source with
+      | error err =>
+          simp [hArgs] at hEval
+      | ok argResult =>
+          rcases argResult with ⟨sourceAfterArgs, argValues⟩
+          simp [hArgs] at hEval
+          cases hPrimEval :
+              Locals.Source.PrimitiveSemantics.structured.eval op
+                sourceAfterArgs.shared argValues with
+          | error err =>
+              simp [hPrimEval] at hEval
+          | ok primResult =>
+              rcases primResult with ⟨shared', values'⟩
+              simp [hPrimEval] at hEval
+              rcases hEval with ⟨rfl, rfl⟩
+              simp [SpillExpr.compileCode?] at hCompile
+              cases hArgsCode :
+                  SpillExpr.compileSeqFullCode? range stackPrefix.length layout
+                    args with
+              | none =>
+                  simp [hArgsCode] at hCompile
+              | some argsCode =>
+                  simp [hArgsCode] at hCompile
+                  cases hCompile
+                  rcases compileSeqFullCode_exact_prefix_structured_nil
+                      (exprs := args)
+                      (range := range) (sourceScope := sourceScope)
+                      (layout := layout) (source := source)
+                      (source' := sourceAfterArgs) (target := target)
+                      (stackPrefix := stackPrefix)
+                      (offset := stackPrefix.length)
+                      (values := argValues) (code := argsCode)
+                      hArgsSafe hRel hStack rfl hArgsCode hArgs with
+                    ⟨targetAfterArgs, hRunArgs, hArgsStack, hArgsRel⟩
+                  rcases hArgsRel with
+                    ⟨hSharedArgs, hReadyArgs, hLayoutArgs, baseStack,
+                      _hStackArgsRel, hValuesArgs⟩
+                  rcases Locals.SourceLowering.PrimitiveSemantics.structuredScratchSound.eval_step_exists
+                      (range := range) (op := op)
+                      (sourceShared := sourceAfterArgs.shared)
+                      (sourceShared' := shared')
+                      (targetShared := targetAfterArgs.toSharedState)
+                      (values := argValues) (values' := values')
+                      (evm := targetAfterArgs)
+                      (baseStack := stackPrefix)
+                      hOpSafe hPrimEval hSharedArgs hReadyArgs rfl
+                      hArgsStack with
+                    ⟨targetAfterPrim, hStep, hSharedPrim, hReadyPrim,
+                      hMachinePrim, hStackPrim⟩
+                  refine ⟨targetAfterPrim, ?_, ?_, ?_⟩
+                  · rw [Locals.Direct.code_run_append]
+                    simp [hRunArgs, Structured.Code.run,
+                      Structured.BasicInstr.step, hStep]
+                  · simpa using hStackPrim
+                  · refine ⟨?_, ?_, hLayoutArgs, [], ?_, ?_⟩
+                    · simpa [Locals.Source.State.withShared] using
+                        hSharedPrim
+                    · exact hReadyPrim
+                    · simpa [hStackPrim]
+                    · rw [hMachinePrim]
+                      simpa [Locals.Source.State.withShared] using
+                        valueRel_stackLayout_nil_change_stack hLayoutArgs
+                          hValuesArgs
+
+theorem compileSeqFullCode_exact_prefix_structured_nil
+    {results : Nat} {exprs : Locals.ExprSeq results}
+    {range : ScratchRange}
+    {sourceScope : List Name}
+    {layout : SpillLayout.Layout}
+    {source source' : Source.State} {target : EVMState}
+    {stackPrefix : List Word} {offset : Nat}
+    {values : List Word} {code : Structured.Code}
+    (hSafe : SourceNoMemoryTouch.ExprSeqSafe exprs)
+    (hRel :
+      SpillStackPrefixRel range sourceScope [] layout source stackPrefix
+        target)
+    (hStack : target.stack = stackPrefix)
+    (hPrefixLen : stackPrefix.length = offset)
+    (hCompile :
+      SpillExpr.compileSeqFullCode? range offset layout exprs = some code)
+    (hEval :
+      Locals.Source.Expr.ExprSeq.eval
+          Locals.Source.PrimitiveSemantics.structured exprs source =
+        .ok (source', values)) :
+    ∃ final,
+      Structured.Code.run code target = .ok final ∧
+        final.stack = values.reverse ++ stackPrefix ∧
+        SpillStackPrefixRel range sourceScope [] layout source'
+          (values.reverse ++ stackPrefix) final := by
+  subst offset
+  cases exprs with
+  | nil =>
+      simp [SpillExpr.compileSeqFullCode?] at hCompile
+      cases hCompile
+      simp [Locals.Source.Expr.ExprSeq.eval] at hEval
+      rcases hEval with ⟨rfl, rfl⟩
+      exact ⟨target, by simp [Structured.Code.run],
+        by simpa using hStack, by simpa using hRel⟩
+  | @cons left right head tail =>
+      simp [SourceNoMemoryTouch.ExprSeqSafe] at hSafe
+      rcases hSafe with ⟨hHeadSafe, hTailSafe⟩
+      unfold Locals.Source.Expr.ExprSeq.eval at hEval
+      cases hHead :
+          Locals.Source.Expr.eval
+            Locals.Source.PrimitiveSemantics.structured head source with
+      | error err =>
+          simp [hHead] at hEval
+      | ok headResult =>
+          rcases headResult with ⟨sourceAfterHead, headValues⟩
+          simp [hHead] at hEval
+          cases hTail :
+              Locals.Source.Expr.ExprSeq.eval
+                Locals.Source.PrimitiveSemantics.structured tail
+                sourceAfterHead with
+          | error err =>
+              simp [hTail] at hEval
+          | ok tailResult =>
+              rcases tailResult with ⟨sourceAfterTail, tailValues⟩
+              simp [hTail] at hEval
+              rcases hEval with ⟨rfl, rfl⟩
+              simp [SpillExpr.compileSeqFullCode?] at hCompile
+              cases hHeadCode :
+                  SpillExpr.compileCode? range stackPrefix.length layout
+                    head with
+              | none =>
+                  simp [hHeadCode] at hCompile
+              | some headCode =>
+                  cases hTailCode :
+                      SpillExpr.compileSeqFullCode? range
+                        (stackPrefix.length + left) layout tail with
+                  | none =>
+                      simp [hHeadCode, hTailCode] at hCompile
+                  | some tailCode =>
+                      simp [hHeadCode, hTailCode] at hCompile
+                      cases hCompile
+                      rcases compileCode_exact_prefix_structured_nil
+                          (expr := head)
+                          (range := range) (sourceScope := sourceScope)
+                          (layout := layout) (source := source)
+                          (source' := sourceAfterHead) (target := target)
+                          (stackPrefix := stackPrefix)
+                          (offset := stackPrefix.length)
+                          (values := headValues) (code := headCode)
+                          hHeadSafe hRel hStack rfl hHeadCode hHead with
+                        ⟨targetAfterHead, hRunHead, hHeadStack,
+                          hHeadRel⟩
+                      have hHeadLen :
+                          headValues.length = left :=
+                        SpillStackPrefixRel.eval_length_of_exprSafe
+                          Locals.SourceLowering.PrimitiveSemantics.structuredScratchSound
+                          hHeadSafe hHead
+                      have hNextPrefixLen :
+                          (headValues.reverse ++ stackPrefix).length =
+                            stackPrefix.length + left := by
+                        simp [List.length_reverse, hHeadLen, Nat.add_comm]
+                      rcases compileSeqFullCode_exact_prefix_structured_nil
+                          (exprs := tail)
+                          (range := range) (sourceScope := sourceScope)
+                          (layout := layout) (source := sourceAfterHead)
+                          (source' := sourceAfterTail)
+                          (target := targetAfterHead)
+                          (stackPrefix := headValues.reverse ++ stackPrefix)
+                          (offset := stackPrefix.length + left)
+                          (values := tailValues) (code := tailCode)
+                          hTailSafe hHeadRel hHeadStack hNextPrefixLen
+                          hTailCode hTail with
+                        ⟨targetAfterTail, hRunTail, hTailStack,
+                          hTailRel⟩
+                      refine ⟨targetAfterTail, ?_, ?_, ?_⟩
+                      · rw [Locals.Direct.code_run_append]
+                        simp [hRunHead, hRunTail]
+                      · simpa [List.reverse_append, List.append_assoc] using
+                          hTailStack
+                      · simpa [List.reverse_append, List.append_assoc] using
+                          hTailRel
+
+end
+
+theorem compileReturnExprsCode?_exact_prefix
+    {range : ScratchRange}
+    {sourceScope : List Name}
+    {layout : SpillLayout.Layout}
+    {source : Source.State} :
+    ∀ {returns : List Name} {code : Structured.Code}
+      {target : EVMState} {stackPrefix values : List Word},
+      SpillExpr.compileSeqFullCode? range stackPrefix.length layout
+          (Lower.returnExprs returns) =
+        some code →
+      Source.Store.lookupMany returns source.vars = some values →
+      SpillStackPrefixRel range sourceScope [] layout source stackPrefix
+        target →
+      target.stack = stackPrefix →
+      ∃ final,
+        Structured.Code.run code target = .ok final ∧
+          final.stack = values.reverse ++ stackPrefix ∧
+          SpillStackPrefixRel range sourceScope [] layout source
+            (values.reverse ++ stackPrefix) final
+  | [], code, target, stackPrefix, values, hCompile, hLookup, hRel,
+      hStack => by
+      simp [Lower.returnExprs, Source.Store.lookupMany] at hCompile hLookup
+      subst values
+      cases hCompile
+      exact
+        ⟨target,
+          by simp [Structured.Code.run],
+          by simpa using hStack,
+          by simpa using hRel⟩
+  | name :: rest, code, target, stackPrefix, values, hCompile, hLookup,
+      hRel, hStack => by
+      unfold Source.Store.lookupMany at hLookup
+      cases hHead : source.vars name with
+      | none =>
+          simp [hHead] at hLookup
+      | some value =>
+          simp [hHead] at hLookup
+          cases hTail : Source.Store.lookupMany rest source.vars with
+          | none =>
+              simp [hTail] at hLookup
+          | some tailValues =>
+              simp [hTail] at hLookup
+              cases hLookup
+              unfold Lower.returnExprs at hCompile
+              have hComm : 1 + rest.length = rest.length + 1 :=
+                Nat.add_comm 1 rest.length
+              have hCompileShape :
+                  SpillExpr.compileSeqFullCode? range stackPrefix.length layout
+                      (Eq.mp
+                        (congrArg Locals.ExprSeq hComm)
+                        (Locals.ExprSeq.cons (left := 1)
+                          (right := rest.length) (Locals.Expr.var name)
+                          (Lower.returnExprs rest))) =
+                    some code := by
+                change
+                  SpillExpr.compileSeqFullCode? range stackPrefix.length layout
+                      (Eq.mp
+                        (congrArg Locals.ExprSeq hComm)
+                        (Locals.ExprSeq.cons (left := 1)
+                          (right := rest.length) (Locals.Expr.var name)
+                          (Lower.returnExprs rest))) =
+                    some code at hCompile
+                exact hCompile
+              rw [compileSeqFullCode_eq_mp_congrArg hComm] at hCompileShape
+              unfold SpillExpr.compileSeqFullCode? at hCompileShape
+              cases hHeadCode :
+                  SpillExpr.compileCode? range stackPrefix.length layout
+                    (Locals.Expr.var name) with
+              | none =>
+                  simp [hHeadCode] at hCompileShape
+              | some headCode =>
+                  cases hTailCode :
+                      SpillExpr.compileSeqFullCode? range
+                        (stackPrefix.length + 1) layout
+                        (Lower.returnExprs rest) with
+                  | none =>
+                      simp [hHeadCode, hTailCode] at hCompileShape
+                  | some tailCode =>
+                      simp [hHeadCode, hTailCode] at hCompileShape
+                      cases hCompileShape
+                      unfold SpillExpr.compileCode? at hHeadCode
+                      cases hLookupName :
+                          SpillLayout.lookup? name layout with
+                      | none =>
+                          simp [SpillExpr.compileCode?,
+                            SpillLayout.readCode?, hLookupName] at hHeadCode
+                      | some location =>
+                          cases location with
+                          | stack depth =>
+                              have hBinding :
+                                  (name,
+                                      SpillLayout.LocalLocation.stack depth) ∈
+                                    layout :=
+                                SpillLayout.lookup?_sound hLookupName
+                              have hDepth :=
+                                (SpillStackPrefixRel.layout hRel).stack_binding
+                                  hBinding
+                              simp at hDepth
+                          | scratch slot =>
+                              simp [SpillLayout.readCode?, hLookupName]
+                                at hHeadCode
+                              cases hHeadCode
+                              have hBinding :
+                                  (name,
+                                      SpillLayout.LocalLocation.scratch slot) ∈
+                                    layout :=
+                                SpillLayout.lookup?_sound hLookupName
+                              rcases
+                                  run_spillLoadCode_scratch_exact_prefix
+                                    hRel hStack hBinding with
+                                ⟨loadedValue, afterHead, hLoadedStore,
+                                  hHeadRun, hAfterHeadStack,
+                                  hAfterHeadRel⟩
+                              have hLoadedEq : loadedValue = value := by
+                                rw [hHead] at hLoadedStore
+                                cases hLoadedStore
+                                rfl
+                              subst loadedValue
+                              have hTailCompile :
+                                  SpillExpr.compileSeqFullCode? range
+                                      (value :: stackPrefix).length layout
+                                      (Lower.returnExprs rest) =
+                                    some tailCode := by
+                                simpa using hTailCode
+                              rcases
+                                  compileReturnExprsCode?_exact_prefix
+                                    (range := range)
+                                    (sourceScope := sourceScope)
+                                    (layout := layout)
+                                    (source := source)
+                                    (returns := rest) (code := tailCode)
+                                    (target := afterHead)
+                                    (stackPrefix := value :: stackPrefix)
+                                    (values := tailValues)
+                                    hTailCompile hTail hAfterHeadRel
+                                    hAfterHeadStack with
+                                ⟨final, hTailRun, hFinalStack,
+                                  hFinalRel⟩
+                              refine
+                                ⟨final,
+                                  by
+                                    rw [Locals.Direct.code_run_append]
+                                    simp [hHeadRun, hTailRun],
+                                  ?_,
+                                  ?_⟩
+                              · simpa [List.reverse_cons,
+                                  List.append_assoc] using hFinalStack
+                              · simpa [List.reverse_cons,
+                                  List.append_assoc] using hFinalRel
+
+theorem compileReturnCode?_sound_exact_nil
+    {range : ScratchRange} {sourceScope : List Name}
+    {layout : SpillLayout.Layout}
+    {returns : List Name} {code : Structured.Code}
+    {source : Source.State} {target : EVMState} {values : List Word}
+    (hCompile :
+      compileReturnCode? range layout returns = some code)
+    (hRel :
+      SpillStackPrefixRel range sourceScope [] layout source [] target)
+    (hStack : target.stack = [])
+    (hLookup :
+      Source.Store.lookupMany returns source.vars = some values) :
+    ∃ final,
+      Structured.Code.run code target = .ok final ∧
+        final.stack = values.reverse ∧
+        SpillStackPrefixRel range sourceScope [] layout source
+          values.reverse final := by
+  rcases compileReturnCode?_eq_some hCompile with ⟨_hSafe, hCode⟩
+  rcases
+      compileReturnExprsCode?_exact_prefix
+        (range := range) (sourceScope := sourceScope) (layout := layout)
+        (source := source) (returns := returns) (code := code)
+        (target := target) (stackPrefix := []) (values := values)
+        hCode hLookup hRel hStack with
+    ⟨final, hRun, hFinalStack, hFinalRel⟩
+  exact
+    ⟨final, hRun,
+      by simpa using hFinalStack,
+      by simpa using hFinalRel⟩
+
+theorem run_spillStoreTopCode_evictTopStackLayout?_of_storeDefined_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout nextLayout : SpillLayout.Layout}
+    {source : Source.State} {target : EVMState}
+    {slot : Nat}
+    (hEvict :
+      SpillLayout.evictTopStackLayout? range sourceScope stackLayout layout =
+        some (slot, nextLayout))
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.stack.length = stackLayout.length) :
+    ∃ top restStack final,
+      stackLayout = top :: restStack ∧
+        Structured.Code.run (spillStoreTopCode (range.word slot)) target =
+          .ok final ∧
+        SpillStateRel range sourceScope restStack nextLayout source final ∧
+        final.stack.length = restStack.length := by
+  rcases
+      run_spillStoreTopCode_evictTopStackLayout?_of_storeDefined
+        hSpec hWordBytes hEvict hRel hDefined with
+    ⟨top, restStack, final, hStackLayout, hRun, hFinalRel⟩
+  subst stackLayout
+  cases hTargetStack : target.stack with
+  | nil =>
+      simp [hTargetStack] at hLength
+  | cons head baseStack =>
+      have hStartEq :
+          ({ target with stack := head :: baseStack } : EVMState) =
+            target := by
+        cases target
+        simpa using hTargetStack.symm
+      rcases run_spillStoreTopCode_shared target baseStack
+          (range.word slot) head with
+        ⟨directFinal, hDirectRun, hDirectStack, _hDirectMachine,
+          _hDirectShared⟩
+      have hDirectRunTarget :
+          Structured.Code.run (spillStoreTopCode (range.word slot)) target =
+            .ok directFinal := by
+        simpa [hStartEq] using hDirectRun
+      have hDirectEq : directFinal = final := by
+        rw [hRun] at hDirectRunTarget
+        cases hDirectRunTarget
+        rfl
+      have hBaseLen : baseStack.length = restStack.length := by
+        simpa [hTargetStack] using hLength
+      exact
+        ⟨top, restStack, final, rfl, hRun, hFinalRel, by
+          rw [← hDirectEq, hDirectStack]
+          exact hBaseLen⟩
+
+theorem spillAllStack?_sound_exact_empty
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {plan : SpillPlan}
+    {source : Source.State} {target : EVMState}
+    (hPlan :
+      SpillPlan.spillAllStack? range sourceScope stackLayout layout =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.stack.length = stackLayout.length) :
+    ∃ final,
+      SpillStmtCode.run plan.code target = .ok (.regular final) ∧
+        SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+          source final ∧
+        plan.sourceScope = sourceScope ∧
+        plan.stackLayout = [] ∧
+        SpillLayout.StoreDefined source.vars plan.layout ∧
+        final.stack = [] := by
+  induction stackLayout generalizing layout plan target with
+  | nil =>
+      simp [SpillPlan.spillAllStack?] at hPlan
+      cases hPlan
+      have hStackNil : target.stack = [] :=
+        List.eq_nil_of_length_eq_zero hLength
+      exact
+        ⟨target, SpillStmtCode.run_skip target, hRel, rfl, rfl, hDefined,
+          hStackNil⟩
+  | cons top restStack ih =>
+      unfold SpillPlan.spillAllStack? at hPlan
+      cases hEvict :
+          SpillLayout.evictTopStackLayout? range sourceScope
+            (top :: restStack) layout with
+      | none =>
+          simp [hEvict] at hPlan
+      | some evicted =>
+          rcases evicted with ⟨slot, nextLayout⟩
+          cases hTail :
+              SpillPlan.spillAllStack? range sourceScope restStack
+                nextLayout with
+          | none =>
+              simp [hEvict, hTail] at hPlan
+          | some tail =>
+              simp [hEvict, hTail] at hPlan
+              cases hPlan
+              rcases
+                  run_spillStoreTopCode_evictTopStackLayout?_of_storeDefined_exact_length
+                    hSpec hWordBytes hEvict hRel hDefined hLength with
+                ⟨_evictTop, _evictRest, targetMid, hStackLayout,
+                  hHeadRunCode, hMidRel, hMidLength⟩
+              cases hStackLayout
+              have hHeadRun :
+                  SpillStmtCode.run
+                    (.Code (spillStoreTopCode (range.word slot))) target =
+                    .ok (.regular targetMid) := by
+                simp [SpillStmtCode.run, hHeadRunCode]
+              have hDefinedNext :
+                  SpillLayout.StoreDefined source.vars nextLayout := by
+                rcases SpillLayout.evictTopStackLayout?_sound hEvict with
+                  ⟨_soundTop, _soundRest, hSoundStack, _hTopBinding,
+                    _hSlotChoose, hNext, _hCheck⟩
+                cases hSoundStack
+                rw [hNext]
+                exact SpillLayout.StoreDefined.evictTopStackLayout hDefined
+              rcases ih (layout := nextLayout) (plan := tail)
+                  (target := targetMid) hTail hMidRel hDefinedNext
+                  hMidLength with
+                ⟨targetFinal, hTailRun, hFinalRel, hFinalScope,
+                  hFinalStack, hFinalDefined, hFinalStackExact⟩
+              exact
+                ⟨targetFinal,
+                  SpillStmtCode.run_seq_regular hHeadRun hTailRun,
+                  hFinalRel, hFinalScope, hFinalStack, hFinalDefined,
+                  hFinalStackExact⟩
+
+theorem compileFreshAtomWithSpill?_regular_sound_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {stmt : Locals.Stmt} {plan : SpillPlan}
+    {program : Locals.Program}
+    {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Locals.Source.State}
+    {target : EVMState}
+    (hPlan :
+      SpillPlan.compileFreshAtomWithSpill? range sourceScope stackLayout
+          layout stmt =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.stack.length = stackLayout.length)
+    (hSourceRun :
+      Locals.Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel stmt source =
+        .ok (Locals.Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    ∃ final,
+      SpillStmtCode.run plan.code target = .ok (.regular final) ∧
+        SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+          sourceAfter final ∧
+        SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+        final.stack.length = plan.stackLayout.length := by
+  unfold SpillPlan.compileFreshAtomWithSpill? at hPlan
+  cases hSpill :
+      SpillPlan.spillAllStack? range sourceScope stackLayout layout with
+  | none =>
+      simp [hSpill] at hPlan
+  | some spill =>
+      cases hAtom :
+          SpillPlan.compileFreshAtom? range spill.sourceScope
+            spill.stackLayout spill.layout stmt with
+      | none =>
+          simp [hSpill, hAtom] at hPlan
+      | some atom =>
+          simp [hSpill, hAtom] at hPlan
+          cases hPlan
+          rcases
+              spillAllStack?_sound_exact_empty hSpec hWordBytes hSpill hRel
+                hDefined hLength with
+            ⟨afterSpill, hSpillRun, hSpillRel, _hSpillScope, hSpillStack,
+              hSpillDefined, hSpillEmpty⟩
+          have hAtomEmpty :
+              SpillPlan.compileFreshAtom? range spill.sourceScope []
+                  spill.layout stmt =
+                some atom := by
+            simpa [hSpillStack] using hAtom
+          have hSpillLength :
+              afterSpill.stack.length = ([] : List Name).length := by
+            simpa [hSpillEmpty]
+          rcases
+              compileFreshAtom?_regular_sound_exact_length hSpec hWordBytes
+                hAtomEmpty
+                (by simpa [hSpillStack] using hSpillRel)
+                hSpillDefined hSpillLength hSourceRun with
+            ⟨final, hAtomRun, hAtomRel, hAtomDefined, hAtomLength⟩
+          exact
+            ⟨final,
+              SpillStmtCode.run_seq_regular hSpillRun hAtomRun,
+              hAtomRel, hAtomDefined, hAtomLength⟩
+
+theorem compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {stmt : Locals.Stmt} {plan : SpillPlan}
+    {program : Locals.Program}
+    {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Locals.Source.State}
+    {target : EVMState}
+    (hPlan :
+      SpillPlan.compileFreshAtomWithConservativeSpill? range sourceScope
+          stackLayout layout stmt =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.stack.length = stackLayout.length)
+    (hSourceRun :
+      Locals.Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel stmt source =
+        .ok (Locals.Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    ∃ final,
+      SpillStmtCode.run plan.code target = .ok (.regular final) ∧
+        SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+          sourceAfter final ∧
+        SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+        final.stack.length = plan.stackLayout.length := by
+  unfold SpillPlan.compileFreshAtomWithConservativeSpill? at hPlan
+  cases hAtom :
+      SpillPlan.compileFreshAtom? range sourceScope stackLayout layout
+        stmt with
+  | some atom =>
+      simp [hAtom] at hPlan
+      cases hPlan
+      exact
+        compileFreshAtom?_regular_sound_exact_length hSpec hWordBytes hAtom
+          hRel hDefined hLength hSourceRun
+  | none =>
+      simp [hAtom] at hPlan
+      exact
+        compileFreshAtomWithSpill?_regular_sound_exact_length hSpec
+          hWordBytes hPlan hRel hDefined hLength hSourceRun
+
+mutual
+
+theorem compileStmtWithConservativeScopedSpill?_regular_sound_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {stmt : Locals.Stmt} {plan : SpillPlan}
+      {program : Locals.Program}
+      {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+      {fuel : Nat} {source sourceAfter : Locals.Source.State}
+      {target : EVMState},
+      SpillPlan.compileStmtWithConservativeScopedSpill? range sourceScope
+          stackLayout layout stmt =
+        some plan →
+      sourceCtx.scope = sourceScope →
+      SpillStateRel range sourceScope stackLayout layout source target →
+      SpillLayout.StoreDefined source.vars layout →
+      target.stack.length = stackLayout.length →
+      Locals.Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel stmt source =
+        .ok (Locals.Source.Outcome.regular sourceAfter, sourceCtxAfter) →
+      ∃ final,
+        SpillStmtCode.run plan.code target = .ok (.regular final) ∧
+          SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+            sourceAfter final ∧
+          SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+          final.stack.length = plan.stackLayout.length
+  | .expr (results := results) expr, plan, program, sourceCtx,
+      sourceCtxAfter, fuel, source, sourceAfter, target, hPlan, _hScope,
+      hRel, hDefined, hLength, hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .exprs exprs, plan, program, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hPlan, _hScope, hRel, hDefined, hLength,
+      hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .let_ name value, plan, program, sourceCtx, sourceCtxAfter, fuel,
+      source, sourceAfter, target, hPlan, _hScope, hRel, hDefined,
+      hLength, hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .assign name value, plan, program, sourceCtx, sourceCtxAfter, fuel,
+      source, sourceAfter, target, hPlan, _hScope, hRel, hDefined,
+      hLength, hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .assignTop name, plan, program, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hPlan, _hScope, hRel, hDefined, hLength,
+      hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .assignTopWithOffset offset name, plan, program, sourceCtx,
+      sourceCtxAfter, fuel, source, sourceAfter, target, hPlan, _hScope,
+      hRel, hDefined, hLength, hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .promoteName name, plan, program, sourceCtx, sourceCtxAfter, fuel,
+      source, sourceAfter, target, hPlan, _hScope, hRel, hDefined,
+      hLength, hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .cleanupTo targetLayout, plan, program, sourceCtx, sourceCtxAfter,
+      fuel, source, sourceAfter, target, hPlan, _hScope, hRel, hDefined,
+      hLength, hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .block body, plan, program, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hPlan, hScope, hRel, hDefined, hLength,
+      hSourceRun =>
+      compileBlockStmtWithConservativeScopedSpill?_regular_sound_exact_length
+        hSpec hWordBytes (body := body) (plan := plan)
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hScope hRel hDefined hLength hSourceRun
+  | .if_ cond body, plan, program, sourceCtx, sourceCtxAfter, fuel,
+      source, sourceAfter, target, hPlan, _hScope, hRel, hDefined,
+      hLength, hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .switch scrutinee cases defaultBody, plan, program, sourceCtx,
+      sourceCtxAfter, fuel, source, sourceAfter, target, hPlan, _hScope,
+      hRel, hDefined, hLength, hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .for_ init cond post body, plan, program, sourceCtx, sourceCtxAfter,
+      fuel, source, sourceAfter, target, hPlan, _hScope, hRel, hDefined,
+      hLength, hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .brk, plan, program, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hPlan, _hScope, hRel, hDefined, hLength,
+      hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .cont, plan, program, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hPlan, _hScope, hRel, hDefined, hLength,
+      hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .leave, plan, program, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hPlan, _hScope, hRel, hDefined, hLength,
+      hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .call name, plan, program, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hPlan, _hScope, hRel, hDefined, hLength,
+      hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .terminal kind, plan, program, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hPlan, _hScope, hRel, hDefined, hLength,
+      hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  | .terminalArgs kind args, plan, program, sourceCtx, sourceCtxAfter, fuel,
+      source, sourceAfter, target, hPlan, _hScope, hRel, hDefined,
+      hLength, hSourceRun =>
+      compileFreshAtomWithConservativeSpill?_regular_sound_exact_length
+        hSpec hWordBytes
+        (by
+          simpa [SpillPlan.compileStmtWithConservativeScopedSpill?]
+            using hPlan)
+        hRel hDefined hLength hSourceRun
+  termination_by stmt plan program sourceCtx sourceCtxAfter fuel source
+      sourceAfter target _hPlan _hScope _hRel _hDefined _hLength
+      _hSourceRun =>
+    (sizeOf stmt, 0)
+  decreasing_by
+    all_goals simp_wf
+    all_goals
+      first
+      | omega
+      | simp
+
+theorem compileStmtListWithConservativeScopedSpill?_regular_sound_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {stmts : List Locals.Stmt} {plan : SpillPlan}
+      {program : Locals.Program}
+      {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+      {fuel : Nat} {source sourceAfter : Locals.Source.State}
+      {target : EVMState},
+      SpillPlan.compileStmtListWithConservativeScopedSpill? range sourceScope
+          stackLayout layout stmts =
+        some plan →
+      sourceCtx.scope = sourceScope →
+      SpillStateRel range sourceScope stackLayout layout source target →
+      SpillLayout.StoreDefined source.vars layout →
+      target.stack.length = stackLayout.length →
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program sourceCtx fuel
+          { stmts := stmts } source =
+        .ok (Locals.Source.Outcome.regular sourceAfter, sourceCtxAfter) →
+      ∃ final,
+        SpillStmtCode.run plan.code target = .ok (.regular final) ∧
+          SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+            sourceAfter final ∧
+          SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+          final.stack.length = plan.stackLayout.length
+  | [], plan, program, sourceCtx, sourceCtxAfter, fuel, source, sourceAfter,
+      target, hPlan, _hScope, hRel, hDefined, hLength, hSourceRun => by
+      cases fuel with
+      | zero =>
+          simp [Locals.Source.Block.runOpen, Locals.Source.invalid,
+            Structured.invalid] at hSourceRun
+      | succ fuel =>
+          simp [SpillPlan.compileStmtListWithConservativeScopedSpill?]
+            at hPlan
+          cases hPlan
+          simp [Locals.Source.Block.runOpen] at hSourceRun
+          rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+          cases hOutcome
+          exact
+            ⟨target, SpillStmtCode.run_skip target, hRel, hDefined,
+              hLength⟩
+  | stmt :: rest, plan, program, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hPlan, hScope, hRel, hDefined, hLength,
+      hSourceRun => by
+      cases fuel with
+      | zero =>
+          simp [Locals.Source.Block.runOpen, Locals.Source.invalid,
+            Structured.invalid] at hSourceRun
+      | succ fuel =>
+          unfold SpillPlan.compileStmtListWithConservativeScopedSpill?
+            at hPlan
+          cases hHeadPlan :
+              SpillPlan.compileStmtWithConservativeScopedSpill? range
+                sourceScope stackLayout layout stmt with
+          | none =>
+              simp [hHeadPlan] at hPlan
+          | some head =>
+              cases hTailPlan :
+                  SpillPlan.compileStmtListWithConservativeScopedSpill? range
+                    head.sourceScope head.stackLayout head.layout rest with
+              | none =>
+                  simp [hHeadPlan, hTailPlan] at hPlan
+              | some tail =>
+                  simp [hHeadPlan, hTailPlan] at hPlan
+                  cases hPlan
+                  cases hStmtRun :
+                      Locals.Source.Stmt.run
+                        Locals.Source.PrimitiveSemantics.structured program
+                        sourceCtx fuel stmt source with
+                  | error err =>
+                      simp [Locals.Source.Block.runOpen, hStmtRun]
+                        at hSourceRun
+                  | ok stmtResult =>
+                      rcases stmtResult with ⟨sourceHeadOutcome, sourceCtxMid⟩
+                      cases sourceHeadOutcome with
+                      | mk sourceHead sourceMode =>
+                          cases sourceMode with
+                          | regular =>
+                              have hTailSourceRun :
+                                  Locals.Source.Block.runOpen
+                                      Locals.Source.PrimitiveSemantics.structured
+                                      program sourceCtxMid fuel
+                                      { stmts := rest } sourceHead =
+                                    .ok
+                                      (Locals.Source.Outcome.regular
+                                        sourceAfter,
+                                        sourceCtxAfter) := by
+                                simpa [Locals.Source.Block.runOpen, hStmtRun]
+                                  using hSourceRun
+                              have hSourceCtxMidScope :
+                                  sourceCtxMid.scope =
+                                    Locals.Scope.Stmt.outEnv sourceCtx.scope
+                                      stmt :=
+                                Locals.Source.Stmt.run_regular_scope hStmtRun
+                              have hHeadPlanScope :
+                                  head.sourceScope =
+                                    Locals.Scope.Stmt.outEnv sourceScope
+                                      stmt :=
+                                SpillPlan.compileStmtWithConservativeScopedSpill?_sourceScope_outEnv
+                                  hHeadPlan
+                              have hTailScope :
+                                  sourceCtxMid.scope = head.sourceScope := by
+                                simpa [hScope, hHeadPlanScope] using
+                                  hSourceCtxMidScope
+                              rcases
+                                  compileStmtWithConservativeScopedSpill?_regular_sound_exact_length
+                                    hSpec hWordBytes (stmt := stmt)
+                                    (plan := head) hHeadPlan hScope hRel
+                                    hDefined hLength hStmtRun with
+                                ⟨headFinal, hHeadRun, hHeadRel,
+                                  hHeadDefined, hHeadLength⟩
+                              rcases
+                                  compileStmtListWithConservativeScopedSpill?_regular_sound_exact_length
+                                    hSpec hWordBytes hTailPlan hTailScope
+                                    hHeadRel hHeadDefined hHeadLength
+                                    hTailSourceRun with
+                                ⟨final, hTailRun, hTailRel, hTailDefined,
+                                  hTailLength⟩
+                              exact
+                                ⟨final,
+                                  SpillStmtCode.run_seq_regular hHeadRun
+                                    hTailRun,
+                                  hTailRel,
+                                  hTailDefined,
+                                  hTailLength⟩
+                          | brk =>
+                              simp [Locals.Source.Block.runOpen, hStmtRun,
+                                Locals.Source.Outcome.brk] at hSourceRun
+                              rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                              cases hOutcome
+                          | cont =>
+                              simp [Locals.Source.Block.runOpen, hStmtRun,
+                                Locals.Source.Outcome.cont] at hSourceRun
+                              rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                              cases hOutcome
+                          | leave =>
+                              simp [Locals.Source.Block.runOpen, hStmtRun,
+                                Locals.Source.Outcome.leave] at hSourceRun
+                              rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                              cases hOutcome
+                          | halt kind =>
+                              simp [Locals.Source.Block.runOpen, hStmtRun,
+                                Locals.Source.Outcome.halt] at hSourceRun
+                              rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                              cases hOutcome
+  termination_by stmts plan program sourceCtx sourceCtxAfter fuel source
+      sourceAfter target _hPlan _hScope _hRel _hDefined _hLength
+      _hSourceRun =>
+    (sizeOf stmts, 0)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+theorem compileBlockOpenWithConservativeScopedSpill?_regular_sound_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {block : Locals.Block} {plan : SpillPlan}
+      {program : Locals.Program}
+      {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+      {fuel : Nat} {source sourceAfter : Locals.Source.State}
+      {target : EVMState},
+      SpillPlan.compileBlockOpenWithConservativeScopedSpill? range
+          sourceScope stackLayout layout block =
+        some plan →
+      sourceCtx.scope = sourceScope →
+      SpillStateRel range sourceScope stackLayout layout source target →
+      SpillLayout.StoreDefined source.vars layout →
+      target.stack.length = stackLayout.length →
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program sourceCtx fuel
+          block source =
+        .ok (Locals.Source.Outcome.regular sourceAfter, sourceCtxAfter) →
+      ∃ final,
+        SpillStmtCode.run plan.code target = .ok (.regular final) ∧
+          SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+            sourceAfter final ∧
+          SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+          final.stack.length = plan.stackLayout.length
+  | ⟨stmts⟩, plan, program, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hPlan, hScope, hRel, hDefined, hLength,
+      hSourceRun =>
+      compileStmtListWithConservativeScopedSpill?_regular_sound_exact_length
+        hSpec hWordBytes (stmts := stmts) (plan := plan)
+        (by
+          simpa [SpillPlan.compileBlockOpenWithConservativeScopedSpill?]
+            using hPlan)
+        hScope hRel hDefined hLength hSourceRun
+  termination_by block plan program sourceCtx sourceCtxAfter fuel source
+      sourceAfter target _hPlan _hScope _hRel _hDefined _hLength
+      _hSourceRun =>
+    (sizeOf block, 1)
+  decreasing_by
+    cases block
+    simp_wf
+    omega
+
+theorem compileBlockStmtWithConservativeScopedSpill?_regular_sound_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {body : Locals.Block} {plan : SpillPlan}
+      {program : Locals.Program}
+      {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+      {fuel : Nat} {source sourceAfter : Locals.Source.State}
+      {target : EVMState},
+      SpillPlan.compileBlockStmtWithConservativeScopedSpill? range
+          sourceScope stackLayout layout body =
+        some plan →
+      sourceCtx.scope = sourceScope →
+      SpillStateRel range sourceScope stackLayout layout source target →
+      SpillLayout.StoreDefined source.vars layout →
+      target.stack.length = stackLayout.length →
+      Locals.Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel (.block body) source =
+        .ok (Locals.Source.Outcome.regular sourceAfter, sourceCtxAfter) →
+      ∃ final,
+        SpillStmtCode.run plan.code target = .ok (.regular final) ∧
+          SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+            sourceAfter final ∧
+          SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+          final.stack.length = plan.stackLayout.length
+  | body, plan, program, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hPlan, hScope, hRel, hDefined, hLength,
+      hSourceRun => by
+      rcases
+          SpillPlan.compileBlockStmtWithConservativeScopedSpill?_eq_some
+            hPlan with
+        ⟨bodyPlan, restrictedLayout, hBodyPlan, hRestricted, hCheck,
+          hPlanEq⟩
+      subst plan
+      cases hOpen :
+          Locals.Source.Block.runOpen
+            Locals.Source.PrimitiveSemantics.structured program sourceCtx
+            fuel body source with
+      | error err =>
+          simp [Locals.Source.Stmt.run, Locals.Source.Block.runScoped, hOpen]
+            at hSourceRun
+      | ok openResult =>
+          rcases openResult with ⟨openOutcome, openCtx⟩
+          cases openOutcome with
+          | mk openState mode =>
+              cases mode with
+              | regular =>
+                  rcases
+                      compileBlockOpenWithConservativeScopedSpill?_regular_sound_exact_length
+                        hSpec hWordBytes (block := body) (plan := bodyPlan)
+                        hBodyPlan hScope hRel hDefined hLength hOpen with
+                    ⟨targetFinal, hRun, hBodyRel, hBodyDefined,
+                      hBodyLength⟩
+                  simp [Locals.Source.Stmt.run, Locals.Source.Block.runScoped,
+                    hOpen] at hSourceRun
+                  rcases hSourceRun with ⟨hOutcome, _hCtxAfter⟩
+                  cases hOutcome
+                  refine ⟨targetFinal, hRun, ?_, ?_, hBodyLength⟩
+                  · simpa [hScope] using
+                      SpillStateRel.restrictToScope hRestricted hCheck
+                        hBodyRel
+                  · intro name location hMem
+                    have hRestrictedDefined :
+                        SpillLayout.StoreDefined
+                          (Locals.Source.Store.restrictTo sourceScope
+                            openState.vars)
+                          (SpillLayout.restrictToScope sourceScope
+                            bodyPlan.layout) :=
+                      SpillLayout.StoreDefined.restrictToScope
+                        (scope := sourceScope) hBodyDefined
+                    simpa [hScope, Locals.Source.State.restrictTo] using
+                      hRestrictedDefined (name := name) (location := location)
+                        (by simpa [hRestricted] using hMem)
+              | brk =>
+                  simp [Locals.Source.Stmt.run, Locals.Source.Block.runScoped,
+                    hOpen, Locals.Source.Outcome.brk] at hSourceRun
+                  rcases hSourceRun with ⟨hOutcome, _hCtxAfter⟩
+                  cases hOutcome
+              | cont =>
+                  simp [Locals.Source.Stmt.run, Locals.Source.Block.runScoped,
+                    hOpen, Locals.Source.Outcome.cont] at hSourceRun
+                  rcases hSourceRun with ⟨hOutcome, _hCtxAfter⟩
+                  cases hOutcome
+              | leave =>
+                  simp [Locals.Source.Stmt.run, Locals.Source.Block.runScoped,
+                    hOpen, Locals.Source.Outcome.leave] at hSourceRun
+                  rcases hSourceRun with ⟨hOutcome, _hCtxAfter⟩
+                  cases hOutcome
+              | halt kind =>
+                  simp [Locals.Source.Stmt.run, Locals.Source.Block.runScoped,
+                    hOpen, Locals.Source.Outcome.halt] at hSourceRun
+                  rcases hSourceRun with ⟨hOutcome, _hCtxAfter⟩
+                  cases hOutcome
+  termination_by body plan program sourceCtx sourceCtxAfter fuel source
+      sourceAfter target _hPlan _hScope _hRel _hDefined _hLength
+      _hSourceRun =>
+    (sizeOf body, 2)
+  decreasing_by
+    simp_wf
+    omega
+
+end
+
+theorem compileFreshAtomWithAdaptiveSpill?_regular_sound_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {stmt : Locals.Stmt} {plan : SpillPlan}
+    {program : Locals.Program}
+    {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Locals.Source.State}
+    {target : EVMState}
+    (hPlan :
+      SpillPlan.compileFreshAtomWithAdaptiveSpill? range sourceScope
+          stackLayout layout stmt =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.stack.length = stackLayout.length)
+    (hSourceRun :
+      Locals.Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel stmt source =
+        .ok (Locals.Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    ∃ final,
+      SpillStmtCode.run plan.code target = .ok (.regular final) ∧
+        SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+          sourceAfter final ∧
+        SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+        final.stack.length = plan.stackLayout.length := by
+  induction stackLayout generalizing layout plan target with
+  | nil =>
+      unfold SpillPlan.compileFreshAtomWithAdaptiveSpill? at hPlan
+      cases hAtom :
+          SpillPlan.compileFreshAtom? range sourceScope [] layout stmt with
+      | none =>
+          simp [hAtom] at hPlan
+      | some atom =>
+          simp [hAtom] at hPlan
+          cases hPlan
+          exact
+            compileFreshAtom?_regular_sound_exact_length hSpec hWordBytes
+              hAtom hRel hDefined hLength hSourceRun
+  | cons top restStack ih =>
+      unfold SpillPlan.compileFreshAtomWithAdaptiveSpill? at hPlan
+      cases hAtom :
+          SpillPlan.compileFreshAtom? range sourceScope (top :: restStack)
+              layout stmt with
+      | some atom =>
+          simp [hAtom] at hPlan
+          cases hPlan
+          exact
+            compileFreshAtom?_regular_sound_exact_length hSpec hWordBytes
+              hAtom hRel hDefined hLength hSourceRun
+      | none =>
+          cases hEvict :
+              SpillLayout.evictTopStackLayout? range sourceScope
+                (top :: restStack) layout with
+          | none =>
+              simp [hAtom, hEvict] at hPlan
+          | some evicted =>
+              rcases evicted with ⟨slot, nextLayout⟩
+              cases hTail :
+                  SpillPlan.compileFreshAtomWithAdaptiveSpill? range
+                    sourceScope restStack nextLayout stmt with
+              | none =>
+                  simp [hAtom, hEvict, hTail] at hPlan
+              | some tail =>
+                  simp [hAtom, hEvict, hTail] at hPlan
+                  cases hPlan
+                  rcases
+                      run_spillStoreTopCode_evictTopStackLayout?_of_storeDefined_exact_length
+                        hSpec hWordBytes hEvict hRel hDefined hLength with
+                    ⟨_evictTop, _evictRest, targetMid, hStackLayout,
+                      hHeadRunCode, hMidRel, hMidLength⟩
+                  cases hStackLayout
+                  have hHeadRun :
+                      SpillStmtCode.run
+                        (.Code (spillStoreTopCode (range.word slot))) target =
+                        .ok (.regular targetMid) := by
+                    simp [SpillStmtCode.run, hHeadRunCode]
+                  have hDefinedNext :
+                      SpillLayout.StoreDefined source.vars nextLayout := by
+                    rcases SpillLayout.evictTopStackLayout?_sound hEvict with
+                      ⟨_soundTop, _soundRest, hSoundStack, _hTopBinding,
+                        _hSlotChoose, hNext, _hCheck⟩
+                    cases hSoundStack
+                    rw [hNext]
+                    exact
+                      SpillLayout.StoreDefined.evictTopStackLayout hDefined
+                  rcases ih (layout := nextLayout) (plan := tail)
+                      (target := targetMid) hTail hMidRel hDefinedNext
+                      hMidLength with
+                    ⟨final, hTailRun, hTailRel, hTailDefined,
+                      hTailLength⟩
+                  exact
+                    ⟨final,
+                      SpillStmtCode.run_seq_regular hHeadRun hTailRun,
+                      hTailRel,
+                      hTailDefined,
+                      hTailLength⟩
+
+theorem compileStmtListWithAdaptiveSpill?_regular_sound_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} :
+    ∀ {sourceScope stackLayout : List Name}
+      {layout : SpillLayout.Layout} {stmts : List Locals.Stmt}
+      {plan : SpillPlan}
+      {program : Locals.Program}
+      {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+      {fuel : Nat} {source sourceAfter : Locals.Source.State}
+      {target : EVMState},
+      SpillPlan.compileStmtListWithAdaptiveSpill? range sourceScope
+          stackLayout layout stmts =
+        some plan →
+      SpillStateRel range sourceScope stackLayout layout source target →
+      SpillLayout.StoreDefined source.vars layout →
+      target.stack.length = stackLayout.length →
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program sourceCtx fuel
+          { stmts := stmts } source =
+        .ok (Locals.Source.Outcome.regular sourceAfter, sourceCtxAfter) →
+      ∃ final,
+        SpillStmtCode.run plan.code target = .ok (.regular final) ∧
+          SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+            sourceAfter final ∧
+          SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+          final.stack.length = plan.stackLayout.length
+  | sourceScope, stackLayout, layout, [], plan, program, sourceCtx,
+      sourceCtxAfter, fuel, source, sourceAfter, target, hPlan, hRel,
+      hDefined, hLength, hSourceRun => by
+      cases fuel with
+      | zero =>
+          simp [Locals.Source.Block.runOpen, Locals.Source.invalid,
+            Structured.invalid] at hSourceRun
+      | succ fuel =>
+          simp [SpillPlan.compileStmtListWithAdaptiveSpill?] at hPlan
+          cases hPlan
+          simp [Locals.Source.Block.runOpen] at hSourceRun
+          rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+          cases hOutcome
+          exact
+            ⟨target, SpillStmtCode.run_skip target, hRel, hDefined,
+              hLength⟩
+  | sourceScope, stackLayout, layout, stmt :: rest, plan, program,
+      sourceCtx, sourceCtxAfter, fuel, source, sourceAfter, target, hPlan,
+      hRel, hDefined, hLength, hSourceRun => by
+      cases fuel with
+      | zero =>
+          simp [Locals.Source.Block.runOpen, Locals.Source.invalid,
+            Structured.invalid] at hSourceRun
+      | succ fuel =>
+          unfold SpillPlan.compileStmtListWithAdaptiveSpill? at hPlan
+          cases hHeadPlan :
+              SpillPlan.compileFreshAtomWithAdaptiveSpill? range sourceScope
+                stackLayout layout stmt with
+          | none =>
+              simp [hHeadPlan] at hPlan
+          | some head =>
+              cases hTailPlan :
+                  SpillPlan.compileStmtListWithAdaptiveSpill? range
+                    head.sourceScope head.stackLayout head.layout rest with
+              | none =>
+                  simp [hHeadPlan, hTailPlan] at hPlan
+              | some tail =>
+                  simp [hHeadPlan, hTailPlan] at hPlan
+                  cases hPlan
+                  cases hStmtRun :
+                      Locals.Source.Stmt.run
+                        Locals.Source.PrimitiveSemantics.structured
+                        program sourceCtx fuel stmt source with
+                  | error err =>
+                      simp [Locals.Source.Block.runOpen, hStmtRun]
+                        at hSourceRun
+                  | ok stmtResult =>
+                      rcases stmtResult with ⟨sourceHeadOutcome, sourceCtxMid⟩
+                      cases sourceHeadOutcome with
+                      | mk sourceHead sourceMode =>
+                          cases sourceMode with
+                          | regular =>
+                              have hTailSourceRun :
+                                  Locals.Source.Block.runOpen
+                                      Locals.Source.PrimitiveSemantics.structured
+                                      program sourceCtxMid fuel
+                                      { stmts := rest } sourceHead =
+                                    .ok
+                                      (Locals.Source.Outcome.regular
+                                        sourceAfter,
+                                        sourceCtxAfter) := by
+                                simpa [Locals.Source.Block.runOpen, hStmtRun]
+                                  using hSourceRun
+                              rcases
+                                  compileFreshAtomWithAdaptiveSpill?_regular_sound_exact_length
+                                    hSpec hWordBytes hHeadPlan hRel hDefined
+                                    hLength hStmtRun with
+                                ⟨headFinal, hHeadRun, hHeadRel,
+                                  hHeadDefined, hHeadLength⟩
+                              rcases
+                                  compileStmtListWithAdaptiveSpill?_regular_sound_exact_length
+                                    hSpec hWordBytes hTailPlan hHeadRel
+                                    hHeadDefined hHeadLength
+                                    hTailSourceRun with
+                                ⟨final, hTailRun, hTailRel, hTailDefined,
+                                  hTailLength⟩
+                              exact
+                                ⟨final,
+                                  SpillStmtCode.run_seq_regular hHeadRun
+                                    hTailRun,
+                                  hTailRel,
+                                  hTailDefined,
+                                  hTailLength⟩
+                          | brk =>
+                              simp [Locals.Source.Block.runOpen, hStmtRun,
+                                Locals.Source.Outcome.brk] at hSourceRun
+                              rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                              cases hOutcome
+                          | cont =>
+                              simp [Locals.Source.Block.runOpen, hStmtRun,
+                                Locals.Source.Outcome.cont] at hSourceRun
+                              rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                              cases hOutcome
+                          | leave =>
+                              simp [Locals.Source.Block.runOpen, hStmtRun,
+                                Locals.Source.Outcome.leave] at hSourceRun
+                              rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                              cases hOutcome
+                          | halt kind =>
+                              simp [Locals.Source.Block.runOpen, hStmtRun,
+                                Locals.Source.Outcome.halt] at hSourceRun
+                              rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                              cases hOutcome
+
+theorem compileBlockOpenWithAdaptiveSpill?_regular_sound_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {block : Locals.Block} {plan : SpillPlan}
+    {program : Locals.Program}
+    {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Locals.Source.State}
+    {target : EVMState}
+    (hPlan :
+      SpillPlan.compileBlockOpenWithAdaptiveSpill? range sourceScope
+          stackLayout layout block =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.stack.length = stackLayout.length)
+    (hSourceRun :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program sourceCtx fuel
+          block source =
+        .ok (Locals.Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    ∃ final,
+      SpillStmtCode.run plan.code target = .ok (.regular final) ∧
+        SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+          sourceAfter final ∧
+        SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+        final.stack.length = plan.stackLayout.length := by
+  cases block with
+  | mk stmts =>
+      exact
+        compileStmtListWithAdaptiveSpill?_regular_sound_exact_length
+          hSpec hWordBytes
+          (by simpa [SpillPlan.compileBlockOpenWithAdaptiveSpill?] using
+            hPlan)
+          hRel hDefined hLength hSourceRun
+
+theorem compileLocalsBlockSpan?_regular_sound_exact_length
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Locals.Block} {plan : Plan}
+    {program : Locals.Program} {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Locals.Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Locals.Source.State}
+    {target : Expressions.RunState}
+    (hCompile :
+      compileLocalsBlockSpan? range sourceScope stackLayout layout block =
+        some plan)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program sourceCtx fuel
+          block source =
+        .ok (Locals.Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      final.stack.length = plan.stackLayout.length ∧
+      sourceCtxAfter.scope = plan.sourceScope := by
+  have hScopeAfter :
+      sourceCtxAfter.scope = plan.sourceScope := by
+    have hRunScope :
+        sourceCtxAfter.scope =
+          Locals.Scope.Block.outEnv sourceCtx.scope block :=
+      Locals.Source.Block.runOpen_regular_scope hSourceRun
+    have hPlanScope :
+        plan.sourceScope = Locals.Scope.Block.outEnv sourceScope block :=
+      compileLocalsBlockSpan?_sourceScope_outEnv hCompile
+    rw [hPlanScope]
+    simpa [hScope] using hRunScope
+  unfold compileLocalsBlockSpan? at hCompile
+  cases hAdaptive :
+      SpillPlan.compileBlockOpenWithAdaptiveSpill? range sourceScope
+        stackLayout layout block with
+  | some adaptivePlan =>
+      simp [hAdaptive, planOfSpillPlan] at hCompile
+      subst plan
+      rcases
+          compileBlockOpenWithAdaptiveSpill?_regular_sound_exact_length
+            hSpec hWordBytes hAdaptive hRel hDefined hLength hSourceRun with
+        ⟨final, hCodeRun, hFinalRel, hFinalDefined, hFinalLength⟩
+      rcases
+          SpillStmtCode.run_toExpressionsBlock_exists exprProgram hCodeRun with
+        ⟨exprFuel, hExprRun⟩
+      exact
+        ⟨final, exprFuel,
+          by simpa [SpillStmtCode.toExpressionsOutcome] using hExprRun,
+          hFinalRel, hFinalDefined, hFinalLength, hScopeAfter⟩
+  | none =>
+      simp [hAdaptive] at hCompile
+      cases hConservative :
+          SpillPlan.compileBlockOpenWithConservativeScopedSpill? range
+            sourceScope stackLayout layout block with
+      | none =>
+          simp [hConservative] at hCompile
+      | some conservativePlan =>
+          simp [hConservative, planOfSpillPlan] at hCompile
+          subst plan
+          rcases
+              compileBlockOpenWithConservativeScopedSpill?_regular_sound_exact_length
+                hSpec hWordBytes hConservative hScope hRel hDefined hLength
+                hSourceRun with
+            ⟨final, hCodeRun, hFinalRel, hFinalDefined, hFinalLength⟩
+          rcases
+              SpillStmtCode.run_toExpressionsBlock_exists exprProgram
+                hCodeRun with
+            ⟨exprFuel, hExprRun⟩
+          exact
+            ⟨final, exprFuel,
+              by simpa [SpillStmtCode.toExpressionsOutcome] using hExprRun,
+              hFinalRel, hFinalDefined, hFinalLength, hScopeAfter⟩
+
+theorem compileNonCallStmtSpan?_regular_sound_meta_exact_of_source_run
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    {program : Program} {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    (hCompile :
+      compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+          stmt =
+        some plan)
+    (hOwned : SourceLowering.SourceToLocals.Stmt.SourceOwned returns stmt)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel stmt source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      final.stack.length = plan.stackLayout.length ∧
+      sourceCtxAfter.scope = plan.sourceScope := by
+  have hBlockRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx (fuel + 2) { stmts := [stmt] } source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter) :=
+    source_runOpen_singleton_of_stmt_run hSourceRun
+  have hBlockOwned :
+      SourceLowering.SourceToLocals.Block.SourceOwned returns
+        { stmts := [stmt] } := by
+    simpa [SourceLowering.SourceToLocals.Block.SourceOwned,
+      SourceLowering.SourceToLocals.StmtList.SourceOwned] using
+      And.intro hOwned trivial
+  have hLowerRun :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program.toLocals
+          (SourceLowering.Ctx.toLocals sourceCtx) (fuel + 2)
+          (Block.toLocals returns { stmts := [stmt] }) source =
+        .ok (Source.Outcome.regular sourceAfter,
+          SourceLowering.Ctx.toLocals sourceCtxAfter) :=
+    SourceLowering.SourceToLocals.sourceOwnedBlock_runOpen_toLocals_of_run
+      (lowerProgram := program.toLocals) hBlockOwned hBlockRun
+  have hLowerRun' :
+      Locals.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured program.toLocals
+          (SourceLowering.Ctx.toLocals sourceCtx) (fuel + 2)
+          { stmts := Stmt.toLocals returns stmt } source =
+        .ok (Source.Outcome.regular sourceAfter,
+          SourceLowering.Ctx.toLocals sourceCtxAfter) := by
+    simpa [Block.toLocals, StmtList.toLocals] using hLowerRun
+  exact
+    compileLocalsBlockSpan?_regular_sound_exact_length
+      hSpec hWordBytes hCompile
+      (by simpa [SourceLowering.Ctx.toLocals, hScope])
+      hRel hDefined hLength hLowerRun'
+
+theorem compileReturnCode?_sound
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {returns : List Name} {code : Structured.Code}
+    {source : Source.State} {target : EVMState} {values : List Word}
+    (hCompile :
+      compileReturnCode? range layout returns = some code)
+    (hRel :
+      SpillStackPrefixRel range sourceScope stackLayout layout source []
+        target)
+    (hLookup :
+      Source.Store.lookupMany returns source.vars = some values) :
+    ∃ final,
+      Structured.Code.run code target = .ok final ∧
+        SpillStackPrefixRel range sourceScope stackLayout layout source
+          values.reverse final := by
+  rcases compileReturnCode?_eq_some hCompile with ⟨hSafe, hCode⟩
+  have hEval :
+      Locals.Source.Expr.ExprSeq.eval Locals.Source.PrimitiveSemantics.structured
+          (Lower.returnExprs returns) source =
+        .ok (source, values) :=
+    returnExprs_eval_of_lookupMany hLookup
+  simpa using
+    SpillStackPrefixRel.compileSeqFullCode_bridge_structured
+      (exprs := Lower.returnExprs returns)
+      (range := range) (sourceScope := sourceScope)
+      (stackLayout := stackLayout) (layout := layout)
+      (source := source) (source' := source)
+      (target := target) (stackPrefix := [])
+      (offset := 0) (values := values) (code := code)
+      hSafe hRel rfl hCode hEval
+
+def appendReturnFallthrough? (range : ScratchRange)
+    (returns : List Name) (plan : Plan) : Option Plan := do
+  let spill ←
+    Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.spillAllStack?
+      range plan.sourceScope plan.stackLayout plan.layout
+  let code ← compileReturnCode? range spill.layout returns
+  some
+    { sourceScope := spill.sourceScope
+      stackLayout := []
+      layout := spill.layout
+      block :=
+        ExpressionsBlock.seqList
+          [ plan.block,
+            SpillStmtCode.toExpressionsBlock spill.code,
+            ExpressionsBlock.ofCode code ] }
+
+theorem appendReturnFallthrough?_eq_some
+    {range : ScratchRange} {returns : List Name}
+    {plan full : Plan}
+    (hCompile :
+      appendReturnFallthrough? range returns plan = some full) :
+    ∃ spill code,
+      SpillPlan.spillAllStack? range plan.sourceScope plan.stackLayout
+          plan.layout =
+        some spill ∧
+      compileReturnCode? range spill.layout returns = some code ∧
+      full =
+        { sourceScope := spill.sourceScope
+          stackLayout := []
+          layout := spill.layout
+          block :=
+            ExpressionsBlock.seqList
+              [ plan.block,
+                SpillStmtCode.toExpressionsBlock spill.code,
+                ExpressionsBlock.ofCode code ] } := by
+  unfold appendReturnFallthrough? at hCompile
+  cases hSpill :
+      SpillPlan.spillAllStack? range plan.sourceScope plan.stackLayout
+        plan.layout with
+  | none =>
+      simp [hSpill] at hCompile
+  | some spill =>
+      simp [hSpill] at hCompile
+      cases hCode : compileReturnCode? range spill.layout returns with
+      | none =>
+          simp [hCode] at hCompile
+      | some code =>
+          simp [hCode] at hCompile
+          cases hCompile
+          exact
+            ⟨spill, code, by simpa [hSpill], by simpa [hCode], rfl⟩
+
+theorem appendReturnFallthrough?_noCallCreate
+    {range : ScratchRange} {returns : List Name}
+    {plan full : Plan}
+    (hCompile :
+      appendReturnFallthrough? range returns plan = some full)
+    (hPlan : plan.block.usesCallCreate = false) :
+    full.block.usesCallCreate = false := by
+  rcases appendReturnFallthrough?_eq_some hCompile with
+    ⟨spill, code, hSpill, hCode, hFull⟩
+  subst full
+  simpa [ExpressionsBlock.seqList] using
+    expressionsBlock_append_noCallCreate hPlan
+      (expressionsBlock_append_noCallCreate
+        (SpillStmtCode.toExpressionsBlock_noCallCreate
+          (SpillPlan.spillAllStack?_noCallCreate hSpill))
+        (expressionsBlock_append_noCallCreate
+          (expressionsBlock_ofCode_noCallCreate
+            (compileReturnCode?_noCallCreate hCode))
+          expressionsBlock_empty_noCallCreate))
+
+theorem appendReturnFallthrough?_regular_sound
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {returns : List Name}
+    {plan full : Plan} {exprProgram : Expressions.Program}
+    {sourceAfter : Source.State} {target : Expressions.RunState}
+    {targetAfter : EVMState} {values : List Word}
+    (hCompile :
+      appendReturnFallthrough? range returns plan = some full)
+    (hPlanRun :
+      ∃ planFuel,
+        Expressions.Block.run exprProgram planFuel plan.block target =
+          .ok (Expressions.Outcome.regular (target.withEVM targetAfter)))
+    (hRel :
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter targetAfter)
+    (hDefined : SpillLayout.StoreDefined sourceAfter.vars plan.layout)
+    (hLookup :
+      Source.Store.lookupMany returns sourceAfter.vars = some values) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel full.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+        SpillStackPrefixRel range full.sourceScope full.stackLayout full.layout
+          sourceAfter values.reverse final := by
+  rcases appendReturnFallthrough?_eq_some hCompile with
+    ⟨spill, code, hSpill, hCode, hFull⟩
+  subst full
+  rcases hPlanRun with ⟨planFuel, hPlanRun⟩
+  rcases
+      SpillPlan.spillAllStack?_sound hSpec hWordBytes hSpill hRel
+        hDefined with
+    ⟨afterSpill, hSpillRun, hSpillRel, _hSpillScope, hSpillStack,
+      _hSpillDefined⟩
+  have hSpillRelNil :
+      SpillStateRel range spill.sourceScope [] spill.layout sourceAfter
+        afterSpill := by
+    simpa [hSpillStack] using hSpillRel
+  have hSpillBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (SpillStmtCode.toExpressionsBlock spill.code)
+          (target.withEVM targetAfter) =
+        .ok (Expressions.Outcome.regular (target.withEVM afterSpill)) := by
+    rcases
+        SpillStmtCode.run_toExpressionsBlock_exists exprProgram
+          (initial := target.withEVM targetAfter) hSpillRun with
+      ⟨fuel, hRun⟩
+    exact
+      ⟨fuel, by
+        simpa [SpillStmtCode.toExpressionsOutcome,
+          Expressions.RunState.withEVM_withEVM] using hRun⟩
+  rcases
+      compileReturnCode?_sound hCode
+        (SpillStackPrefixRel.of_spillStateRel hSpillRelNil) hLookup with
+    ⟨final, hReturnRun, hFinalRel⟩
+  have hReturnBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel (ExpressionsBlock.ofCode code)
+          (target.withEVM afterSpill) =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) := by
+    rcases
+        expressionsBlock_ofCode_run_exists exprProgram
+          (state := target.withEVM afterSpill) hReturnRun with
+      ⟨fuel, hRun⟩
+    exact
+      ⟨fuel, by
+        simpa [Expressions.RunState.withEVM_withEVM] using hRun⟩
+  have hSpillReturn :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (SpillStmtCode.toExpressionsBlock spill.code)
+            (ExpressionsBlock.ofCode code))
+          (target.withEVM targetAfter) =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram hSpillBlock hReturnBlock
+  have hAll :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append plan.block
+            (ExpressionsBlock.append
+              (SpillStmtCode.toExpressionsBlock spill.code)
+              (ExpressionsBlock.ofCode code)))
+          target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram
+      ⟨planFuel, hPlanRun⟩ hSpillReturn
+  rcases hAll with ⟨exprFuel, hRun⟩
+  exact
+    ⟨final, exprFuel,
+      by simpa [ExpressionsBlock.seqList] using hRun,
+      by simpa using hFinalRel⟩
+
+theorem appendReturnFallthrough?_regular_sound_exact_stack
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {returns : List Name}
+    {plan full : Plan} {exprProgram : Expressions.Program}
+    {sourceAfter : Source.State} {target : Expressions.RunState}
+    {targetAfter : EVMState} {values : List Word}
+    (hCompile :
+      appendReturnFallthrough? range returns plan = some full)
+    (hPlanRun :
+      ∃ planFuel,
+        Expressions.Block.run exprProgram planFuel plan.block target =
+          .ok (Expressions.Outcome.regular (target.withEVM targetAfter)))
+    (hRel :
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter targetAfter)
+    (hDefined : SpillLayout.StoreDefined sourceAfter.vars plan.layout)
+    (hLookup :
+      Source.Store.lookupMany returns sourceAfter.vars = some values)
+    (hLength : targetAfter.stack.length = plan.stackLayout.length) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel full.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+        final.stack = values.reverse ∧
+        SpillStackPrefixRel range full.sourceScope full.stackLayout full.layout
+          sourceAfter values.reverse final := by
+  rcases appendReturnFallthrough?_eq_some hCompile with
+    ⟨spill, code, hSpill, hCode, hFull⟩
+  subst full
+  rcases hPlanRun with ⟨planFuel, hPlanRun⟩
+  rcases
+      spillAllStack?_sound_exact_empty hSpec hWordBytes hSpill hRel
+        hDefined hLength with
+    ⟨afterSpill, hSpillRun, hSpillRel, _hSpillScope, hSpillStack,
+      _hSpillDefined, hAfterSpillStack⟩
+  have hSpillRelNil :
+      SpillStateRel range spill.sourceScope [] spill.layout sourceAfter
+        afterSpill := by
+    simpa [hSpillStack] using hSpillRel
+  have hSpillBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (SpillStmtCode.toExpressionsBlock spill.code)
+          (target.withEVM targetAfter) =
+        .ok (Expressions.Outcome.regular (target.withEVM afterSpill)) := by
+    rcases
+        SpillStmtCode.run_toExpressionsBlock_exists exprProgram
+          (initial := target.withEVM targetAfter) hSpillRun with
+      ⟨fuel, hRun⟩
+    exact
+      ⟨fuel, by
+        simpa [SpillStmtCode.toExpressionsOutcome,
+          Expressions.RunState.withEVM_withEVM] using hRun⟩
+  rcases
+      compileReturnCode?_sound_exact_nil hCode
+        (SpillStackPrefixRel.of_spillStateRel hSpillRelNil)
+        hAfterSpillStack hLookup with
+    ⟨final, hReturnRun, hFinalStack, hFinalRel⟩
+  have hReturnBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel (ExpressionsBlock.ofCode code)
+          (target.withEVM afterSpill) =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) := by
+    rcases
+        expressionsBlock_ofCode_run_exists exprProgram
+          (state := target.withEVM afterSpill) hReturnRun with
+      ⟨fuel, hRun⟩
+    exact
+      ⟨fuel, by
+        simpa [Expressions.RunState.withEVM_withEVM] using hRun⟩
+  have hSpillReturn :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (SpillStmtCode.toExpressionsBlock spill.code)
+            (ExpressionsBlock.ofCode code))
+          (target.withEVM targetAfter) =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram hSpillBlock hReturnBlock
+  have hAll :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append plan.block
+            (ExpressionsBlock.append
+              (SpillStmtCode.toExpressionsBlock spill.code)
+              (ExpressionsBlock.ofCode code)))
+          target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram
+      ⟨planFuel, hPlanRun⟩ hSpillReturn
+  rcases hAll with ⟨exprFuel, hRun⟩
+  exact
+    ⟨final, exprFuel,
+      by simpa [ExpressionsBlock.seqList] using hRun,
+      hFinalStack,
+      by simpa using hFinalRel⟩
+
+theorem appendReturnFallthrough?_leave_passthrough
+    {range : ScratchRange} {returns : List Name}
+    {plan full : Plan} {exprProgram : Expressions.Program}
+    {target : Expressions.RunState} {final : EVMState}
+    (hCompile :
+      appendReturnFallthrough? range returns plan = some full)
+    (hPlanRun :
+      ∃ planFuel,
+        Expressions.Block.run exprProgram planFuel plan.block target =
+          .ok (Expressions.Outcome.leave (target.withEVM final))) :
+    ∃ exprFuel,
+      Expressions.Block.run exprProgram exprFuel full.block target =
+        .ok (Expressions.Outcome.leave (target.withEVM final)) := by
+  rcases appendReturnFallthrough?_eq_some hCompile with
+    ⟨spill, code, _hSpill, _hCode, hFull⟩
+  subst full
+  rcases
+      expressionsBlock_append_nonregular_exists exprProgram
+        (left := plan.block)
+        (right :=
+          ExpressionsBlock.seqList
+            [ SpillStmtCode.toExpressionsBlock spill.code,
+              ExpressionsBlock.ofCode code ])
+        (state := target) hPlanRun
+        (by simp [Expressions.Outcome.leave]) with
+    ⟨exprFuel, hRun⟩
+  exact
+    ⟨exprFuel, by simpa [ExpressionsBlock.seqList] using hRun⟩
+
+theorem appendReturnFallthrough?_halt_passthrough
+    {range : ScratchRange} {returns : List Name}
+    {plan full : Plan} {exprProgram : Expressions.Program}
+    {target haltTarget : Expressions.RunState}
+    {kind : Assembly.HaltKind}
+    (hCompile :
+      appendReturnFallthrough? range returns plan = some full)
+    (hPlanRun :
+      ∃ planFuel,
+        Expressions.Block.run exprProgram planFuel plan.block target =
+          .ok (Expressions.Outcome.halt kind haltTarget)) :
+    ∃ exprFuel,
+      Expressions.Block.run exprProgram exprFuel full.block target =
+        .ok (Expressions.Outcome.halt kind haltTarget) := by
+  rcases appendReturnFallthrough?_eq_some hCompile with
+    ⟨spill, code, _hSpill, _hCode, hFull⟩
+  subst full
+  rcases
+      expressionsBlock_append_nonregular_exists exprProgram
+        (left := plan.block)
+        (right :=
+          ExpressionsBlock.seqList
+            [ SpillStmtCode.toExpressionsBlock spill.code,
+              ExpressionsBlock.ofCode code ])
+        (state := target) hPlanRun
+        (by simp [Expressions.Outcome.halt]) with
+    ⟨exprFuel, hRun⟩
+  exact
+    ⟨exprFuel, by simpa [ExpressionsBlock.seqList] using hRun⟩
+
+def compileLeave? (range : ScratchRange)
+    (returns sourceScope stackLayout : List Name)
+    (layout : SpillLayout.Layout) : Option Plan := do
+  let spill ←
+    Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.spillAllStack?
+      range sourceScope stackLayout layout
+  let code ← compileReturnCode? range spill.layout returns
+  some
+    { sourceScope := spill.sourceScope
+      stackLayout := []
+      layout := spill.layout
+      block :=
+        ExpressionsBlock.seqList
+          [ SpillStmtCode.toExpressionsBlock spill.code,
+            ExpressionsBlock.ofCode code,
+            { stmts := [Expressions.Stmt.leave] } ] }
+
+theorem compileLeave?_eq_some
+    {range : ScratchRange} {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {plan : Plan}
+    (hCompile :
+      compileLeave? range returns sourceScope stackLayout layout = some plan) :
+    ∃ spill code,
+      SpillPlan.spillAllStack? range sourceScope stackLayout layout =
+        some spill ∧
+      compileReturnCode? range spill.layout returns = some code ∧
+      plan =
+        { sourceScope := spill.sourceScope
+          stackLayout := []
+          layout := spill.layout
+          block :=
+            ExpressionsBlock.seqList
+              [ SpillStmtCode.toExpressionsBlock spill.code,
+                ExpressionsBlock.ofCode code,
+                { stmts := [Expressions.Stmt.leave] } ] } := by
+  unfold compileLeave? at hCompile
+  cases hSpill :
+      SpillPlan.spillAllStack? range sourceScope stackLayout layout with
+  | none =>
+      simp [hSpill] at hCompile
+  | some spill =>
+      simp [hSpill] at hCompile
+      cases hCode : compileReturnCode? range spill.layout returns with
+      | none =>
+          simp [hCode] at hCompile
+      | some code =>
+          simp [hCode] at hCompile
+          cases hCompile
+          exact ⟨spill, code, by simpa [hSpill], by simpa [hCode], rfl⟩
+
+theorem compileLeave?_noCallCreate
+    {range : ScratchRange} {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {plan : Plan}
+    (hCompile :
+      compileLeave? range returns sourceScope stackLayout layout = some plan) :
+    plan.block.usesCallCreate = false := by
+  rcases compileLeave?_eq_some hCompile with
+    ⟨spill, code, hSpill, hCode, hPlan⟩
+  subst plan
+  simpa [ExpressionsBlock.seqList] using
+    expressionsBlock_append_noCallCreate
+      (SpillStmtCode.toExpressionsBlock_noCallCreate
+        (SpillPlan.spillAllStack?_noCallCreate hSpill))
+      (expressionsBlock_append_noCallCreate
+        (expressionsBlock_ofCode_noCallCreate
+          (compileReturnCode?_noCallCreate hCode))
+        (expressionsBlock_append_noCallCreate
+          (by
+            simp [Expressions.Block.usesCallCreate,
+              Expressions.StmtList.usesCallCreate,
+              Expressions.Stmt.usesCallCreate])
+          expressionsBlock_empty_noCallCreate))
+
+theorem compileLeave?_sound_exact_stack
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {source : Source.State} {target : Expressions.RunState}
+    {values : List Word} {frame : Structured.ReturnDest}
+    {returnStack : List Structured.ReturnDest}
+    (hCompile :
+      compileLeave? range returns sourceScope stackLayout layout = some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hLookup :
+      Source.Store.lookupMany returns source.vars = some values)
+    (hReturns : target.returns = frame :: returnStack) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.leave (target.withEVM final)) ∧
+      final.stack = values.reverse ∧
+      SpillStackPrefixRel range plan.sourceScope plan.stackLayout plan.layout
+        source values.reverse final := by
+  rcases compileLeave?_eq_some hCompile with
+    ⟨spill, code, hSpill, hCode, hPlan⟩
+  subst plan
+  rcases
+      spillAllStack?_sound_exact_empty hSpec hWordBytes hSpill hRel
+        hDefined hLength with
+    ⟨afterSpill, hSpillRun, hSpillRel, _hSpillScope, hSpillStack,
+      _hSpillDefined, hAfterSpillStack⟩
+  have hSpillRelNil :
+      SpillStateRel range spill.sourceScope [] spill.layout source
+        afterSpill := by
+    simpa [hSpillStack] using hSpillRel
+  have hSpillBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (SpillStmtCode.toExpressionsBlock spill.code) target =
+        .ok (Expressions.Outcome.regular (target.withEVM afterSpill)) := by
+    rcases
+        SpillStmtCode.run_toExpressionsBlock_exists exprProgram hSpillRun with
+      ⟨fuel, hRun⟩
+    exact
+      ⟨fuel, by
+        simpa [SpillStmtCode.toExpressionsOutcome] using hRun⟩
+  rcases
+      compileReturnCode?_sound_exact_nil hCode
+        (SpillStackPrefixRel.of_spillStateRel hSpillRelNil)
+        hAfterSpillStack hLookup with
+    ⟨afterReturn, hReturnRun, hReturnStack, hReturnRel⟩
+  have hReturnBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel (ExpressionsBlock.ofCode code)
+          (target.withEVM afterSpill) =
+        .ok (Expressions.Outcome.regular (target.withEVM afterReturn)) := by
+    rcases
+        expressionsBlock_ofCode_run_exists exprProgram
+          (state := target.withEVM afterSpill) hReturnRun with
+      ⟨fuel, hRun⟩
+    exact
+      ⟨fuel, by
+        simpa [Expressions.RunState.withEVM_withEVM] using hRun⟩
+  have hLeaveStmt :
+      ∃ fuel,
+        Expressions.Stmt.run exprProgram fuel Expressions.Stmt.leave
+          (target.withEVM afterReturn) =
+        .ok (Expressions.Outcome.leave (target.withEVM afterReturn)) := by
+    refine ⟨1, ?_⟩
+    simp [Expressions.Stmt.run, Structured.RunState.withEVM, hReturns]
+  have hLeaveBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          { stmts := [Expressions.Stmt.leave] }
+          (target.withEVM afterReturn) =
+        .ok (Expressions.Outcome.leave (target.withEVM afterReturn)) :=
+    Expressions.Block.run_single_exists exprProgram hLeaveStmt
+  have hReturnLeave :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (ExpressionsBlock.ofCode code)
+            { stmts := [Expressions.Stmt.leave] })
+          (target.withEVM afterSpill) =
+        .ok (Expressions.Outcome.leave (target.withEVM afterReturn)) :=
+    expressionsBlock_append_regular_exists exprProgram hReturnBlock hLeaveBlock
+  have hAll :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (SpillStmtCode.toExpressionsBlock spill.code)
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCode code)
+              { stmts := [Expressions.Stmt.leave] }))
+          target =
+        .ok (Expressions.Outcome.leave (target.withEVM afterReturn)) :=
+    expressionsBlock_append_regular_exists exprProgram hSpillBlock
+      hReturnLeave
+  rcases hAll with ⟨exprFuel, hRun⟩
+  exact
+    ⟨afterReturn, exprFuel,
+      by simpa [ExpressionsBlock.seqList] using hRun,
+      hReturnStack,
+      by simpa using hReturnRel⟩
+
+def compileCall? (range : ScratchRange) (program : Program)
+    (sourceScope stackLayout : List Name) (layout : SpillLayout.Layout)
+    (targets : List Name) (functionName : Name)
+    (args : List (Expr 1)) : Option Plan := do
+  let fn ← FunList.find? functionName program.functions
+  if targets.Nodup then
+    if args.length = fn.params.length then
+      if targets.length = fn.returns.length then
+        if SourceNoMemoryTouch.exprSeq? (Lower.argExprs args) then
+          let spill ←
+            Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.spillAllStack?
+              range sourceScope stackLayout layout
+          let saved := callerSaveEntries targets spill.layout
+          let argsCode ←
+            SpillExpr.compileSeqFullCode? range saved.length spill.layout
+              (Lower.argExprs args)
+          let storeCode ←
+            storeReturnedTargetsCode? range spill.layout targets.reverse
+          some
+            { sourceScope := spill.sourceScope
+              stackLayout := []
+              layout := spill.layout
+              block :=
+                ExpressionsBlock.seqList
+                  [ SpillStmtCode.toExpressionsBlock spill.code,
+                    ExpressionsBlock.ofCode (saveScratchCode range saved),
+                    ExpressionsBlock.ofCode argsCode,
+                    ExpressionsBlock.ofCall functionName,
+                    ExpressionsBlock.ofCode storeCode,
+                    ExpressionsBlock.ofCode
+                      (restoreScratchCode range saved) ] }
+        else
+          none
+      else
+        none
+    else
+      none
+  else
+    none
+
+theorem compileCall?_eq_some
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan) :
+    ∃ fn, ∃ spill : SpillPlan, ∃ saved argsCode storeCode,
+      FunList.find? functionName program.functions = some fn ∧
+      targets.Nodup ∧
+      args.length = fn.params.length ∧
+      targets.length = fn.returns.length ∧
+      SourceNoMemoryTouch.exprSeq? (Lower.argExprs args) = true ∧
+      Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.spillAllStack?
+          range sourceScope stackLayout layout = some spill ∧
+      saved = callerSaveEntries targets spill.layout ∧
+      SpillExpr.compileSeqFullCode? range saved.length spill.layout
+          (Lower.argExprs args) = some argsCode ∧
+      storeReturnedTargetsCode? range spill.layout targets.reverse =
+        some storeCode ∧
+      plan =
+        { sourceScope := spill.sourceScope
+          stackLayout := []
+          layout := spill.layout
+          block :=
+            ExpressionsBlock.seqList
+              [ SpillStmtCode.toExpressionsBlock spill.code,
+                ExpressionsBlock.ofCode (saveScratchCode range saved),
+                ExpressionsBlock.ofCode argsCode,
+                ExpressionsBlock.ofCall functionName,
+                ExpressionsBlock.ofCode storeCode,
+                ExpressionsBlock.ofCode
+                  (restoreScratchCode range saved) ] } := by
+  unfold compileCall? at hCompile
+  cases hFind : FunList.find? functionName program.functions with
+  | none =>
+      simp [hFind] at hCompile
+  | some fn =>
+      simp [hFind] at hCompile
+      by_cases hTargetsNodup : targets.Nodup
+      · simp [hTargetsNodup] at hCompile
+        by_cases hArgsLength : args.length = fn.params.length
+        · simp [hArgsLength] at hCompile
+          by_cases hTargetsLength : targets.length = fn.returns.length
+          · simp [hTargetsLength] at hCompile
+            cases hSafe :
+                SourceNoMemoryTouch.exprSeq? (Lower.argExprs args) with
+            | false =>
+                simp [hSafe] at hCompile
+            | true =>
+                simp [hSafe] at hCompile
+                cases hSpill :
+                    Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.spillAllStack?
+                      range sourceScope stackLayout layout with
+                | none =>
+                    simp [hSpill] at hCompile
+                | some spill =>
+                    simp [hSpill] at hCompile
+                    let saved := callerSaveEntries targets spill.layout
+                    cases hArgsCode :
+                        SpillExpr.compileSeqFullCode? range saved.length
+                          spill.layout
+                          (Lower.argExprs args) with
+                    | none =>
+                        simp [saved, hArgsCode] at hCompile
+                    | some argsCode =>
+                        simp [saved, hArgsCode] at hCompile
+                        cases hStore :
+                            storeReturnedTargetsCode? range spill.layout
+                              targets.reverse with
+                        | none =>
+                            simp [hStore] at hCompile
+                        | some storeCode =>
+                            simp [hStore] at hCompile
+                            cases hCompile
+                            have hFind' :
+                                FunList.find? functionName program.functions =
+                                  some fn := by
+                              simpa [hFind]
+                            have hSafe' :
+                                SourceNoMemoryTouch.exprSeq?
+                                    (Lower.argExprs args) = true := by
+                              simpa [hSafe]
+                            have hSpill' :
+                                Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.spillAllStack?
+                                    range sourceScope stackLayout layout =
+                                  some spill := by
+                              simpa [hSpill]
+                            have hArgsCode' :
+                                SpillExpr.compileSeqFullCode? range
+                                    saved.length spill.layout
+                                    (Lower.argExprs args) =
+                                  some argsCode := by
+                              simpa [hArgsCode]
+                            have hStore' :
+                                storeReturnedTargetsCode? range spill.layout
+                                    targets.reverse =
+                                  some storeCode := by
+                              simpa [hStore]
+                            exact
+                              ⟨fn, spill, saved, argsCode, storeCode, rfl,
+                                hTargetsNodup, hArgsLength, hTargetsLength,
+                                rfl, rfl, rfl, hArgsCode', hStore', rfl⟩
+          · simp [hTargetsLength] at hCompile
+        · simp [hArgsLength] at hCompile
+      · simp [hTargetsNodup] at hCompile
+
+theorem compileCall?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan) :
+    plan.block.usesCallCreate = false := by
+  rcases compileCall?_eq_some hCompile with
+    ⟨_fn, spill, saved, argsCode, storeCode, _hFind, _hTargetsNodup,
+      _hArgsLength, _hTargetsLength, hSafe, hSpill, hSaved, hArgsCode,
+      hStore, hPlan⟩
+  subst plan
+  simpa [ExpressionsBlock.seqList] using
+    expressionsBlock_append_noCallCreate
+      (SpillStmtCode.toExpressionsBlock_noCallCreate
+        (SpillPlan.spillAllStack?_noCallCreate hSpill))
+      (expressionsBlock_append_noCallCreate
+        (expressionsBlock_ofCode_noCallCreate
+          (saveScratchCode_noCallCreate range saved))
+        (expressionsBlock_append_noCallCreate
+          (expressionsBlock_ofCode_noCallCreate
+            (SpillExpr.compileSeqFullCode?_noCallCreate
+              (SourceNoMemoryTouch.exprSeq?_sound hSafe) hArgsCode))
+          (expressionsBlock_append_noCallCreate
+            expressionsBlock_ofCall_noCallCreate
+            (expressionsBlock_append_noCallCreate
+              (expressionsBlock_ofCode_noCallCreate
+                (storeReturnedTargetsCode?_noCallCreate hStore))
+              (expressionsBlock_append_noCallCreate
+                (expressionsBlock_ofCode_noCallCreate
+                  (restoreScratchCode_noCallCreate range saved))
+                expressionsBlock_empty_noCallCreate)))))
+
+theorem compileCall?_returned_targets_lookup_scratch
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan) :
+    ∀ target, target ∈ targets →
+      ∃ slot, SpillLayout.lookup? target plan.layout = some (.scratch slot) := by
+  rcases compileCall?_eq_some hCompile with
+    ⟨_fn, spill, _saved, _argsCode, storeCode, _hFind, _hTargetsNodup,
+      _hArgsLength, _hTargetsLength, _hSafe, _hSpill, _hArgsCode,
+      _hSaved, hStore, hPlan⟩
+  subst plan
+  intro target hMem
+  exact storeReturnedTargetsCode?_lookup_scratch hStore target
+    (by simpa using List.mem_reverse.mpr hMem)
+
+theorem compileCall?_block_stmts_eq
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan) :
+    ∃ fn, ∃ spill : SpillPlan, ∃ saved argsCode storeCode,
+      FunList.find? functionName program.functions = some fn ∧
+      saved = callerSaveEntries targets spill.layout ∧
+      SpillExpr.compileSeqFullCode? range saved.length spill.layout
+          (Lower.argExprs args) = some argsCode ∧
+      storeReturnedTargetsCode? range spill.layout targets.reverse =
+        some storeCode ∧
+      plan.block.stmts =
+        (SpillStmtCode.toExpressionsBlock spill.code).stmts ++
+          [Expressions.Stmt.code (saveScratchCode range saved)] ++
+          [Expressions.Stmt.code argsCode] ++
+          [Expressions.Stmt.call functionName] ++
+          [Expressions.Stmt.code storeCode] ++
+          [Expressions.Stmt.code
+            (restoreScratchCode range saved)] := by
+  rcases compileCall?_eq_some hCompile with
+    ⟨fn, spill, saved, argsCode, storeCode, hFind, _hTargetsNodup,
+      _hArgsLength, _hTargetsLength, _hSafe, _hSpill, hSaved, hArgsCode,
+      hStore, hPlan⟩
+  subst plan
+  refine
+    ⟨fn, spill, saved, argsCode, storeCode, hFind, hSaved, hArgsCode,
+      hStore, ?_⟩
+  simp [ExpressionsBlock.seqList, ExpressionsBlock.append,
+    ExpressionsBlock.ofCode, ExpressionsBlock.ofCall, List.append_assoc]
+
+theorem compileCall?_block_contains_call
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan) :
+    Expressions.Stmt.call functionName ∈ plan.block.stmts := by
+  rcases compileCall?_block_stmts_eq hCompile with
+    ⟨_fn, _spill, _saved, _argsCode, _storeCode, _hFind, _hSaved,
+      _hArgsCode, _hStore, hStmts⟩
+  rw [hStmts]
+  simp
+
+theorem compileCall?_sourceScope_stackLayout
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan) :
+    plan.sourceScope = sourceScope ∧ plan.stackLayout = [] := by
+  rcases compileCall?_eq_some hCompile with
+    ⟨_fn, spill, _saved, _argsCode, _storeCode, _hFind, _hTargetsNodup,
+      _hArgsLength, _hTargetsLength, _hSafe, hSpill, _hSavedEq,
+      _hArgsCode, _hStoreCode, hPlan⟩
+  subst plan
+  constructor
+  · exact SpillPlan.spillAllStack?_sourceScope hSpill
+  · rfl
+
+theorem source_call_regular_ctx
+    {prim : Source.PrimitiveSemantics}
+    {program : Program} {ctx ctxAfter : Source.Ctx} {fuel : Nat}
+    {targets : List Name} {functionName : Name} {args : List (Expr 1)}
+    {source sourceAfter : Source.State}
+    (hRun :
+      Source.Stmt.run prim program ctx fuel
+          (.call targets functionName args) source =
+        .ok (Source.Outcome.regular sourceAfter, ctxAfter)) :
+    ctxAfter = ctx := by
+  cases fuel with
+  | zero =>
+      simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hRun
+  | succ bodyFuel =>
+      unfold Source.Stmt.run at hRun
+      by_cases hTargets : targets.Nodup
+      · simp [hTargets] at hRun
+        cases hArgs : Source.ArgList.eval prim args source with
+        | error err =>
+            simp [hArgs] at hRun
+        | ok argResult =>
+            rcases argResult with ⟨sourceAfterArgs, argValues⟩
+            simp [hArgs] at hRun
+            cases hFind : FunList.find? functionName program.functions with
+            | none =>
+                simp [hFind, Source.invalid, Structured.invalid] at hRun
+            | some fn =>
+                simp [hFind] at hRun
+                cases hBody :
+                    Source.FunDef.runBody prim program fn argValues bodyFuel
+                      sourceAfterArgs.shared with
+                | error err =>
+                    simp [hBody] at hRun
+                | ok callResult =>
+                    cases callResult with
+                    | returned sharedAfterCall returnValues =>
+                        cases hAssign :
+                            Source.Store.assignMany targets returnValues
+                              sourceAfterArgs.vars with
+                        | none =>
+                            simp [hBody, hAssign, Source.invalid,
+                              Structured.invalid] at hRun
+                        | some returnStore =>
+                            simp [hBody, hAssign] at hRun
+                            exact hRun.2.symm
+                    | halted kind haltedState =>
+                        simp [hBody, Source.Outcome.halt] at hRun
+                        cases hRun.1
+      · simp [hTargets, Source.invalid, Structured.invalid] at hRun
+
+theorem source_call_leave_false
+    {prim : Source.PrimitiveSemantics}
+    {program : Program} {ctx ctxAfter : Source.Ctx} {fuel : Nat}
+    {targets : List Name} {functionName : Name} {args : List (Expr 1)}
+    {source sourceAfter : Source.State}
+    (hRun :
+      Source.Stmt.run prim program ctx fuel
+          (.call targets functionName args) source =
+        .ok (Source.Outcome.leave sourceAfter, ctxAfter)) :
+    False := by
+  cases fuel with
+  | zero =>
+      simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hRun
+  | succ bodyFuel =>
+      unfold Source.Stmt.run at hRun
+      by_cases hTargets : targets.Nodup
+      · simp [hTargets] at hRun
+        cases hArgs : Source.ArgList.eval prim args source with
+        | error err =>
+            simp [hArgs] at hRun
+        | ok argResult =>
+            rcases argResult with ⟨sourceAfterArgs, argValues⟩
+            simp [hArgs] at hRun
+            cases hFind : FunList.find? functionName program.functions with
+            | none =>
+                simp [hFind, Source.invalid, Structured.invalid] at hRun
+            | some fn =>
+                simp [hFind] at hRun
+                cases hBody :
+                    Source.FunDef.runBody prim program fn argValues bodyFuel
+                      sourceAfterArgs.shared with
+                | error err =>
+                    simp [hBody] at hRun
+                | ok callResult =>
+                    cases callResult with
+                    | returned sharedAfterCall returnValues =>
+                        cases hAssign :
+                            Source.Store.assignMany targets returnValues
+                              sourceAfterArgs.vars with
+                        | none =>
+                            simp [hBody, hAssign, Source.invalid,
+                              Structured.invalid] at hRun
+                        | some returnStore =>
+                            simp [hBody, hAssign, Source.Outcome.regular]
+                              at hRun
+                            cases hRun.1
+                    | halted kind haltedState =>
+                        simp [hBody, Source.Outcome.halt] at hRun
+                        cases hRun.1
+      · simp [hTargets, Source.invalid, Structured.invalid] at hRun
+
+theorem source_stmt_regular_leaveScope_eq
+    {prim : Source.PrimitiveSemantics}
+    {program : Program} {ctx ctxAfter : Source.Ctx} {fuel : Nat}
+    {stmt : Stmt} {source sourceAfter : Source.State}
+    (hRun :
+      Source.Stmt.run prim program ctx fuel stmt source =
+        .ok (Source.Outcome.regular sourceAfter, ctxAfter)) :
+    ctxAfter.leaveScope? = ctx.leaveScope? := by
+  cases stmt with
+  | expr expr =>
+      unfold Source.Stmt.run at hRun
+      cases hEval : Source.Expr.eval prim expr source with
+      | error err =>
+          simp [hEval] at hRun
+      | ok result =>
+          rcases result with ⟨stateAfter, values⟩
+          simp [hEval] at hRun
+          rcases hRun with ⟨_hOutcome, hCtx⟩
+          cases hCtx
+          rfl
+  | let_ name value =>
+      unfold Source.Stmt.run at hRun
+      cases hEval : Source.Expr.evalOne prim value source with
+      | error err =>
+          simp [hEval] at hRun
+      | ok result =>
+          rcases result with ⟨stateAfter, value'⟩
+          simp [hEval] at hRun
+          rcases hRun with ⟨_hOutcome, hCtx⟩
+          cases hCtx
+          rfl
+  | assign name value =>
+      unfold Source.Stmt.run at hRun
+      cases hContains : source.vars.contains name with
+      | false =>
+          simp [hContains, Source.invalid, Structured.invalid] at hRun
+      | true =>
+          cases hEval : Source.Expr.evalOne prim value source with
+          | error err =>
+              simp [hContains, hEval] at hRun
+          | ok result =>
+              rcases result with ⟨stateAfter, value'⟩
+              simp [hContains, hEval] at hRun
+              rcases hRun with ⟨_hOutcome, hCtx⟩
+              cases hCtx
+              rfl
+  | block body =>
+      unfold Source.Stmt.run at hRun
+      cases hScoped : Source.Block.runScoped prim program ctx body fuel
+          source with
+      | error err =>
+          simp [hScoped] at hRun
+      | ok bodyOutcome =>
+          simp [hScoped] at hRun
+          rcases hRun with ⟨_hOutcome, hCtx⟩
+          cases hCtx
+          rfl
+  | if_ cond body =>
+      cases fuel with
+      | zero =>
+          simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hRun
+      | succ fuel =>
+          unfold Source.Stmt.run at hRun
+          cases hCond : Source.Expr.evalCondition prim cond source with
+          | error err =>
+              simp [hCond] at hRun
+          | ok condResult =>
+              rcases condResult with ⟨stateAfterCond, condTrue⟩
+              cases condTrue
+              · simp [hCond] at hRun
+                rcases hRun with ⟨_hOutcome, hCtx⟩
+                cases hCtx
+                rfl
+              · cases hScoped :
+                    Source.Block.runScoped prim program ctx body fuel
+                      stateAfterCond with
+                | error err =>
+                    simp [hCond, hScoped] at hRun
+                | ok bodyOutcome =>
+                    simp [hCond, hScoped] at hRun
+                    rcases hRun with ⟨_hOutcome, hCtx⟩
+                    cases hCtx
+                    rfl
+  | switch scrutinee cases defaultBody =>
+      cases fuel with
+      | zero =>
+          simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hRun
+      | succ fuel =>
+          unfold Source.Stmt.run at hRun
+          cases hScrutinee : Source.Expr.evalOne prim scrutinee source with
+          | error err =>
+              simp [hScrutinee] at hRun
+          | ok scrutineeResult =>
+              rcases scrutineeResult with ⟨stateAfterScrutinee, value⟩
+              cases hSelect : Source.Switch.select value cases defaultBody with
+              | none =>
+                  simp [hScrutinee, hSelect] at hRun
+                  rcases hRun with ⟨_hOutcome, hCtx⟩
+                  cases hCtx
+                  rfl
+              | some body =>
+                  cases hScoped :
+                      Source.Block.runScoped prim program ctx body fuel
+                        stateAfterScrutinee with
+                  | error err =>
+                      simp [hScrutinee, hSelect, hScoped] at hRun
+                  | ok bodyOutcome =>
+                      simp [hScrutinee, hSelect, hScoped] at hRun
+                      rcases hRun with ⟨_hOutcome, hCtx⟩
+                      cases hCtx
+                      rfl
+  | for_ init cond post body =>
+      cases fuel with
+      | zero =>
+          simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hRun
+      | succ fuel =>
+          unfold Source.Stmt.run at hRun
+          cases hInit :
+              Source.Block.runOpen prim program ctx.withoutLoopControl fuel
+                init source with
+          | error err =>
+              simp [hInit] at hRun
+          | ok initResult =>
+              rcases initResult with ⟨initOutcome, initCtx⟩
+              cases hInitMode : initOutcome.mode with
+              | regular =>
+                  cases hLoop :
+                      Source.Stmt.runForLoop prim program initCtx cond
+                        initCtx.withoutLoopControl post
+                        (initCtx.withLoopControl initCtx.scope initCtx.scope)
+                        body fuel initOutcome.state with
+                  | error err =>
+                      simp [hInit, hInitMode, hLoop] at hRun
+                  | ok loopOutcome =>
+                      cases hLoopMode : loopOutcome.mode with
+                      | regular =>
+                          simp [hInit, hInitMode, hLoop, hLoopMode] at hRun
+                          rcases hRun with ⟨_hOutcome, hCtx⟩
+                          cases hCtx
+                          rfl
+                      | brk =>
+                          simp [hInit, hInitMode, hLoop, hLoopMode,
+                            Source.invalid, Structured.invalid] at hRun
+                      | cont =>
+                          simp [hInit, hInitMode, hLoop, hLoopMode,
+                            Source.invalid, Structured.invalid] at hRun
+                      | leave =>
+                          simp [hInit, hInitMode, hLoop, hLoopMode] at hRun
+                          have hModeRegular : loopOutcome.mode = .regular := by
+                            rw [hRun.1]
+                            rfl
+                          rw [hModeRegular] at hLoopMode
+                          cases hLoopMode
+                      | halt kind =>
+                          simp [hInit, hInitMode, hLoop, hLoopMode] at hRun
+                          have hModeRegular : loopOutcome.mode = .regular := by
+                            rw [hRun.1]
+                            rfl
+                          rw [hModeRegular] at hLoopMode
+                          cases hLoopMode
+              | brk =>
+                  simp [hInit, hInitMode, Source.invalid,
+                    Structured.invalid] at hRun
+              | cont =>
+                  simp [hInit, hInitMode, Source.invalid,
+                    Structured.invalid] at hRun
+              | leave =>
+                  simp [hInit, hInitMode] at hRun
+                  have hModeRegular : initOutcome.mode = .regular := by
+                    rw [hRun.1]
+                    rfl
+                  rw [hModeRegular] at hInitMode
+                  cases hInitMode
+              | halt kind =>
+                  simp [hInit, hInitMode] at hRun
+                  have hModeRegular : initOutcome.mode = .regular := by
+                    rw [hRun.1]
+                    rfl
+                  rw [hModeRegular] at hInitMode
+                  cases hInitMode
+  | brk =>
+      unfold Source.Stmt.run at hRun
+      cases hBreak : ctx.breakScope? with
+      | none =>
+          simp [hBreak, Source.invalid, Structured.invalid] at hRun
+      | some scope =>
+          simp [hBreak, Source.Outcome.brk] at hRun
+          cases hRun.1
+  | cont =>
+      unfold Source.Stmt.run at hRun
+      cases hContinue : ctx.continueScope? with
+      | none =>
+          simp [hContinue, Source.invalid, Structured.invalid] at hRun
+      | some scope =>
+          simp [hContinue, Source.Outcome.cont] at hRun
+          cases hRun.1
+  | leave =>
+      unfold Source.Stmt.run at hRun
+      cases hLeave : ctx.leaveScope? with
+      | none =>
+          simp [hLeave, Source.invalid, Structured.invalid] at hRun
+      | some scope =>
+          simp [hLeave, Source.Outcome.leave] at hRun
+          cases hRun.1
+  | call targets functionName args =>
+      have hCtx : ctxAfter = ctx :=
+        source_call_regular_ctx hRun
+      cases hCtx
+      rfl
+  | terminal kind =>
+      unfold Source.Stmt.run at hRun
+      cases hTerminal : prim.terminal kind source.shared [] with
+      | error err =>
+          simp [hTerminal] at hRun
+      | ok shared =>
+          simp [hTerminal, Source.Outcome.halt] at hRun
+          cases hRun.1
+  | terminalArgs kind args =>
+      unfold Source.Stmt.run at hRun
+      cases hArgs : Locals.Source.Expr.ExprSeq.eval prim args source with
+      | error err =>
+          simp [hArgs] at hRun
+      | ok argResult =>
+          rcases argResult with ⟨stateAfterArgs, values⟩
+          cases hTerminal : prim.terminal kind stateAfterArgs.shared values with
+          | error err =>
+              simp [hArgs, hTerminal] at hRun
+          | ok shared =>
+              simp [hArgs, hTerminal, Source.Outcome.halt] at hRun
+              cases hRun.1
+
+mutual
+
+def compileStmt? (range : ScratchRange) (program : Program)
+    (returns sourceScope stackLayout : List Name)
+    (layout : SpillLayout.Layout) : Stmt → Option Plan
+  | .call targets functionName args =>
+      compileCall? range program sourceScope stackLayout layout targets
+        functionName args
+  | .leave =>
+      compileLeave? range returns sourceScope stackLayout layout
+  | stmt =>
+      compileNonCallStmtSpan? range returns sourceScope stackLayout layout stmt
+
+def compileStmtList? (range : ScratchRange) (program : Program)
+    (returns sourceScope stackLayout : List Name)
+    (layout : SpillLayout.Layout) : List Stmt → Option Plan
+  | [] =>
+      some
+        { sourceScope := sourceScope
+          stackLayout := stackLayout
+          layout := layout
+          block := { stmts := [] } }
+  | stmt :: rest => do
+      let head ←
+        compileStmt? range program returns sourceScope stackLayout layout stmt
+      let tail ←
+        compileStmtList? range program returns head.sourceScope
+          head.stackLayout head.layout rest
+      some
+        { sourceScope := tail.sourceScope
+          stackLayout := tail.stackLayout
+          layout := tail.layout
+          block := ExpressionsBlock.append head.block tail.block }
+
+end
+
+def compileBlockOpen? (range : ScratchRange) (program : Program)
+    (returns sourceScope stackLayout : List Name)
+    (layout : SpillLayout.Layout) (block : Block) : Option Plan :=
+  compileStmtList? range program returns sourceScope stackLayout layout
+    block.stmts
+
+theorem compileStmt?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    (hCompile :
+      compileStmt? range program returns sourceScope stackLayout layout stmt =
+        some plan) :
+    plan.block.usesCallCreate = false := by
+  cases stmt with
+  | call targets functionName args =>
+      exact compileCall?_noCallCreate (by simpa [compileStmt?] using hCompile)
+  | leave =>
+      exact compileLeave?_noCallCreate (by simpa [compileStmt?] using hCompile)
+  | expr expr =>
+      exact
+        compileNonCallStmtSpan?_noCallCreate
+          (by simpa [compileStmt?] using hCompile)
+  | let_ name value =>
+      exact
+        compileNonCallStmtSpan?_noCallCreate
+          (by simpa [compileStmt?] using hCompile)
+  | assign name value =>
+      exact
+        compileNonCallStmtSpan?_noCallCreate
+          (by simpa [compileStmt?] using hCompile)
+  | block body =>
+      exact
+        compileNonCallStmtSpan?_noCallCreate
+          (by simpa [compileStmt?] using hCompile)
+  | if_ cond body =>
+      exact
+        compileNonCallStmtSpan?_noCallCreate
+          (by simpa [compileStmt?] using hCompile)
+  | switch scrutinee cases defaultBody =>
+      exact
+        compileNonCallStmtSpan?_noCallCreate
+          (by simpa [compileStmt?] using hCompile)
+  | for_ init cond post body =>
+      exact
+        compileNonCallStmtSpan?_noCallCreate
+          (by simpa [compileStmt?] using hCompile)
+  | brk =>
+      exact
+        compileNonCallStmtSpan?_noCallCreate
+          (by simpa [compileStmt?] using hCompile)
+  | cont =>
+      exact
+        compileNonCallStmtSpan?_noCallCreate
+          (by simpa [compileStmt?] using hCompile)
+  | terminal kind =>
+      exact
+        compileNonCallStmtSpan?_noCallCreate
+          (by simpa [compileStmt?] using hCompile)
+  | terminalArgs kind args =>
+      exact
+        compileNonCallStmtSpan?_noCallCreate
+          (by simpa [compileStmt?] using hCompile)
+
+theorem compileStmtList?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {stmts : List Stmt} {plan : Plan},
+      compileStmtList? range program returns sourceScope stackLayout layout
+          stmts =
+        some plan →
+      plan.block.usesCallCreate = false
+  | [], plan, hCompile => by
+      simp [compileStmtList?] at hCompile
+      subst plan
+      simp [Expressions.Block.usesCallCreate,
+        Expressions.StmtList.usesCallCreate]
+  | stmt :: rest, plan, hCompile => by
+      unfold compileStmtList? at hCompile
+      cases hHead :
+          compileStmt? range program returns sourceScope stackLayout layout stmt with
+      | none =>
+          simp [hHead] at hCompile
+      | some head =>
+          simp [hHead] at hCompile
+          cases hTail :
+              compileStmtList? range program returns head.sourceScope
+                head.stackLayout head.layout rest with
+          | none =>
+              simp [hTail] at hCompile
+          | some tail =>
+              simp [hTail] at hCompile
+              cases hCompile
+              exact
+                expressionsBlock_append_noCallCreate
+                  (compileStmt?_noCallCreate hHead)
+                  (compileStmtList?_noCallCreate hTail)
+
+theorem compileBlockOpen?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan : Plan}
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan) :
+    plan.block.usesCallCreate = false :=
+  compileStmtList?_noCallCreate hCompile
+
+def StmtRegularOpenSupported (returns : List Name) : Stmt → Prop
+  | .call _targets _functionName _args => True
+  | .leave => False
+  | stmt => SourceLowering.SourceToLocals.Stmt.SourceOwned returns stmt
+
+def StmtListRegularOpenSupported (returns : List Name) :
+    List Stmt → Prop
+  | [] => True
+  | stmt :: rest =>
+      StmtRegularOpenSupported returns stmt ∧
+        StmtListRegularOpenSupported returns rest
+
+def BlockRegularOpenSupported (returns : List Name) (block : Block) :
+    Prop :=
+  StmtListRegularOpenSupported returns block.stmts
+
+def StmtOpenSupported (returns : List Name) : Stmt → Prop
+  | .call _targets _functionName _args => True
+  | .leave => True
+  | stmt => SourceLowering.SourceToLocals.Stmt.SourceOwned returns stmt
+
+def StmtListOpenSupported (returns : List Name) :
+    List Stmt → Prop
+  | [] => True
+  | stmt :: rest =>
+      StmtOpenSupported returns stmt ∧
+        StmtListOpenSupported returns rest
+
+def BlockOpenSupported (returns : List Name) (block : Block) : Prop :=
+  StmtListOpenSupported returns block.stmts
+
+structure ProgramOpenSupported (program : Program) : Prop where
+  body : BlockOpenSupported [] program.body
+  functions :
+    ∀ {functionName fn},
+      FunList.find? functionName program.functions = some fn →
+        BlockOpenSupported fn.returns fn.body
+
+structure ProgramCallAwareSupported (program : Program) : Prop where
+  programScoped : Program.Scoped program
+  openSupported : ProgramOpenSupported program
+
+theorem funList_scoped_of_find?
+    {functions : List FunDef} {functionName : Name} {fn : FunDef}
+    (hScoped : FunList.Scoped functions)
+    (hFind : FunList.find? functionName functions = some fn) :
+    fn.Scoped := by
+  induction functions generalizing functionName fn with
+  | nil =>
+      simp [FunList.find?] at hFind
+  | cons head rest ih =>
+      rcases hScoped with ⟨hHeadScoped, hRestScoped⟩
+      by_cases hName : head.name = functionName
+      · simp [FunList.find?, hName] at hFind
+        cases hFind
+        exact hHeadScoped
+      · have hTailFind :
+            FunList.find? functionName rest = some fn := by
+          simpa [FunList.find?, hName] using hFind
+        exact ih hRestScoped hTailFind
+
+theorem program_function_scoped_of_find?
+    {program : Program} {functionName : Name} {fn : FunDef}
+    (hScoped : Program.Scoped program)
+    (hFind : FunList.find? functionName program.functions = some fn) :
+    fn.Scoped :=
+  funList_scoped_of_find? hScoped.1 hFind
+
+theorem funDef_params_nodup_of_scoped {fn : FunDef}
+    (hScoped : fn.Scoped) :
+    fn.params.Nodup :=
+  List.Nodup.of_append_right (Functions.FunDef.signatureNodup hScoped)
+
+theorem funDef_returns_nodup_of_scoped {fn : FunDef}
+    (hScoped : fn.Scoped) :
+    fn.returns.Nodup :=
+  List.Nodup.of_append_left (Functions.FunDef.signatureNodup hScoped)
+
+namespace ProgramCallAwareSupported
+
+theorem functionScoped
+    {program : Program} (hSupport : ProgramCallAwareSupported program)
+    {functionName : Name} {fn : FunDef}
+    (hFind : FunList.find? functionName program.functions = some fn) :
+    fn.Scoped :=
+  program_function_scoped_of_find? hSupport.programScoped hFind
+
+theorem functionOpenSupported
+    {program : Program} (hSupport : ProgramCallAwareSupported program)
+    {functionName : Name} {fn : FunDef}
+    (hFind : FunList.find? functionName program.functions = some fn) :
+    BlockOpenSupported fn.returns fn.body :=
+  hSupport.openSupported.functions hFind
+
+theorem functionParamsNodup
+    {program : Program} (hSupport : ProgramCallAwareSupported program)
+    {functionName : Name} {fn : FunDef}
+    (hFind : FunList.find? functionName program.functions = some fn) :
+    fn.params.Nodup :=
+  funDef_params_nodup_of_scoped (functionScoped hSupport hFind)
+
+theorem functionReturnsNodup
+    {program : Program} (hSupport : ProgramCallAwareSupported program)
+    {functionName : Name} {fn : FunDef}
+    (hFind : FunList.find? functionName program.functions = some fn) :
+    fn.returns.Nodup :=
+  funDef_returns_nodup_of_scoped (functionScoped hSupport hFind)
+
+end ProgramCallAwareSupported
+
+namespace FunctionSourceNoMemoryTouch
+
+mutual
+  def BlockSafe (returns : List Name) : Block → Prop
+    | ⟨stmts⟩ => StmtListSafe returns stmts
+
+  def StmtSafe (returns : List Name) : Stmt → Prop
+    | .expr expr => SourceNoMemoryTouch.ExprSafe expr
+    | .let_ _name value => SourceNoMemoryTouch.ExprSafe value
+    | .assign _name value => SourceNoMemoryTouch.ExprSafe value
+    | .block body => BlockSafe returns body
+    | .if_ cond body =>
+        SourceNoMemoryTouch.ExprSafe cond ∧ BlockSafe returns body
+    | .switch scrutinee cases defaultBody =>
+        SourceNoMemoryTouch.ExprSafe scrutinee ∧
+          CaseListSafe returns cases ∧ DefaultSafe returns defaultBody
+    | .for_ init cond post body =>
+        BlockSafe returns init ∧ SourceNoMemoryTouch.ExprSafe cond ∧
+          BlockSafe returns post ∧ BlockSafe returns body
+    | .brk => True
+    | .cont => True
+    | .leave => True
+    | .call _targets _functionName args =>
+        SourceNoMemoryTouch.ExprSeqSafe (Lower.argExprs args)
+    | .terminal kind => ¬ SourceNoMemoryTouch.HaltKindMemoryTouching kind
+    | .terminalArgs kind args =>
+        ¬ SourceNoMemoryTouch.HaltKindMemoryTouching kind ∧
+          SourceNoMemoryTouch.ExprSeqSafe args
+
+  def StmtListSafe (returns : List Name) : List Stmt → Prop
+    | [] => True
+    | stmt :: rest => StmtSafe returns stmt ∧ StmtListSafe returns rest
+
+  def CaseListSafe (returns : List Name) :
+      List (Word × Block) → Prop
+    | [] => True
+    | (_value, body) :: rest =>
+        BlockSafe returns body ∧ CaseListSafe returns rest
+
+  def DefaultSafe (returns : List Name) : Option Block → Prop
+    | none => True
+    | some body => BlockSafe returns body
+end
+
+structure ProgramSafe (program : Program) : Prop where
+  body : BlockSafe [] program.body
+  functions :
+    ∀ {functionName fn},
+      FunList.find? functionName program.functions = some fn →
+        BlockSafe fn.returns fn.body
+
+theorem caseListSafe_select
+    {returns : List Name} {scrutinee : Word} :
+    ∀ {cases : List (Word × Block)} {defaultBody : Option Block}
+      {body : Block},
+      CaseListSafe returns cases →
+      DefaultSafe returns defaultBody →
+      Source.Switch.select scrutinee cases defaultBody = some body →
+        BlockSafe returns body
+  | [], none, body, _hCases, hDefault, hSelect => by
+      simp [Source.Switch.select] at hSelect
+  | [], some defaultBody, body, _hCases, hDefault, hSelect => by
+      simp [Source.Switch.select] at hSelect
+      subst body
+      simpa [DefaultSafe] using hDefault
+  | (value, caseBody) :: rest, defaultBody, body, hCases, hDefault,
+      hSelect => by
+      have hParts :
+          BlockSafe returns caseBody ∧ CaseListSafe returns rest := by
+        simpa [CaseListSafe] using hCases
+      unfold Source.Switch.select at hSelect
+      by_cases hEq : value = scrutinee
+      · simp [hEq] at hSelect
+        subst body
+        exact hParts.1
+      · simp [hEq] at hSelect
+        exact caseListSafe_select hParts.2 hDefault hSelect
+
+inductive CallResultPrivateScratchInvariant :
+    Source.CallResult → Source.CallResult → Prop
+  | returned {sourceShared targetShared : EvmYul.SharedState .EVM}
+      {values : List Word}
+      (hRel :
+        SharedStatePrivateScratchInvariant sourceShared targetShared) :
+      CallResultPrivateScratchInvariant
+        (Source.CallResult.returned sourceShared values)
+        (Source.CallResult.returned targetShared values)
+  | halted {kind : Assembly.HaltKind} {source target : Source.State}
+      (hRel : SourceStatePrivateScratchInvariant source target) :
+      CallResultPrivateScratchInvariant
+        (Source.CallResult.halted kind source)
+        (Source.CallResult.halted kind target)
+
+theorem assignMany_of_privateScratchInvariant
+    {targets : List Name} {values : List Word}
+    {source target : Source.State} {returnStore : Source.Store}
+    (hRel : SourceStatePrivateScratchInvariant source target)
+    (hAssign :
+      Source.Store.assignMany targets values source.vars = some returnStore) :
+    Source.Store.assignMany targets values target.vars = some returnStore := by
+  simpa [hRel.vars_eq] using hAssign
+
+theorem lookupMany_of_privateScratchInvariant
+    {names : List Name} {source target : Source.State}
+    {values : List Word}
+    (hRel : SourceStatePrivateScratchInvariant source target)
+    (hLookup :
+      Source.Store.lookupMany names source.vars = some values) :
+    Source.Store.lookupMany names target.vars = some values := by
+  simpa [hRel.vars_eq] using hLookup
+
+theorem sourceStatePrivateScratchInvariant_of_shared
+    {sourceShared targetShared : EvmYul.SharedState .EVM}
+    {vars : Source.Store}
+    (hShared :
+      SharedStatePrivateScratchInvariant sourceShared targetShared) :
+    SourceStatePrivateScratchInvariant
+      ({ shared := sourceShared, vars := vars } : Source.State)
+      ({ shared := targetShared, vars := vars } : Source.State) where
+  shared := hShared
+  vars_eq := rfl
+
+theorem funDef_runBody_privateScratchInvariant_of_bodyReplay
+    {program : Program} {fn : FunDef} {args : List Word}
+    {fuel : Nat} {sourceShared targetShared : EvmYul.SharedState .EVM}
+    {sourceResult : Source.CallResult}
+    (hShared :
+      SharedStatePrivateScratchInvariant sourceShared targetShared)
+    (hRun :
+      Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+          program fn args fuel sourceShared =
+        .ok sourceResult)
+    (hBodyReplay :
+      ∀ {bodyFuel : Nat} {paramStore : Source.Store}
+        {sourceOutcome : Source.Outcome} {bodyCtxAfter : Source.Ctx},
+        Source.Store.insertMany fn.params args
+            Locals.Source.Store.empty =
+          some paramStore →
+        Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+            program (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+            { shared := sourceShared,
+              vars := Source.Store.initReturns fn.returns paramStore } =
+          .ok (sourceOutcome, bodyCtxAfter) →
+        ∃ targetOutcome,
+          Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+              program (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+              { shared := targetShared,
+                vars := Source.Store.initReturns fn.returns paramStore } =
+            .ok (targetOutcome, bodyCtxAfter) ∧
+          SourceOutcomePrivateScratchInvariant sourceOutcome
+            targetOutcome) :
+    ∃ targetResult,
+      Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+          program fn args fuel targetShared =
+        .ok targetResult ∧
+      CallResultPrivateScratchInvariant sourceResult targetResult := by
+  cases fuel with
+  | zero =>
+      simp [Source.FunDef.runBody, Source.invalid, Structured.invalid]
+        at hRun
+  | succ bodyFuel =>
+      unfold Source.FunDef.runBody at hRun ⊢
+      cases hParams :
+          Source.Store.insertMany fn.params args
+            Locals.Source.Store.empty with
+      | none =>
+          simp [hParams, Source.invalid, Structured.invalid] at hRun
+      | some paramStore =>
+          simp [hParams] at hRun ⊢
+          cases hBody :
+              Source.Block.runOpen
+                  Locals.Source.PrimitiveSemantics.structured program
+                  { Source.Ctx.withLeaveScope Source.Ctx.initial
+                      (fn.returns ++ fn.params) with
+                    scope := fn.returns ++ fn.params }
+                  bodyFuel fn.body
+                  { shared := sourceShared,
+                    vars := Source.Store.initReturns fn.returns paramStore } with
+          | error err =>
+              simp [Source.FunDef.bodyCtx, hBody] at hRun
+          | ok bodyResult =>
+              rcases bodyResult with ⟨sourceOutcome, bodyCtxAfter⟩
+              have hBodyForReplay :
+                  Source.Block.runOpen
+                      Locals.Source.PrimitiveSemantics.structured program
+                      (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+                      { shared := sourceShared,
+                        vars :=
+                          Source.Store.initReturns fn.returns paramStore } =
+                    .ok (sourceOutcome, bodyCtxAfter) := by
+                simpa [Source.FunDef.bodyCtx] using hBody
+              rcases hBodyReplay hParams hBodyForReplay with
+                ⟨targetOutcome, hTargetBody, hOutcomeRel⟩
+              simp [Source.FunDef.bodyCtx, hBody, hTargetBody] at hRun ⊢
+              rcases sourceOutcome with ⟨sourceBodyState, sourceMode⟩
+              rcases targetOutcome with ⟨targetBodyState, targetMode⟩
+              have hTargetMode : targetMode = sourceMode :=
+                hOutcomeRel.mode_eq
+              subst targetMode
+              have hTargetBodyExpanded :
+                  Source.Block.runOpen
+                      Locals.Source.PrimitiveSemantics.structured program
+                      { Source.Ctx.withLeaveScope Source.Ctx.initial
+                          (fn.returns ++ fn.params) with
+                        scope := fn.returns ++ fn.params }
+                      bodyFuel fn.body
+                      { shared := targetShared,
+                        vars :=
+                          Source.Store.initReturns fn.returns paramStore } =
+                    .ok
+                      (({ state := targetBodyState, mode := sourceMode } :
+                        Source.Outcome), bodyCtxAfter) := by
+                simpa [Source.FunDef.bodyCtx] using hTargetBody
+              cases sourceMode with
+              | regular =>
+                  simp [Source.Outcome.regular,
+                    Locals.Source.Outcome.regular] at hRun ⊢
+                  cases hLookup :
+                      Source.Store.lookupMany fn.returns
+                        sourceBodyState.vars with
+                  | none =>
+                      simp [hLookup, Source.invalid, Structured.invalid]
+                        at hRun
+                  | some returnValues =>
+                      have hTargetLookup :
+                          Source.Store.lookupMany fn.returns
+                              targetBodyState.vars =
+                            some returnValues :=
+                        lookupMany_of_privateScratchInvariant
+                          hOutcomeRel.state hLookup
+                      simp [hLookup, hTargetLookup] at hRun ⊢
+                      rcases hRun with ⟨rfl, rfl⟩
+                      exact
+                        ⟨Source.CallResult.returned targetBodyState.shared
+                            returnValues,
+                          by
+                            simp [hTargetBodyExpanded,
+                              Source.Outcome.regular,
+                              Locals.Source.Outcome.regular, hTargetLookup],
+                          CallResultPrivateScratchInvariant.returned
+                            hOutcomeRel.state.shared⟩
+              | brk =>
+                  simp [Source.Outcome.brk, Locals.Source.Outcome.brk,
+                    Source.invalid, Structured.invalid] at hRun
+              | cont =>
+                  simp [Source.Outcome.cont, Locals.Source.Outcome.cont,
+                    Source.invalid, Structured.invalid] at hRun
+              | leave =>
+                  simp [Source.Outcome.leave, Locals.Source.Outcome.leave]
+                    at hRun ⊢
+                  cases hLookup :
+                      Source.Store.lookupMany fn.returns
+                        sourceBodyState.vars with
+                  | none =>
+                      simp [hLookup, Source.invalid, Structured.invalid]
+                        at hRun
+                  | some returnValues =>
+                      have hTargetLookup :
+                          Source.Store.lookupMany fn.returns
+                              targetBodyState.vars =
+                            some returnValues :=
+                        lookupMany_of_privateScratchInvariant
+                          hOutcomeRel.state hLookup
+                      simp [hLookup, hTargetLookup] at hRun ⊢
+                      rcases hRun with ⟨rfl, rfl⟩
+                      exact
+                        ⟨Source.CallResult.returned targetBodyState.shared
+                            returnValues,
+                          by
+                            simp [hTargetBodyExpanded,
+                              Source.Outcome.leave,
+                              Locals.Source.Outcome.leave, hTargetLookup],
+                          CallResultPrivateScratchInvariant.returned
+                            hOutcomeRel.state.shared⟩
+              | halt kind =>
+                  simp [Source.FunDef.bodyCtx, hTargetBody,
+                    Source.Outcome.halt, Locals.Source.Outcome.halt]
+                    at hRun ⊢
+                  rcases hRun with ⟨rfl, rfl⟩
+                  exact
+                    ⟨Source.CallResult.halted kind targetBodyState,
+                      by
+                        simp [hTargetBodyExpanded,
+                          Source.Outcome.halt, Locals.Source.Outcome.halt],
+                      CallResultPrivateScratchInvariant.halted
+                        hOutcomeRel.state⟩
+
+theorem callStmt_privateScratchInvariant_of_callReplay
+    {program : Program} {ctx : Source.Ctx} {bodyFuel : Nat}
+    {targets : List Name} {functionName : Name} {args : List (Expr 1)}
+    {source target : Source.State} {sourceOutcome : Source.Outcome}
+    {ctxAfter : Source.Ctx}
+    (hArgsSafe : SourceNoMemoryTouch.ExprSeqSafe (Lower.argExprs args))
+    (hRel : SourceStatePrivateScratchInvariant source target)
+    (hRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          ctx (bodyFuel + 1) (.call targets functionName args) source =
+        .ok (sourceOutcome, ctxAfter))
+    (hCallReplay :
+      ∀ {fn : FunDef} {sourceAfterArgs targetAfterArgs : Source.State}
+        {argValues : List Word} {sourceCallResult : Source.CallResult},
+        SourceStatePrivateScratchInvariant sourceAfterArgs targetAfterArgs →
+        FunList.find? functionName program.functions = some fn →
+        Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+            program fn argValues bodyFuel sourceAfterArgs.shared =
+          .ok sourceCallResult →
+        ∃ targetCallResult,
+          Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+              program fn argValues bodyFuel targetAfterArgs.shared =
+            .ok targetCallResult ∧
+          CallResultPrivateScratchInvariant sourceCallResult
+            targetCallResult) :
+    ∃ targetOutcome,
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          ctx (bodyFuel + 1) (.call targets functionName args) target =
+        .ok (targetOutcome, ctxAfter) ∧
+      SourceOutcomePrivateScratchInvariant sourceOutcome targetOutcome := by
+  unfold Source.Stmt.run at hRun ⊢
+  by_cases hTargets : targets.Nodup
+  · simp [hTargets] at hRun ⊢
+    cases hArgs :
+        Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured args
+          source with
+    | error err =>
+        simp [hArgs] at hRun
+    | ok argResult =>
+        rcases argResult with ⟨sourceAfterArgs, argValues⟩
+        rcases
+            argList_eval_privateScratchInvariant hArgsSafe hRel hArgs with
+          ⟨targetAfterArgs, hTargetArgs, hArgsRel⟩
+        simp [hArgs, hTargetArgs] at hRun ⊢
+        cases hFind : FunList.find? functionName program.functions with
+        | none =>
+            simp [hFind, Source.invalid, Structured.invalid] at hRun
+        | some fn =>
+            simp [hFind] at hRun ⊢
+            cases hBody :
+                Source.FunDef.runBody
+                    Locals.Source.PrimitiveSemantics.structured program fn
+                    argValues bodyFuel sourceAfterArgs.shared with
+            | error err =>
+                simp [hBody] at hRun
+            | ok sourceCallResult =>
+                rcases hCallReplay hArgsRel hFind hBody with
+                  ⟨targetCallResult, hTargetBody, hCallRel⟩
+                simp [hBody, hTargetBody] at hRun ⊢
+                cases hCallRel with
+                | returned hSharedRel =>
+                    rename_i sourceSharedAfterCall targetSharedAfterCall
+                      returnValues
+                    cases hAssign :
+                        Source.Store.assignMany targets returnValues
+                          sourceAfterArgs.vars with
+                    | none =>
+                        simp [hAssign, Source.invalid, Structured.invalid]
+                          at hRun
+                    | some returnStore =>
+                        have hTargetAssign :
+                            Source.Store.assignMany targets returnValues
+                                targetAfterArgs.vars =
+                              some returnStore :=
+                          assignMany_of_privateScratchInvariant hArgsRel
+                            hAssign
+                        simp [hAssign] at hRun
+                        rcases hRun with ⟨hOutcome, hCtx⟩
+                        subst sourceOutcome
+                        subst ctxAfter
+                        exact
+                          ⟨Source.Outcome.regular
+                              { shared := targetSharedAfterCall,
+                                vars := returnStore },
+                            by simp [hTargetAssign],
+                            SourceOutcomePrivateScratchInvariant.regular
+                              (sourceStatePrivateScratchInvariant_of_shared
+                                hSharedRel)⟩
+                | halted hHaltedRel =>
+                    rename_i kind haltedSource haltedTarget
+                    simp [Source.Outcome.halt, Locals.Source.Outcome.halt]
+                      at hRun
+                    rcases hRun with ⟨hOutcome, hCtx⟩
+                    subst sourceOutcome
+                    subst ctxAfter
+                    exact
+                      ⟨Source.Outcome.halt kind haltedTarget,
+                        by
+                          simp [Source.Outcome.halt,
+                            Locals.Source.Outcome.halt],
+                        SourceOutcomePrivateScratchInvariant.halt
+                          hHaltedRel⟩
+  · simp [hTargets, Source.invalid, Structured.invalid] at hRun
+
+theorem blockRunScoped_privateScratchInvariant_of_runOpenReplay
+    {program : Program} {ctx : Source.Ctx} {block : Block} {fuel : Nat}
+    {source target : Source.State} {sourceOutcome : Source.Outcome}
+    (hRun :
+      Source.Block.runScoped Locals.Source.PrimitiveSemantics.structured
+          program ctx block fuel source =
+        .ok sourceOutcome)
+    (hOpenReplay :
+      ∀ {innerOutcome : Source.Outcome} {ctxAfter : Source.Ctx},
+        Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+            program ctx fuel block source =
+          .ok (innerOutcome, ctxAfter) →
+        ∃ targetInnerOutcome,
+          Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+              program ctx fuel block target =
+            .ok (targetInnerOutcome, ctxAfter) ∧
+          SourceOutcomePrivateScratchInvariant innerOutcome
+            targetInnerOutcome) :
+    ∃ targetOutcome,
+      Source.Block.runScoped Locals.Source.PrimitiveSemantics.structured
+          program ctx block fuel target =
+        .ok targetOutcome ∧
+      SourceOutcomePrivateScratchInvariant sourceOutcome targetOutcome := by
+  unfold Source.Block.runScoped at hRun ⊢
+  cases hOpen :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+        program ctx fuel block source with
+  | error err =>
+      simp [hOpen] at hRun
+  | ok openResult =>
+      rcases openResult with ⟨innerOutcome, ctxAfter⟩
+      rcases hOpenReplay hOpen with
+        ⟨targetInnerOutcome, hTargetOpen, hInnerRel⟩
+      simp [hOpen, hTargetOpen] at hRun ⊢
+      rcases innerOutcome with ⟨innerState, innerMode⟩
+      rcases targetInnerOutcome with ⟨targetInnerState, targetMode⟩
+      have hTargetMode : targetMode = innerMode := hInnerRel.mode_eq
+      subst targetMode
+      cases innerMode with
+      | regular =>
+          simp [Source.Outcome.regular, Locals.Source.Outcome.regular]
+            at hRun ⊢
+          subst sourceOutcome
+          exact
+            SourceOutcomePrivateScratchInvariant.regular
+              (SourceStatePrivateScratchInvariant.restrictTo
+                hInnerRel.state ctx.scope)
+      | brk =>
+          simp [Source.Outcome.brk, Locals.Source.Outcome.brk] at hRun ⊢
+          subst sourceOutcome
+          exact SourceOutcomePrivateScratchInvariant.brk hInnerRel.state
+      | cont =>
+          simp [Source.Outcome.cont, Locals.Source.Outcome.cont] at hRun ⊢
+          subst sourceOutcome
+          exact SourceOutcomePrivateScratchInvariant.cont hInnerRel.state
+      | leave =>
+          simp [Source.Outcome.leave, Locals.Source.Outcome.leave] at hRun ⊢
+          subst sourceOutcome
+          exact SourceOutcomePrivateScratchInvariant.leave hInnerRel.state
+      | halt kind =>
+          simp [Source.Outcome.halt, Locals.Source.Outcome.halt] at hRun ⊢
+          subst sourceOutcome
+          exact SourceOutcomePrivateScratchInvariant.halt hInnerRel.state
+
+theorem blockRunOpen_privateScratchInvariant_of_stmtReplay
+    {program : Program}
+    (hStmtReplay :
+      ∀ {returns : List Name} {stmt : Stmt} {ctx ctxAfter : Source.Ctx}
+        {fuel : Nat} {source target : Source.State}
+        {sourceOutcome : Source.Outcome},
+        StmtSafe returns stmt →
+        SourceStatePrivateScratchInvariant source target →
+        Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+            ctx fuel stmt source =
+          .ok (sourceOutcome, ctxAfter) →
+        ∃ targetOutcome,
+          Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+              ctx fuel stmt target =
+            .ok (targetOutcome, ctxAfter) ∧
+          SourceOutcomePrivateScratchInvariant sourceOutcome targetOutcome) :
+    ∀ {returns : List Name} {stmts : List Stmt} {ctx ctxAfter : Source.Ctx}
+      {fuel : Nat} {source target : Source.State}
+      {sourceOutcome : Source.Outcome},
+      StmtListSafe returns stmts →
+      SourceStatePrivateScratchInvariant source target →
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+          program ctx fuel { stmts := stmts } source =
+        .ok (sourceOutcome, ctxAfter) →
+      ∃ targetOutcome,
+        Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+            program ctx fuel { stmts := stmts } target =
+          .ok (targetOutcome, ctxAfter) ∧
+        SourceOutcomePrivateScratchInvariant sourceOutcome targetOutcome
+  | returns, [], ctx, ctxAfter, fuel, source, target, sourceOutcome,
+      _hSafe, hRel, hRun => by
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hRun
+      | succ fuel =>
+          simp [Source.Block.runOpen, Source.Outcome.regular,
+            Locals.Source.Outcome.regular] at hRun ⊢
+          rcases hRun with ⟨hOutcome, hCtx⟩
+          subst sourceOutcome
+          subst ctxAfter
+          exact ⟨rfl, SourceOutcomePrivateScratchInvariant.regular hRel⟩
+  | returns, stmt :: rest, ctx, ctxAfter, fuel, source, target, sourceOutcome,
+      hSafe, hRel, hRun => by
+      have hSafeParts :
+          StmtSafe returns stmt ∧ StmtListSafe returns rest := by
+        simpa [StmtListSafe] using hSafe
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hRun
+      | succ fuel =>
+          cases hStmt :
+              Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+                program ctx fuel stmt source with
+          | error err =>
+              simp [Source.Block.runOpen, hStmt] at hRun
+          | ok stmtResult =>
+              rcases stmtResult with ⟨headOutcome, ctxMid⟩
+              rcases hStmtReplay hSafeParts.1 hRel hStmt with
+                ⟨targetHeadOutcome, hTargetStmt, hHeadRel⟩
+              simp [Source.Block.runOpen, hStmt, hTargetStmt] at hRun ⊢
+              rcases headOutcome with ⟨headState, headMode⟩
+              rcases targetHeadOutcome with ⟨targetHeadState, targetMode⟩
+              have hTargetMode : targetMode = headMode := hHeadRel.mode_eq
+              subst targetMode
+              cases headMode with
+              | regular =>
+                  simp [Source.Outcome.regular,
+                    Locals.Source.Outcome.regular] at hRun ⊢
+                  exact
+                    blockRunOpen_privateScratchInvariant_of_stmtReplay
+                      hStmtReplay hSafeParts.2 hHeadRel.state hRun
+              | brk =>
+                  simp [Source.Outcome.brk, Locals.Source.Outcome.brk]
+                    at hRun ⊢
+                  rcases hRun with ⟨hOutcome, hCtx⟩
+                  subst sourceOutcome
+                  subst ctxAfter
+                  exact
+                    ⟨rfl,
+                      SourceOutcomePrivateScratchInvariant.brk
+                        hHeadRel.state⟩
+              | cont =>
+                  simp [Source.Outcome.cont, Locals.Source.Outcome.cont]
+                    at hRun ⊢
+                  rcases hRun with ⟨hOutcome, hCtx⟩
+                  subst sourceOutcome
+                  subst ctxAfter
+                  exact
+                    ⟨rfl,
+                      SourceOutcomePrivateScratchInvariant.cont
+                        hHeadRel.state⟩
+              | leave =>
+                  simp [Source.Outcome.leave, Locals.Source.Outcome.leave]
+                    at hRun ⊢
+                  rcases hRun with ⟨hOutcome, hCtx⟩
+                  subst sourceOutcome
+                  subst ctxAfter
+                  exact
+                    ⟨rfl,
+                      SourceOutcomePrivateScratchInvariant.leave
+                        hHeadRel.state⟩
+              | halt kind =>
+                  simp [Source.Outcome.halt, Locals.Source.Outcome.halt]
+                    at hRun ⊢
+                  rcases hRun with ⟨hOutcome, hCtx⟩
+                  subst sourceOutcome
+                  subst ctxAfter
+                  exact
+                    ⟨rfl,
+                      SourceOutcomePrivateScratchInvariant.halt
+                        hHeadRel.state⟩
+
+set_option maxHeartbeats 1200000 in
+mutual
+  theorem sourceBlockRunOpen_privateScratchInvariant
+      {program : Program} (hProgramSafe : ProgramSafe program) :
+      ∀ {returns : List Name} {block : Block} {ctx ctxAfter : Source.Ctx}
+        {fuel : Nat} {source target : Source.State}
+        {sourceOutcome : Source.Outcome},
+        BlockSafe returns block →
+        SourceStatePrivateScratchInvariant source target →
+        Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+            program ctx fuel block source =
+          .ok (sourceOutcome, ctxAfter) →
+        ∃ targetOutcome,
+          Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+              program ctx fuel block target =
+            .ok (targetOutcome, ctxAfter) ∧
+          SourceOutcomePrivateScratchInvariant sourceOutcome targetOutcome
+    | returns, ⟨[]⟩, ctx, ctxAfter, fuel, source, target, sourceOutcome,
+        _hSafe, hRel, hRun => by
+        cases fuel with
+        | zero =>
+            simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+              at hRun
+        | succ fuel =>
+            simp [Source.Block.runOpen, Source.Outcome.regular,
+              Locals.Source.Outcome.regular] at hRun ⊢
+            rcases hRun with ⟨hOutcome, hCtx⟩
+            subst sourceOutcome
+            subst ctxAfter
+            exact ⟨rfl, SourceOutcomePrivateScratchInvariant.regular hRel⟩
+    | returns, ⟨stmt :: rest⟩, ctx, ctxAfter, fuel, source, target,
+        sourceOutcome, hSafe, hRel, hRun => by
+        have hSafeParts :
+            StmtSafe returns stmt ∧ StmtListSafe returns rest := by
+          simpa [BlockSafe, StmtListSafe] using hSafe
+        cases fuel with
+        | zero =>
+            simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+              at hRun
+        | succ fuel =>
+            cases hStmt :
+                Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+                  program ctx fuel stmt source with
+            | error err =>
+                simp [Source.Block.runOpen, hStmt] at hRun
+            | ok stmtResult =>
+                rcases stmtResult with ⟨headOutcome, ctxMid⟩
+                rcases
+                    sourceStmtRun_privateScratchInvariant hProgramSafe
+                      hSafeParts.1 hRel hStmt with
+                  ⟨targetHeadOutcome, hTargetStmt, hHeadRel⟩
+                simp [Source.Block.runOpen, hStmt, hTargetStmt] at hRun ⊢
+                rcases headOutcome with ⟨headState, headMode⟩
+                rcases targetHeadOutcome with ⟨targetHeadState, targetMode⟩
+                have hTargetMode : targetMode = headMode :=
+                  hHeadRel.mode_eq
+                subst targetMode
+                cases headMode with
+                | regular =>
+                    simp [Source.Outcome.regular,
+                      Locals.Source.Outcome.regular] at hRun ⊢
+                    exact
+                      sourceBlockRunOpen_privateScratchInvariant hProgramSafe
+                        hSafeParts.2 hHeadRel.state hRun
+                | brk =>
+                    simp [Source.Outcome.brk, Locals.Source.Outcome.brk]
+                      at hRun ⊢
+                    rcases hRun with ⟨hOutcome, hCtx⟩
+                    subst sourceOutcome
+                    subst ctxAfter
+                    exact
+                      ⟨rfl,
+                        SourceOutcomePrivateScratchInvariant.brk
+                          hHeadRel.state⟩
+                | cont =>
+                    simp [Source.Outcome.cont, Locals.Source.Outcome.cont]
+                      at hRun ⊢
+                    rcases hRun with ⟨hOutcome, hCtx⟩
+                    subst sourceOutcome
+                    subst ctxAfter
+                    exact
+                      ⟨rfl,
+                        SourceOutcomePrivateScratchInvariant.cont
+                          hHeadRel.state⟩
+                | leave =>
+                    simp [Source.Outcome.leave, Locals.Source.Outcome.leave]
+                      at hRun ⊢
+                    rcases hRun with ⟨hOutcome, hCtx⟩
+                    subst sourceOutcome
+                    subst ctxAfter
+                    exact
+                      ⟨rfl,
+                        SourceOutcomePrivateScratchInvariant.leave
+                          hHeadRel.state⟩
+                | halt kind =>
+                    simp [Source.Outcome.halt, Locals.Source.Outcome.halt]
+                      at hRun ⊢
+                    rcases hRun with ⟨hOutcome, hCtx⟩
+                    subst sourceOutcome
+                    subst ctxAfter
+                    exact
+                      ⟨rfl,
+                        SourceOutcomePrivateScratchInvariant.halt
+                          hHeadRel.state⟩
+  termination_by returns block ctx ctxAfter fuel source target sourceOutcome
+      hSafe hRel hRun =>
+    (fuel, 0, sizeOf block)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+  theorem sourceBlockRunScoped_privateScratchInvariant
+      {program : Program} (hProgramSafe : ProgramSafe program) :
+      ∀ {returns : List Name} {block : Block} {ctx : Source.Ctx}
+        {fuel : Nat} {source target : Source.State}
+        {sourceOutcome : Source.Outcome},
+        BlockSafe returns block →
+        SourceStatePrivateScratchInvariant source target →
+        Source.Block.runScoped Locals.Source.PrimitiveSemantics.structured
+            program ctx block fuel source =
+          .ok sourceOutcome →
+        ∃ targetOutcome,
+          Source.Block.runScoped Locals.Source.PrimitiveSemantics.structured
+              program ctx block fuel target =
+            .ok targetOutcome ∧
+          SourceOutcomePrivateScratchInvariant sourceOutcome targetOutcome
+    | returns, block, ctx, fuel, source, target, sourceOutcome, hSafe,
+        hRel, hRun => by
+        unfold Source.Block.runScoped at hRun ⊢
+        cases hOpen :
+            Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+              program ctx fuel block source with
+        | error err =>
+            simp [hOpen] at hRun
+        | ok openResult =>
+            rcases openResult with ⟨innerOutcome, ctxAfter⟩
+            rcases
+                sourceBlockRunOpen_privateScratchInvariant hProgramSafe hSafe
+                  hRel hOpen with
+              ⟨targetInnerOutcome, hTargetOpen, hInnerRel⟩
+            simp [hOpen, hTargetOpen] at hRun ⊢
+            rcases innerOutcome with ⟨innerState, innerMode⟩
+            rcases targetInnerOutcome with ⟨targetInnerState, targetMode⟩
+            have hTargetMode : targetMode = innerMode := hInnerRel.mode_eq
+            subst targetMode
+            cases innerMode with
+            | regular =>
+                simp [Source.Outcome.regular, Locals.Source.Outcome.regular]
+                  at hRun ⊢
+                subst sourceOutcome
+                exact
+                  SourceOutcomePrivateScratchInvariant.regular
+                    (SourceStatePrivateScratchInvariant.restrictTo
+                      hInnerRel.state ctx.scope)
+            | brk =>
+                simp [Source.Outcome.brk, Locals.Source.Outcome.brk]
+                  at hRun ⊢
+                subst sourceOutcome
+                exact SourceOutcomePrivateScratchInvariant.brk hInnerRel.state
+            | cont =>
+                simp [Source.Outcome.cont, Locals.Source.Outcome.cont]
+                  at hRun ⊢
+                subst sourceOutcome
+                exact SourceOutcomePrivateScratchInvariant.cont hInnerRel.state
+            | leave =>
+                simp [Source.Outcome.leave, Locals.Source.Outcome.leave]
+                  at hRun ⊢
+                subst sourceOutcome
+                exact SourceOutcomePrivateScratchInvariant.leave hInnerRel.state
+            | halt kind =>
+                simp [Source.Outcome.halt, Locals.Source.Outcome.halt]
+                  at hRun ⊢
+                subst sourceOutcome
+                exact SourceOutcomePrivateScratchInvariant.halt hInnerRel.state
+  termination_by returns block ctx fuel source target sourceOutcome hSafe
+      hRel hRun =>
+    (fuel, 1, sizeOf block)
+  decreasing_by
+    all_goals simp_wf
+    all_goals
+      first
+      | omega
+      | exact Prod.Lex.right _
+          (Prod.Lex.left _ _ (by omega))
+
+  theorem sourceFunDefRunBody_privateScratchInvariant
+      {program : Program} (hProgramSafe : ProgramSafe program) :
+      ∀ {fn : FunDef} {args : List Word} {fuel : Nat}
+        {sourceShared targetShared : EvmYul.SharedState .EVM}
+        {sourceResult : Source.CallResult},
+        BlockSafe fn.returns fn.body →
+        SharedStatePrivateScratchInvariant sourceShared targetShared →
+        Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+            program fn args fuel sourceShared =
+          .ok sourceResult →
+        ∃ targetResult,
+          Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+              program fn args fuel targetShared =
+            .ok targetResult ∧
+          CallResultPrivateScratchInvariant sourceResult targetResult
+    | fn, args, fuel, sourceShared, targetShared, sourceResult, hSafe,
+        hShared, hRun => by
+        cases fuel with
+        | zero =>
+            simp [Source.FunDef.runBody, Source.invalid, Structured.invalid]
+              at hRun
+        | succ bodyFuel =>
+            unfold Source.FunDef.runBody at hRun ⊢
+            cases hParams :
+                Source.Store.insertMany fn.params args
+                  Locals.Source.Store.empty with
+            | none =>
+                simp [hParams, Source.invalid, Structured.invalid] at hRun
+            | some paramStore =>
+                simp [hParams] at hRun ⊢
+                cases hBody :
+                    Source.Block.runOpen
+                        Locals.Source.PrimitiveSemantics.structured program
+                        { Source.Ctx.withLeaveScope Source.Ctx.initial
+                            (fn.returns ++ fn.params) with
+                          scope := fn.returns ++ fn.params }
+                        bodyFuel fn.body
+                        { shared := sourceShared,
+                          vars :=
+                            Source.Store.initReturns fn.returns paramStore } with
+                | error err =>
+                    simp [hBody] at hRun
+                | ok bodyResult =>
+                    rcases bodyResult with ⟨sourceOutcome, bodyCtxAfter⟩
+                    have hBodyForReplay :
+                        Source.Block.runOpen
+                            Locals.Source.PrimitiveSemantics.structured
+                            program (Source.FunDef.bodyCtx fn) bodyFuel
+                            fn.body
+                            { shared := sourceShared,
+                              vars :=
+                                Source.Store.initReturns fn.returns
+                                  paramStore } =
+                          .ok (sourceOutcome, bodyCtxAfter) := by
+                      simpa [Source.FunDef.bodyCtx] using hBody
+                    rcases
+                        sourceBlockRunOpen_privateScratchInvariant
+                          hProgramSafe hSafe
+                          (sourceStatePrivateScratchInvariant_of_shared
+                            hShared)
+                          hBodyForReplay with
+                      ⟨targetOutcome, hTargetBody, hOutcomeRel⟩
+                    simp [Source.FunDef.bodyCtx, hBody, hTargetBody]
+                      at hRun ⊢
+                    rcases sourceOutcome with ⟨sourceBodyState, sourceMode⟩
+                    rcases targetOutcome with ⟨targetBodyState, targetMode⟩
+                    have hTargetMode : targetMode = sourceMode :=
+                      hOutcomeRel.mode_eq
+                    subst targetMode
+                    have hTargetBodyExpanded :
+                        Source.Block.runOpen
+                            Locals.Source.PrimitiveSemantics.structured
+                            program
+                            { Source.Ctx.withLeaveScope Source.Ctx.initial
+                                (fn.returns ++ fn.params) with
+                              scope := fn.returns ++ fn.params }
+                            bodyFuel fn.body
+                            { shared := targetShared,
+                              vars :=
+                                Source.Store.initReturns fn.returns
+                                  paramStore } =
+                          .ok
+                            (({ state := targetBodyState,
+                                mode := sourceMode } : Source.Outcome),
+                              bodyCtxAfter) := by
+                      simpa [Source.FunDef.bodyCtx] using hTargetBody
+                    cases sourceMode with
+                    | regular =>
+                        simp [Source.Outcome.regular,
+                          Locals.Source.Outcome.regular] at hRun ⊢
+                        cases hLookup :
+                            Source.Store.lookupMany fn.returns
+                              sourceBodyState.vars with
+                        | none =>
+                            simp [hLookup, Source.invalid, Structured.invalid]
+                              at hRun
+                        | some returnValues =>
+                            have hTargetLookup :
+                                Source.Store.lookupMany fn.returns
+                                    targetBodyState.vars =
+                                  some returnValues :=
+                              lookupMany_of_privateScratchInvariant
+                                hOutcomeRel.state hLookup
+                            simp [hLookup, hTargetLookup] at hRun ⊢
+                            rcases hRun with ⟨rfl, rfl⟩
+                            exact
+                              ⟨Source.CallResult.returned
+                                  targetBodyState.shared returnValues,
+                                by
+                                  simp [hTargetBodyExpanded,
+                                    Source.Outcome.regular,
+                                    Locals.Source.Outcome.regular,
+                                    hTargetLookup],
+                                CallResultPrivateScratchInvariant.returned
+                                  hOutcomeRel.state.shared⟩
+                    | brk =>
+                        simp [Source.Outcome.brk, Locals.Source.Outcome.brk,
+                          Source.invalid, Structured.invalid] at hRun
+                    | cont =>
+                        simp [Source.Outcome.cont, Locals.Source.Outcome.cont,
+                          Source.invalid, Structured.invalid] at hRun
+                    | leave =>
+                        simp [Source.Outcome.leave,
+                          Locals.Source.Outcome.leave] at hRun ⊢
+                        cases hLookup :
+                            Source.Store.lookupMany fn.returns
+                              sourceBodyState.vars with
+                        | none =>
+                            simp [hLookup, Source.invalid, Structured.invalid]
+                              at hRun
+                        | some returnValues =>
+                            have hTargetLookup :
+                                Source.Store.lookupMany fn.returns
+                                    targetBodyState.vars =
+                                  some returnValues :=
+                              lookupMany_of_privateScratchInvariant
+                                hOutcomeRel.state hLookup
+                            simp [hLookup, hTargetLookup] at hRun ⊢
+                            rcases hRun with ⟨rfl, rfl⟩
+                            exact
+                              ⟨Source.CallResult.returned
+                                  targetBodyState.shared returnValues,
+                                by
+                                  simp [hTargetBodyExpanded,
+                                    Source.Outcome.leave,
+                                    Locals.Source.Outcome.leave,
+                                    hTargetLookup],
+                                CallResultPrivateScratchInvariant.returned
+                                  hOutcomeRel.state.shared⟩
+                    | halt kind =>
+                        simp [Source.Outcome.halt,
+                          Locals.Source.Outcome.halt] at hRun ⊢
+                        rcases hRun with ⟨rfl, rfl⟩
+                        exact
+                          ⟨Source.CallResult.halted kind targetBodyState,
+                            by
+                              simp [hTargetBodyExpanded, Source.Outcome.halt,
+                                Locals.Source.Outcome.halt],
+                            CallResultPrivateScratchInvariant.halted
+                              hOutcomeRel.state⟩
+  termination_by fn args fuel sourceShared targetShared sourceResult hSafe
+      hShared hRun =>
+    (fuel, 2, sizeOf fn.body)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+  theorem sourceRunForLoop_privateScratchInvariant
+      {program : Program} (hProgramSafe : ProgramSafe program) :
+      ∀ {returns : List Name} {loopCtx : Source.Ctx} {cond : Expr 1}
+        {postBase : Source.Ctx} {post : Block} {bodyBase : Source.Ctx}
+        {body : Block} {fuel : Nat} {source target : Source.State}
+        {sourceOutcome : Source.Outcome},
+        SourceNoMemoryTouch.ExprSafe cond →
+        BlockSafe returns post →
+        BlockSafe returns body →
+        SourceStatePrivateScratchInvariant source target →
+        Source.Stmt.runForLoop Locals.Source.PrimitiveSemantics.structured
+            program loopCtx cond postBase post bodyBase body fuel source =
+          .ok sourceOutcome →
+        ∃ targetOutcome,
+          Source.Stmt.runForLoop Locals.Source.PrimitiveSemantics.structured
+              program loopCtx cond postBase post bodyBase body fuel target =
+            .ok targetOutcome ∧
+          SourceOutcomePrivateScratchInvariant sourceOutcome targetOutcome
+    | returns, loopCtx, cond, postBase, post, bodyBase, body, fuel, source,
+        target, sourceOutcome, hCondSafe, hPostSafe, hBodySafe, hRel,
+        hRun => by
+        cases fuel with
+        | zero =>
+            simp [Source.Stmt.runForLoop, Source.invalid, Structured.invalid]
+              at hRun
+        | succ fuel =>
+            cases hCond :
+                Source.Expr.evalCondition
+                  Locals.Source.PrimitiveSemantics.structured cond source with
+            | error err =>
+                simp [Source.Stmt.runForLoop, hCond] at hRun
+            | ok condResult =>
+                rcases condResult with ⟨sourceAfterCond, condTrue⟩
+                rcases
+                    sourceExpr_evalCondition_privateScratchInvariant
+                      hCondSafe hRel hCond with
+                  ⟨targetAfterCond, hTargetCond, hCondRel⟩
+                cases condTrue with
+                | false =>
+                    simp [Source.Stmt.runForLoop, hCond, hTargetCond,
+                      Source.Outcome.regular,
+                      Locals.Source.Outcome.regular] at hRun ⊢
+                    subst sourceOutcome
+                    exact
+                      SourceOutcomePrivateScratchInvariant.regular
+                        (SourceStatePrivateScratchInvariant.restrictTo
+                          hCondRel loopCtx.scope)
+                | true =>
+                    cases hBodyRun :
+                        Source.Block.runScoped
+                          Locals.Source.PrimitiveSemantics.structured
+                          program bodyBase body fuel sourceAfterCond with
+                    | error err =>
+                        simp [Source.Stmt.runForLoop, hCond, hBodyRun]
+                          at hRun
+                    | ok bodyOutcome =>
+                        rcases
+                            sourceBlockRunScoped_privateScratchInvariant
+                              hProgramSafe hBodySafe hCondRel hBodyRun with
+                          ⟨targetBodyOutcome, hTargetBody, hBodyRel⟩
+                        simp [Source.Stmt.runForLoop, hCond, hTargetCond,
+                          hBodyRun, hTargetBody] at hRun ⊢
+                        rcases bodyOutcome with ⟨bodyState, bodyMode⟩
+                        rcases targetBodyOutcome with
+                          ⟨targetBodyState, targetBodyMode⟩
+                        have hTargetBodyMode :
+                            targetBodyMode = bodyMode := hBodyRel.mode_eq
+                        subst targetBodyMode
+                        cases bodyMode with
+                        | brk =>
+                            simp [Source.Outcome.brk,
+                              Locals.Source.Outcome.brk,
+                              Source.Outcome.regular,
+                              Locals.Source.Outcome.regular] at hRun ⊢
+                            subst sourceOutcome
+                            exact
+                              SourceOutcomePrivateScratchInvariant.regular
+                                hBodyRel.state
+                        | regular =>
+                            cases hPostRun :
+                                Source.Block.runScoped
+                                  Locals.Source.PrimitiveSemantics.structured
+                                  program postBase post fuel bodyState with
+                            | error err =>
+                                simp [Source.Outcome.regular,
+                                  Locals.Source.Outcome.regular, hPostRun]
+                                  at hRun
+                            | ok postOutcome =>
+                                rcases
+                                    sourceBlockRunScoped_privateScratchInvariant
+                                      hProgramSafe hPostSafe hBodyRel.state
+                                      hPostRun with
+                                  ⟨targetPostOutcome, hTargetPost,
+                                    hPostRel⟩
+                                simp [Source.Outcome.regular,
+                                  Locals.Source.Outcome.regular, hPostRun,
+                                  hTargetPost]
+                                  at hRun ⊢
+                                rcases postOutcome with
+                                  ⟨postState, postMode⟩
+                                rcases targetPostOutcome with
+                                  ⟨targetPostState, targetPostMode⟩
+                                have hTargetPostMode :
+                                    targetPostMode = postMode :=
+                                  hPostRel.mode_eq
+                                subst targetPostMode
+                                cases postMode with
+                                | regular =>
+                                    simp [Source.Outcome.regular,
+                                      Locals.Source.Outcome.regular] at hRun ⊢
+                                    exact
+                                      sourceRunForLoop_privateScratchInvariant
+                                        hProgramSafe hCondSafe hPostSafe
+                                        hBodySafe hPostRel.state hRun
+                                | brk =>
+                                    simp [Source.Outcome.brk,
+                                      Locals.Source.Outcome.brk,
+                                      Source.invalid, Structured.invalid]
+                                      at hRun
+                                | cont =>
+                                    simp [Source.Outcome.cont,
+                                      Locals.Source.Outcome.cont,
+                                      Source.invalid, Structured.invalid]
+                                      at hRun
+                                | leave =>
+                                    simp [Source.Outcome.leave,
+                                      Locals.Source.Outcome.leave] at hRun ⊢
+                                    subst sourceOutcome
+                                    exact
+                                      SourceOutcomePrivateScratchInvariant.leave
+                                        hPostRel.state
+                                | halt kind =>
+                                    simp [Source.Outcome.halt,
+                                      Locals.Source.Outcome.halt] at hRun ⊢
+                                    subst sourceOutcome
+                                    exact
+                                      SourceOutcomePrivateScratchInvariant.halt
+                                        hPostRel.state
+                        | cont =>
+                            cases hPostRun :
+                                Source.Block.runScoped
+                                  Locals.Source.PrimitiveSemantics.structured
+                                  program postBase post fuel bodyState with
+                            | error err =>
+                                simp [Source.Outcome.cont,
+                                  Locals.Source.Outcome.cont, hPostRun]
+                                  at hRun
+                            | ok postOutcome =>
+                                rcases
+                                    sourceBlockRunScoped_privateScratchInvariant
+                                      hProgramSafe hPostSafe hBodyRel.state
+                                      hPostRun with
+                                  ⟨targetPostOutcome, hTargetPost,
+                                    hPostRel⟩
+                                simp [Source.Outcome.cont,
+                                  Locals.Source.Outcome.cont, hPostRun,
+                                  hTargetPost]
+                                  at hRun ⊢
+                                rcases postOutcome with
+                                  ⟨postState, postMode⟩
+                                rcases targetPostOutcome with
+                                  ⟨targetPostState, targetPostMode⟩
+                                have hTargetPostMode :
+                                    targetPostMode = postMode :=
+                                  hPostRel.mode_eq
+                                subst targetPostMode
+                                cases postMode with
+                                | regular =>
+                                    simp [Source.Outcome.regular,
+                                      Locals.Source.Outcome.regular] at hRun ⊢
+                                    exact
+                                      sourceRunForLoop_privateScratchInvariant
+                                        hProgramSafe hCondSafe hPostSafe
+                                        hBodySafe hPostRel.state hRun
+                                | brk =>
+                                    simp [Source.Outcome.brk,
+                                      Locals.Source.Outcome.brk,
+                                      Source.invalid, Structured.invalid]
+                                      at hRun
+                                | cont =>
+                                    simp [Source.Outcome.cont,
+                                      Locals.Source.Outcome.cont,
+                                      Source.invalid, Structured.invalid]
+                                      at hRun
+                                | leave =>
+                                    simp [Source.Outcome.leave,
+                                      Locals.Source.Outcome.leave] at hRun ⊢
+                                    subst sourceOutcome
+                                    exact
+                                      SourceOutcomePrivateScratchInvariant.leave
+                                        hPostRel.state
+                                | halt kind =>
+                                    simp [Source.Outcome.halt,
+                                      Locals.Source.Outcome.halt] at hRun ⊢
+                                    subst sourceOutcome
+                                    exact
+                                      SourceOutcomePrivateScratchInvariant.halt
+                                        hPostRel.state
+                        | leave =>
+                            simp [Source.Outcome.leave,
+                              Locals.Source.Outcome.leave] at hRun ⊢
+                            subst sourceOutcome
+                            exact SourceOutcomePrivateScratchInvariant.leave
+                              hBodyRel.state
+                        | halt kind =>
+                            simp [Source.Outcome.halt,
+                              Locals.Source.Outcome.halt] at hRun ⊢
+                            subst sourceOutcome
+                            exact SourceOutcomePrivateScratchInvariant.halt
+                              hBodyRel.state
+  termination_by returns loopCtx cond postBase post bodyBase body fuel source
+      target sourceOutcome hCondSafe hPostSafe hBodySafe hRel hRun =>
+    (fuel, 3, 0)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+  theorem sourceStmtRun_privateScratchInvariant
+      {program : Program} (hProgramSafe : ProgramSafe program) :
+      ∀ {returns : List Name} {stmt : Stmt} {ctx ctxAfter : Source.Ctx}
+        {fuel : Nat} {source target : Source.State}
+        {sourceOutcome : Source.Outcome},
+        StmtSafe returns stmt →
+        SourceStatePrivateScratchInvariant source target →
+        Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+            ctx fuel stmt source =
+          .ok (sourceOutcome, ctxAfter) →
+        ∃ targetOutcome,
+          Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+              program ctx fuel stmt target =
+            .ok (targetOutcome, ctxAfter) ∧
+          SourceOutcomePrivateScratchInvariant sourceOutcome targetOutcome
+    | returns, .expr expr, ctx, ctxAfter, fuel, source, target,
+        sourceOutcome, hSafe, hRel, hRun => by
+        cases hEval :
+            Source.Expr.eval Locals.Source.PrimitiveSemantics.structured expr
+              source with
+        | error err =>
+            simp [Source.Stmt.run, hEval] at hRun
+        | ok evalResult =>
+            rcases evalResult with ⟨sourceAfterExpr, values⟩
+            rcases
+                Locals.SourceLowering.PrimitiveSemantics.sourceExpr_eval_privateScratchInvariant
+                  hSafe hRel hEval with
+              ⟨targetAfterExpr, hTargetEval, hExprRel⟩
+            simp [Source.Stmt.run, hEval, hTargetEval,
+              Source.Outcome.regular, Locals.Source.Outcome.regular]
+              at hRun ⊢
+            rcases hRun with ⟨hOutcome, hCtx⟩
+            subst sourceOutcome
+            subst ctxAfter
+            exact ⟨rfl, SourceOutcomePrivateScratchInvariant.regular hExprRel⟩
+    | returns, .let_ name value, ctx, ctxAfter, fuel, source, target,
+        sourceOutcome, hSafe, hRel, hRun => by
+        cases hEval :
+            Source.Expr.evalOne Locals.Source.PrimitiveSemantics.structured
+              value source with
+        | error err =>
+            simp [Source.Stmt.run, hEval] at hRun
+        | ok evalResult =>
+            rcases evalResult with ⟨sourceAfterValue, value'⟩
+            rcases
+                Locals.SourceLowering.PrimitiveSemantics.sourceExpr_evalOne_privateScratchInvariant
+                  hSafe hRel hEval with
+              ⟨targetAfterValue, hTargetEval, hValueRel⟩
+            simp [Source.Stmt.run, hEval, hTargetEval,
+              Source.Outcome.regular, Locals.Source.Outcome.regular]
+              at hRun ⊢
+            rcases hRun with ⟨rfl, rfl⟩
+            exact
+              ⟨rfl,
+                SourceOutcomePrivateScratchInvariant.regular
+                  (SourceStatePrivateScratchInvariant.insert hValueRel name
+                    value')⟩
+    | returns, .assign name value, ctx, ctxAfter, fuel, source, target,
+        sourceOutcome, hSafe, hRel, hRun => by
+        by_cases hContains : source.vars.contains name = true
+        · have hTargetContains : target.vars.contains name = true := by
+            simpa [hRel.vars_eq] using hContains
+          cases hEval :
+              Source.Expr.evalOne Locals.Source.PrimitiveSemantics.structured
+                value source with
+          | error err =>
+              simp [Source.Stmt.run, hContains, hEval] at hRun
+          | ok evalResult =>
+              rcases evalResult with ⟨sourceAfterValue, value'⟩
+              rcases
+                  Locals.SourceLowering.PrimitiveSemantics.sourceExpr_evalOne_privateScratchInvariant
+                    hSafe hRel hEval with
+                ⟨targetAfterValue, hTargetEval, hValueRel⟩
+              simp [Source.Stmt.run, hContains, hTargetContains, hEval,
+                hTargetEval, Source.Outcome.regular,
+                Locals.Source.Outcome.regular] at hRun ⊢
+              rcases hRun with ⟨rfl, rfl⟩
+              have hAssignedRel :
+                  SourceStatePrivateScratchInvariant
+                    (sourceAfterValue.withVars
+                      (Locals.Source.Store.insert sourceAfterValue.vars name value'))
+                    (targetAfterValue.withVars
+                      (Locals.Source.Store.insert targetAfterValue.vars name
+                        value')) := by
+                simpa [hValueRel.vars_eq] using
+                  SourceStatePrivateScratchInvariant.withVars_same hValueRel
+                    (Locals.Source.Store.insert sourceAfterValue.vars name value')
+              exact
+                ⟨rfl, SourceOutcomePrivateScratchInvariant.regular hAssignedRel⟩
+        · have hContainsFalse : source.vars.contains name = false := by
+            cases hBool : source.vars.contains name <;> simp [hBool] at hContains ⊢
+          simp [Source.Stmt.run, hContainsFalse, Source.invalid,
+            Structured.invalid] at hRun
+    | returns, .block body, ctx, ctxAfter, fuel, source, target,
+        sourceOutcome, hSafe, hRel, hRun => by
+        cases hScoped :
+            Source.Block.runScoped
+              Locals.Source.PrimitiveSemantics.structured program ctx body
+              fuel source with
+        | error err =>
+            simp [Source.Stmt.run, hScoped] at hRun
+        | ok scopedOutcome =>
+            rcases
+                sourceBlockRunScoped_privateScratchInvariant hProgramSafe
+                  hSafe hRel hScoped with
+              ⟨targetOutcome, hTargetScoped, hOutcomeRel⟩
+            simp [Source.Stmt.run, hScoped, hTargetScoped] at hRun ⊢
+            rcases hRun with ⟨rfl, rfl⟩
+            exact ⟨rfl, hOutcomeRel⟩
+    | returns, .if_ cond body, ctx, ctxAfter, fuel, source, target,
+        sourceOutcome, hSafe, hRel, hRun => by
+        rcases hSafe with ⟨hCondSafe, hBodySafe⟩
+        cases fuel with
+        | zero =>
+            simp [Source.Stmt.run, Source.invalid, Structured.invalid]
+              at hRun
+        | succ fuel =>
+            cases hCond :
+                Source.Expr.evalCondition
+                  Locals.Source.PrimitiveSemantics.structured cond source with
+            | error err =>
+                simp [Source.Stmt.run, hCond] at hRun
+            | ok condResult =>
+                rcases condResult with ⟨sourceAfterCond, condTrue⟩
+                rcases
+                    sourceExpr_evalCondition_privateScratchInvariant
+                      hCondSafe hRel hCond with
+                  ⟨targetAfterCond, hTargetCond, hCondRel⟩
+                cases condTrue with
+                | false =>
+                    simp [Source.Stmt.run, hCond, hTargetCond,
+                      Source.Outcome.regular,
+                      Locals.Source.Outcome.regular] at hRun ⊢
+                    rcases hRun with ⟨rfl, rfl⟩
+                    exact
+                      ⟨rfl,
+                        SourceOutcomePrivateScratchInvariant.regular hCondRel⟩
+                | true =>
+                    cases hScoped :
+                        Source.Block.runScoped
+                          Locals.Source.PrimitiveSemantics.structured program
+                          ctx body fuel sourceAfterCond with
+                    | error err =>
+                        simp [Source.Stmt.run, hCond, hScoped] at hRun
+                    | ok bodyOutcome =>
+                        rcases
+                            sourceBlockRunScoped_privateScratchInvariant
+                              hProgramSafe hBodySafe hCondRel hScoped with
+                          ⟨targetOutcome, hTargetScoped, hOutcomeRel⟩
+                        simp [Source.Stmt.run, hCond, hTargetCond, hScoped,
+                          hTargetScoped] at hRun ⊢
+                        rcases hRun with ⟨rfl, rfl⟩
+                        exact ⟨rfl, hOutcomeRel⟩
+    | returns, .switch scrutinee cases defaultBody, ctx, ctxAfter, fuel,
+        source, target, sourceOutcome, hSafe, hRel, hRun => by
+        rcases hSafe with ⟨hScrutineeSafe, hCasesSafe, hDefaultSafe⟩
+        cases fuel with
+        | zero =>
+            simp [Source.Stmt.run, Source.invalid, Structured.invalid]
+              at hRun
+        | succ fuel =>
+            cases hScrut :
+                Source.Expr.evalOne Locals.Source.PrimitiveSemantics.structured
+                  scrutinee source with
+            | error err =>
+                simp [Source.Stmt.run, hScrut] at hRun
+            | ok scrutResult =>
+                rcases scrutResult with ⟨sourceAfterScrut, value⟩
+                rcases
+                    Locals.SourceLowering.PrimitiveSemantics.sourceExpr_evalOne_privateScratchInvariant
+                      hScrutineeSafe hRel hScrut with
+                  ⟨targetAfterScrut, hTargetScrut, hScrutRel⟩
+                cases hSelect :
+                    Source.Switch.select value cases defaultBody with
+                | none =>
+                    simp [Source.Stmt.run, hScrut, hTargetScrut, hSelect,
+                      Source.Outcome.regular,
+                      Locals.Source.Outcome.regular] at hRun ⊢
+                    rcases hRun with ⟨rfl, rfl⟩
+                    exact
+                      ⟨rfl,
+                        SourceOutcomePrivateScratchInvariant.regular hScrutRel⟩
+                | some selectedBody =>
+                    have hSelectedSafe :
+                        BlockSafe returns selectedBody :=
+                      caseListSafe_select hCasesSafe hDefaultSafe hSelect
+                    cases hScoped :
+                        Source.Block.runScoped
+                          Locals.Source.PrimitiveSemantics.structured program
+                          ctx selectedBody fuel sourceAfterScrut with
+                    | error err =>
+                        simp [Source.Stmt.run, hScrut, hSelect, hScoped]
+                          at hRun
+                    | ok selectedOutcome =>
+                        rcases
+                            sourceBlockRunScoped_privateScratchInvariant
+                              hProgramSafe hSelectedSafe hScrutRel hScoped with
+                          ⟨targetOutcome, hTargetScoped, hOutcomeRel⟩
+                        simp [Source.Stmt.run, hScrut, hTargetScrut, hSelect,
+                          hScoped, hTargetScoped] at hRun ⊢
+                        rcases hRun with ⟨rfl, rfl⟩
+                        exact ⟨rfl, hOutcomeRel⟩
+    | returns, .for_ init cond post body, ctx, ctxAfter, fuel, source,
+        target, sourceOutcome, hSafe, hRel, hRun => by
+        rcases hSafe with ⟨hInitSafe, hCondSafe, hPostSafe, hBodySafe⟩
+        cases fuel with
+        | zero =>
+            simp [Source.Stmt.run, Source.invalid, Structured.invalid]
+              at hRun
+        | succ fuel =>
+            let initBase := ctx.withoutLoopControl
+            cases hInit :
+                Source.Block.runOpen
+                  Locals.Source.PrimitiveSemantics.structured program
+                  initBase fuel init source with
+            | error err =>
+                simp [Source.Stmt.run, initBase, hInit] at hRun
+            | ok initResult =>
+                rcases initResult with ⟨initOutcome, initCtx⟩
+                rcases
+                    sourceBlockRunOpen_privateScratchInvariant hProgramSafe
+                      hInitSafe hRel hInit with
+                  ⟨targetInitOutcome, hTargetInit, hInitRel⟩
+                simp [Source.Stmt.run, initBase, hInit, hTargetInit]
+                  at hRun ⊢
+                rcases initOutcome with ⟨initState, initMode⟩
+                rcases targetInitOutcome with
+                  ⟨targetInitState, targetInitMode⟩
+                have hTargetInitMode :
+                    targetInitMode = initMode := hInitRel.mode_eq
+                subst targetInitMode
+                cases initMode with
+                | regular =>
+                    let loopCtx := initCtx
+                    let postBase := initCtx.withoutLoopControl
+                    let bodyBase :=
+                      initCtx.withLoopControl initCtx.scope initCtx.scope
+                    cases hLoop :
+                        Source.Stmt.runForLoop
+                          Locals.Source.PrimitiveSemantics.structured
+                          program loopCtx cond postBase post bodyBase body
+                          fuel initState with
+                    | error err =>
+                        simp [Source.Outcome.regular,
+                          Locals.Source.Outcome.regular, loopCtx, postBase,
+                          bodyBase, hLoop] at hRun
+                    | ok loopOutcome =>
+                        rcases
+                            sourceRunForLoop_privateScratchInvariant
+                              hProgramSafe hCondSafe hPostSafe hBodySafe
+                              hInitRel.state hLoop with
+                          ⟨targetLoopOutcome, hTargetLoop, hLoopRel⟩
+                        simp [Source.Outcome.regular,
+                          Locals.Source.Outcome.regular, loopCtx, postBase,
+                          bodyBase, hLoop, hTargetLoop] at hRun ⊢
+                        rcases loopOutcome with ⟨loopState, loopMode⟩
+                        rcases targetLoopOutcome with
+                          ⟨targetLoopState, targetLoopMode⟩
+                        have hTargetLoopMode :
+                            targetLoopMode = loopMode := hLoopRel.mode_eq
+                        subst targetLoopMode
+                        cases loopMode with
+                        | regular =>
+                            simp [Source.Outcome.regular,
+                              Locals.Source.Outcome.regular] at hRun ⊢
+                            rcases hRun with ⟨rfl, rfl⟩
+                            exact
+                              ⟨rfl,
+                                SourceOutcomePrivateScratchInvariant.regular
+                                  (SourceStatePrivateScratchInvariant.restrictTo
+                                    hLoopRel.state ctx.scope)⟩
+                        | brk =>
+                            simp [Source.Outcome.brk,
+                              Locals.Source.Outcome.brk, Source.invalid,
+                              Structured.invalid] at hRun
+                        | cont =>
+                            simp [Source.Outcome.cont,
+                              Locals.Source.Outcome.cont, Source.invalid,
+                              Structured.invalid] at hRun
+                        | leave =>
+                            simp [Source.Outcome.leave,
+                              Locals.Source.Outcome.leave] at hRun ⊢
+                            rcases hRun with ⟨rfl, rfl⟩
+                            exact
+                              ⟨rfl,
+                                SourceOutcomePrivateScratchInvariant.leave
+                                  hLoopRel.state⟩
+                        | halt kind =>
+                            simp [Source.Outcome.halt,
+                              Locals.Source.Outcome.halt] at hRun ⊢
+                            rcases hRun with ⟨rfl, rfl⟩
+                            exact
+                              ⟨rfl,
+                                SourceOutcomePrivateScratchInvariant.halt
+                                  hLoopRel.state⟩
+                | brk =>
+                    simp [Source.Outcome.brk, Locals.Source.Outcome.brk,
+                      Source.invalid, Structured.invalid] at hRun
+                | cont =>
+                    simp [Source.Outcome.cont, Locals.Source.Outcome.cont,
+                      Source.invalid, Structured.invalid] at hRun
+                | leave =>
+                    simp [Source.Outcome.leave, Locals.Source.Outcome.leave]
+                      at hRun ⊢
+                    rcases hRun with ⟨rfl, rfl⟩
+                    exact
+                      ⟨rfl,
+                        SourceOutcomePrivateScratchInvariant.leave
+                          hInitRel.state⟩
+                | halt kind =>
+                    simp [Source.Outcome.halt, Locals.Source.Outcome.halt]
+                      at hRun ⊢
+                    rcases hRun with ⟨rfl, rfl⟩
+                    exact
+                      ⟨rfl,
+                        SourceOutcomePrivateScratchInvariant.halt
+                          hInitRel.state⟩
+    | returns, .brk, ctx, ctxAfter, fuel, source, target, sourceOutcome,
+        hSafe, hRel, hRun => by
+        cases hBreak : ctx.breakScope? with
+        | none =>
+            simp [Source.Stmt.run, hBreak, Source.invalid,
+              Structured.invalid] at hRun
+        | some scope =>
+            simp [Source.Stmt.run, hBreak, Source.Outcome.brk,
+              Locals.Source.Outcome.brk] at hRun ⊢
+            rcases hRun with ⟨rfl, rfl⟩
+            exact
+              ⟨rfl,
+                SourceOutcomePrivateScratchInvariant.brk
+                  (SourceStatePrivateScratchInvariant.restrictTo hRel scope)⟩
+    | returns, .cont, ctx, ctxAfter, fuel, source, target, sourceOutcome,
+        hSafe, hRel, hRun => by
+        cases hCont : ctx.continueScope? with
+        | none =>
+            simp [Source.Stmt.run, hCont, Source.invalid,
+              Structured.invalid] at hRun
+        | some scope =>
+            simp [Source.Stmt.run, hCont, Source.Outcome.cont,
+              Locals.Source.Outcome.cont] at hRun ⊢
+            rcases hRun with ⟨rfl, rfl⟩
+            exact
+              ⟨rfl,
+                SourceOutcomePrivateScratchInvariant.cont
+                  (SourceStatePrivateScratchInvariant.restrictTo hRel scope)⟩
+    | returns, .leave, ctx, ctxAfter, fuel, source, target, sourceOutcome,
+        hSafe, hRel, hRun => by
+        cases hLeave : ctx.leaveScope? with
+        | none =>
+            simp [Source.Stmt.run, hLeave, Source.invalid,
+              Structured.invalid] at hRun
+        | some scope =>
+            simp [Source.Stmt.run, hLeave, Source.Outcome.leave,
+              Locals.Source.Outcome.leave] at hRun ⊢
+            rcases hRun with ⟨rfl, rfl⟩
+            exact
+              ⟨rfl,
+                SourceOutcomePrivateScratchInvariant.leave
+                  (SourceStatePrivateScratchInvariant.restrictTo hRel scope)⟩
+    | returns, .call targets functionName args, ctx, ctxAfter, fuel, source,
+        target, sourceOutcome, hSafe, hRel, hRun => by
+        cases fuel with
+        | zero =>
+            simp [Source.Stmt.run, Source.invalid, Structured.invalid]
+              at hRun
+        | succ bodyFuel =>
+            exact
+              callStmt_privateScratchInvariant_of_callReplay
+                hSafe hRel hRun
+                (by
+                  intro fn sourceAfterArgs targetAfterArgs argValues
+                    sourceCallResult hArgsRel hFind hBody
+                  exact
+                    sourceFunDefRunBody_privateScratchInvariant
+                      hProgramSafe (hProgramSafe.functions hFind)
+                      hArgsRel.shared hBody)
+    | returns, .terminal kind, ctx, ctxAfter, fuel, source, target,
+        sourceOutcome, hSafe, hRel, hRun => by
+        cases hTerminal :
+            Locals.Source.PrimitiveSemantics.structured.terminal kind
+              source.shared [] with
+        | error err =>
+            simp [Source.Stmt.run, hTerminal] at hRun
+        | ok sourceShared' =>
+            rcases
+                Locals.SourceLowering.PrimitiveSemantics.structured_terminal_privateScratchInvariant
+                  hSafe hRel.shared hTerminal with
+              ⟨targetShared', hTargetTerminal, hSharedRel⟩
+            simp [Source.Stmt.run, hTerminal, hTargetTerminal,
+              Source.Outcome.halt, Locals.Source.Outcome.halt] at hRun ⊢
+            rcases hRun with ⟨rfl, rfl⟩
+            exact
+              ⟨rfl,
+                SourceOutcomePrivateScratchInvariant.halt
+                  (SourceStatePrivateScratchInvariant.withShared hRel
+                    hSharedRel)⟩
+    | returns, .terminalArgs kind args, ctx, ctxAfter, fuel, source, target,
+        sourceOutcome, hSafe, hRel, hRun => by
+        rcases hSafe with ⟨hNoMem, hArgsSafe⟩
+        cases hArgs :
+            Locals.Source.Expr.ExprSeq.eval
+              Locals.Source.PrimitiveSemantics.structured args source with
+        | error err =>
+            simp [Source.Stmt.run, hArgs] at hRun
+        | ok argResult =>
+            rcases argResult with ⟨sourceAfterArgs, values⟩
+            rcases
+                Locals.SourceLowering.PrimitiveSemantics.sourceExprSeq_eval_privateScratchInvariant
+                  hArgsSafe hRel hArgs with
+              ⟨targetAfterArgs, hTargetArgs, hArgsRel⟩
+            cases hTerminal :
+                Locals.Source.PrimitiveSemantics.structured.terminal kind
+                  sourceAfterArgs.shared values with
+            | error err =>
+                simp [Source.Stmt.run, hArgs, hTerminal] at hRun
+            | ok sourceShared' =>
+                rcases
+                    Locals.SourceLowering.PrimitiveSemantics.structured_terminal_privateScratchInvariant
+                      hNoMem hArgsRel.shared hTerminal with
+                  ⟨targetShared', hTargetTerminal, hSharedRel⟩
+                simp [Source.Stmt.run, hArgs, hTargetArgs, hTerminal,
+                  hTargetTerminal, Source.Outcome.halt,
+                  Locals.Source.Outcome.halt] at hRun ⊢
+                rcases hRun with ⟨rfl, rfl⟩
+                exact
+                  ⟨rfl,
+                    SourceOutcomePrivateScratchInvariant.halt
+                      (SourceStatePrivateScratchInvariant.withShared hArgsRel
+                        hSharedRel)⟩
+  termination_by returns stmt ctx ctxAfter fuel source target sourceOutcome
+      hSafe hRel hRun =>
+    (fuel, 4, sizeOf stmt)
+  decreasing_by
+    all_goals simp_wf
+    all_goals
+      first
+      | omega
+      | exact Prod.Lex.right _
+          (Prod.Lex.left _ _ (by omega))
+end
+
+theorem lowerStmtListSafe_append :
+    ∀ {left right : List Locals.Stmt},
+      SourceNoMemoryTouch.StmtListSafe (left ++ right) →
+        SourceNoMemoryTouch.StmtListSafe left ∧
+          SourceNoMemoryTouch.StmtListSafe right
+  | [], right, hSafe => by
+      exact ⟨by simp [SourceNoMemoryTouch.StmtListSafe],
+        by simpa using hSafe⟩
+  | stmt :: rest, right, hSafe => by
+      have hParts :
+          SourceNoMemoryTouch.StmtSafe stmt ∧
+            SourceNoMemoryTouch.StmtListSafe (rest ++ right) := by
+        simpa [SourceNoMemoryTouch.StmtListSafe] using hSafe
+      rcases lowerStmtListSafe_append hParts.2 with
+        ⟨hRestSafe, hRightSafe⟩
+      exact
+        ⟨by
+          simpa [SourceNoMemoryTouch.StmtListSafe] using
+            And.intro hParts.1 hRestSafe,
+          hRightSafe⟩
+
+mutual
+  theorem blockSafe_of_toLocals
+      {returns : List Name} :
+      ∀ {block : Block},
+        SourceNoMemoryTouch.BlockSafe (Block.toLocals returns block) →
+          BlockSafe returns block
+    | ⟨stmts⟩, hSafe =>
+        stmtListSafe_of_toLocals hSafe
+  termination_by block _hSafe => sizeOf block
+  decreasing_by
+    cases block
+    all_goals simp_wf
+    all_goals omega
+
+  theorem stmtSafe_of_toLocals_single
+      {returns : List Name} :
+      ∀ {stmt : Stmt},
+        SourceNoMemoryTouch.BlockSafe
+            { stmts := Stmt.toLocals returns stmt } →
+          StmtSafe returns stmt
+    | .expr expr, hSafe => by
+        simpa [Stmt.toLocals, SourceNoMemoryTouch.BlockSafe,
+          SourceNoMemoryTouch.StmtListSafe,
+          SourceNoMemoryTouch.StmtSafe, StmtSafe] using hSafe
+    | .let_ name value, hSafe => by
+        simpa [Stmt.toLocals, SourceNoMemoryTouch.BlockSafe,
+          SourceNoMemoryTouch.StmtListSafe,
+          SourceNoMemoryTouch.StmtSafe, StmtSafe] using hSafe
+    | .assign name value, hSafe => by
+        simpa [Stmt.toLocals, SourceNoMemoryTouch.BlockSafe,
+          SourceNoMemoryTouch.StmtListSafe,
+          SourceNoMemoryTouch.StmtSafe, StmtSafe] using hSafe
+    | .block body, hSafe => by
+        simpa [Stmt.toLocals, SourceNoMemoryTouch.BlockSafe,
+          SourceNoMemoryTouch.StmtListSafe,
+          SourceNoMemoryTouch.StmtSafe, StmtSafe] using
+          blockSafe_of_toLocals
+            (by
+              simpa [Stmt.toLocals, SourceNoMemoryTouch.BlockSafe,
+                SourceNoMemoryTouch.StmtListSafe,
+                SourceNoMemoryTouch.StmtSafe] using hSafe)
+    | .if_ cond body, hSafe => by
+        have hParts :
+            SourceNoMemoryTouch.ExprSafe cond ∧
+              SourceNoMemoryTouch.BlockSafe (Block.toLocals returns body) := by
+          simpa [Stmt.toLocals, SourceNoMemoryTouch.BlockSafe,
+            SourceNoMemoryTouch.StmtListSafe,
+            SourceNoMemoryTouch.StmtSafe] using hSafe
+        exact ⟨hParts.1, blockSafe_of_toLocals hParts.2⟩
+    | .switch scrutinee cases defaultBody, hSafe => by
+        have hParts :
+            SourceNoMemoryTouch.ExprSafe scrutinee ∧
+              SourceNoMemoryTouch.CaseListSafe
+                (CaseList.toLocals returns cases) ∧
+              SourceNoMemoryTouch.DefaultSafe
+                (Default.toLocals returns defaultBody) := by
+          simpa [Stmt.toLocals, SourceNoMemoryTouch.BlockSafe,
+            SourceNoMemoryTouch.StmtListSafe,
+            SourceNoMemoryTouch.StmtSafe] using hSafe
+        exact
+          ⟨hParts.1, caseListSafe_of_toLocals hParts.2.1,
+            defaultSafe_of_toLocals hParts.2.2⟩
+    | .for_ init cond post body, hSafe => by
+        have hParts :
+            SourceNoMemoryTouch.BlockSafe (Block.toLocals returns init) ∧
+              SourceNoMemoryTouch.ExprSafe cond ∧
+              SourceNoMemoryTouch.BlockSafe (Block.toLocals returns post) ∧
+              SourceNoMemoryTouch.BlockSafe (Block.toLocals returns body) := by
+          simpa [Stmt.toLocals, SourceNoMemoryTouch.BlockSafe,
+            SourceNoMemoryTouch.StmtListSafe,
+            SourceNoMemoryTouch.StmtSafe] using hSafe
+        exact
+          ⟨blockSafe_of_toLocals hParts.1, hParts.2.1,
+            blockSafe_of_toLocals hParts.2.2.1,
+            blockSafe_of_toLocals hParts.2.2.2⟩
+    | .brk, hSafe => by
+        simp [StmtSafe]
+    | .cont, hSafe => by
+        simp [StmtSafe]
+    | .leave, hSafe => by
+        simp [StmtSafe]
+    | .call targets functionName args, hSafe => by
+        cases args with
+        | nil =>
+            simp [StmtSafe, Lower.argExprs,
+              SourceNoMemoryTouch.ExprSeqSafe]
+        | cons arg rest =>
+            have hParts :
+                SourceNoMemoryTouch.ExprSeqSafe
+                    (Lower.argExprs (arg :: rest)) ∧
+                  SourceNoMemoryTouch.StmtListSafe
+                    (Lower.assignReturnedTops targets) := by
+              simpa [Stmt.toLocals, Lower.evalArgs,
+                SourceNoMemoryTouch.BlockSafe,
+                SourceNoMemoryTouch.StmtListSafe,
+                SourceNoMemoryTouch.StmtSafe] using hSafe
+            exact hParts.1
+    | .terminal kind, hSafe => by
+        simpa [Stmt.toLocals, SourceNoMemoryTouch.BlockSafe,
+          SourceNoMemoryTouch.StmtListSafe,
+          SourceNoMemoryTouch.StmtSafe, StmtSafe] using hSafe
+    | .terminalArgs kind args, hSafe => by
+        simpa [Stmt.toLocals, SourceNoMemoryTouch.BlockSafe,
+          SourceNoMemoryTouch.StmtListSafe,
+          SourceNoMemoryTouch.StmtSafe, StmtSafe] using hSafe
+  termination_by stmt _hSafe => sizeOf stmt
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+  theorem stmtListSafe_of_toLocals
+      {returns : List Name} :
+      ∀ {stmts : List Stmt},
+        SourceNoMemoryTouch.BlockSafe
+            { stmts := StmtList.toLocals returns stmts } →
+          StmtListSafe returns stmts
+    | [], hSafe => by
+        simp [StmtListSafe]
+    | stmt :: rest, hSafe => by
+        have hListSafe :
+            SourceNoMemoryTouch.StmtListSafe
+              (Stmt.toLocals returns stmt ++
+                StmtList.toLocals returns rest) := by
+          simpa [SourceNoMemoryTouch.BlockSafe, StmtList.toLocals] using
+            hSafe
+        rcases lowerStmtListSafe_append hListSafe with
+          ⟨hHeadList, hTailList⟩
+        have hBlockHead :
+            SourceNoMemoryTouch.BlockSafe
+              { stmts := Stmt.toLocals returns stmt } := by
+          simpa [SourceNoMemoryTouch.BlockSafe] using hHeadList
+        have hBlockTail :
+            SourceNoMemoryTouch.BlockSafe
+              { stmts := StmtList.toLocals returns rest } := by
+          simpa [SourceNoMemoryTouch.BlockSafe] using hTailList
+        exact
+          ⟨stmtSafe_of_toLocals_single hBlockHead,
+            stmtListSafe_of_toLocals hBlockTail⟩
+  termination_by stmts _hSafe => sizeOf stmts
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+  theorem caseListSafe_of_toLocals
+      {returns : List Name} :
+      ∀ {cases : List (Word × Block)},
+        SourceNoMemoryTouch.CaseListSafe
+            (CaseList.toLocals returns cases) →
+          CaseListSafe returns cases
+    | [], hSafe => by
+        simp [CaseListSafe]
+    | (value, body) :: rest, hSafe => by
+        have hParts :
+            SourceNoMemoryTouch.BlockSafe (Block.toLocals returns body) ∧
+              SourceNoMemoryTouch.CaseListSafe
+                (CaseList.toLocals returns rest) := by
+          simpa [CaseList.toLocals, SourceNoMemoryTouch.CaseListSafe] using
+            hSafe
+        exact
+          ⟨blockSafe_of_toLocals hParts.1,
+            caseListSafe_of_toLocals hParts.2⟩
+  termination_by cases _hSafe => sizeOf cases
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+  theorem defaultSafe_of_toLocals
+      {returns : List Name} :
+      ∀ {defaultBody : Option Block},
+        SourceNoMemoryTouch.DefaultSafe
+            (Default.toLocals returns defaultBody) →
+          DefaultSafe returns defaultBody
+    | none, hSafe => by
+        simp [DefaultSafe]
+    | some body, hSafe => by
+        exact blockSafe_of_toLocals (by
+          simpa [Default.toLocals, SourceNoMemoryTouch.DefaultSafe] using
+            hSafe)
+  termination_by defaultBody _hSafe => sizeOf defaultBody
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+end
+
+end FunctionSourceNoMemoryTouch
+
+theorem compileStmtList?_eq_some_nil
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {plan : Plan}
+    (hCompile :
+      compileStmtList? range program returns sourceScope stackLayout layout
+          [] =
+        some plan) :
+    plan =
+      { sourceScope := sourceScope
+        stackLayout := stackLayout
+        layout := layout
+        block := { stmts := [] } } := by
+  unfold compileStmtList? at hCompile
+  simp at hCompile
+  exact hCompile.symm
+
+theorem compileStmtList?_eq_some_cons
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {rest : List Stmt}
+    {plan : Plan}
+    (hCompile :
+      compileStmtList? range program returns sourceScope stackLayout layout
+          (stmt :: rest) =
+        some plan) :
+    ∃ head tail,
+      compileStmt? range program returns sourceScope stackLayout layout stmt =
+        some head ∧
+      compileStmtList? range program returns head.sourceScope
+          head.stackLayout head.layout rest =
+        some tail ∧
+      plan =
+        { sourceScope := tail.sourceScope
+          stackLayout := tail.stackLayout
+          layout := tail.layout
+          block := ExpressionsBlock.append head.block tail.block } := by
+  unfold compileStmtList? at hCompile
+  cases hHead :
+      compileStmt? range program returns sourceScope stackLayout layout
+        stmt with
+  | none =>
+      simp [hHead] at hCompile
+  | some head =>
+      simp [hHead] at hCompile
+      cases hTail :
+          compileStmtList? range program returns head.sourceScope
+            head.stackLayout head.layout rest with
+      | none =>
+          simp [hTail] at hCompile
+      | some tail =>
+          simp [hTail] at hCompile
+          cases hCompile
+          exact ⟨head, tail, rfl, hTail, rfl⟩
+
+theorem compileBlockOpen?_eq_some
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan : Plan}
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan) :
+    compileStmtList? range program returns sourceScope stackLayout layout
+        block.stmts =
+      some plan := by
+  simpa [compileBlockOpen?] using hCompile
+
+namespace FunctionSourceNoMemoryTouch
+
+theorem compileStmt?_sourceNoMemoryTouch
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    (hCompile :
+      compileStmt? range program returns sourceScope stackLayout layout stmt =
+        some plan) :
+    StmtSafe returns stmt := by
+  cases stmt with
+  | expr expr =>
+      have hSpan :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout
+              layout (.expr expr) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      exact
+        stmtSafe_of_toLocals_single
+          (compileLocalsBlockSpan?_sourceNoMemoryTouch
+            (by simpa [compileNonCallStmtSpan?] using hSpan))
+  | let_ name value =>
+      have hSpan :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout
+              layout (.let_ name value) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      exact
+        stmtSafe_of_toLocals_single
+          (compileLocalsBlockSpan?_sourceNoMemoryTouch
+            (by simpa [compileNonCallStmtSpan?] using hSpan))
+  | assign name value =>
+      have hSpan :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout
+              layout (.assign name value) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      exact
+        stmtSafe_of_toLocals_single
+          (compileLocalsBlockSpan?_sourceNoMemoryTouch
+            (by simpa [compileNonCallStmtSpan?] using hSpan))
+  | block body =>
+      have hSpan :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout
+              layout (.block body) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      exact
+        stmtSafe_of_toLocals_single
+          (compileLocalsBlockSpan?_sourceNoMemoryTouch
+            (by simpa [compileNonCallStmtSpan?] using hSpan))
+  | if_ cond body =>
+      have hSpan :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout
+              layout (.if_ cond body) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      exact
+        stmtSafe_of_toLocals_single
+          (compileLocalsBlockSpan?_sourceNoMemoryTouch
+            (by simpa [compileNonCallStmtSpan?] using hSpan))
+  | switch scrutinee cases defaultBody =>
+      have hSpan :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout
+              layout (.switch scrutinee cases defaultBody) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      exact
+        stmtSafe_of_toLocals_single
+          (compileLocalsBlockSpan?_sourceNoMemoryTouch
+            (by simpa [compileNonCallStmtSpan?] using hSpan))
+  | for_ init cond post body =>
+      have hSpan :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout
+              layout (.for_ init cond post body) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      exact
+        stmtSafe_of_toLocals_single
+          (compileLocalsBlockSpan?_sourceNoMemoryTouch
+            (by simpa [compileNonCallStmtSpan?] using hSpan))
+  | brk =>
+      have hSpan :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout
+              layout .brk =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      exact
+        stmtSafe_of_toLocals_single
+          (compileLocalsBlockSpan?_sourceNoMemoryTouch
+            (by simpa [compileNonCallStmtSpan?] using hSpan))
+  | cont =>
+      have hSpan :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout
+              layout .cont =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      exact
+        stmtSafe_of_toLocals_single
+          (compileLocalsBlockSpan?_sourceNoMemoryTouch
+            (by simpa [compileNonCallStmtSpan?] using hSpan))
+  | leave =>
+      simp [StmtSafe]
+  | call targets functionName args =>
+      rcases compileCall?_eq_some
+          (by simpa [compileStmt?] using hCompile) with
+        ⟨fn, spill, saved, argsCode, storeCode, _hFind, _hTargetsNodup,
+          _hArgsLength, _hTargetsLength, hSafe, _hSpill, _hSavedEq,
+          _hArgsCode, _hStoreCode, _hPlan⟩
+      exact SourceNoMemoryTouch.exprSeq?_sound hSafe
+  | terminal kind =>
+      have hSpan :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout
+              layout (.terminal kind) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      exact
+        stmtSafe_of_toLocals_single
+          (compileLocalsBlockSpan?_sourceNoMemoryTouch
+            (by simpa [compileNonCallStmtSpan?] using hSpan))
+  | terminalArgs kind args =>
+      have hSpan :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout
+              layout (.terminalArgs kind args) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      exact
+        stmtSafe_of_toLocals_single
+          (compileLocalsBlockSpan?_sourceNoMemoryTouch
+            (by simpa [compileNonCallStmtSpan?] using hSpan))
+
+theorem compileStmtList?_sourceNoMemoryTouch
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {stmts : List Stmt} {plan : Plan},
+      compileStmtList? range program returns sourceScope stackLayout layout
+          stmts =
+        some plan →
+      StmtListSafe returns stmts
+  | [], plan, hCompile => by
+      simp [StmtListSafe]
+  | stmt :: rest, plan, hCompile => by
+      rcases compileStmtList?_eq_some_cons hCompile with
+        ⟨head, tail, hHead, hTail, _hPlan⟩
+      exact
+        ⟨compileStmt?_sourceNoMemoryTouch hHead,
+          compileStmtList?_sourceNoMemoryTouch hTail⟩
+
+theorem compileBlockOpen?_sourceNoMemoryTouch
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan : Plan}
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan) :
+    BlockSafe returns block := by
+  cases block with
+  | mk stmts =>
+      exact
+        compileStmtList?_sourceNoMemoryTouch
+          (compileBlockOpen?_eq_some hCompile)
+
+end FunctionSourceNoMemoryTouch
+
+theorem compileStmt?_leave_sound_exact_stack
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    {values : List Word} {frame : Structured.ReturnDest}
+    {returnStack : List Structured.ReturnDest}
+    (hCompile :
+      compileStmt? range program returns sourceScope stackLayout layout
+          .leave =
+        some plan)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel .leave source =
+        .ok (Source.Outcome.leave sourceAfter, sourceCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany returns sourceAfter.vars = some values)
+    (hReturnsInLeaveScope :
+      ∀ leaveScope name,
+        sourceCtx.leaveScope? = some leaveScope →
+        name ∈ returns →
+        name ∈ leaveScope)
+    (hReturns : target.returns = frame :: returnStack) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.leave (target.withEVM final)) ∧
+      final.stack = values.reverse ∧
+      SharedStateEqOutsideScratch range sourceAfter.shared
+        final.toSharedState ∧
+      ScratchRegionReady final.toMachineState range.base range.words := by
+  have hCompileLeave :
+      compileLeave? range returns sourceScope stackLayout layout = some plan := by
+    simpa [compileStmt?] using hCompile
+  cases hLeaveScope : sourceCtx.leaveScope? with
+  | none =>
+      simp [Source.Stmt.run, hLeaveScope, Source.invalid,
+        Structured.invalid] at hSourceRun
+  | some leaveScope =>
+      simp [Source.Stmt.run, hLeaveScope, Source.Outcome.leave] at hSourceRun
+      rcases hSourceRun with ⟨hSourceAfter, _hCtxAfter⟩
+      cases hSourceAfter
+      have hLookupSource :
+          Source.Store.lookupMany returns source.vars = some values := by
+        apply source_store_lookupMany_of_restrictTo_of_mem
+        · intro name hNameMem
+          exact hReturnsInLeaveScope leaveScope name hLeaveScope hNameMem
+        · simpa [Locals.Source.State.restrictTo] using hLookup
+      rcases
+          compileLeave?_sound_exact_stack hSpec hWordBytes
+            (exprProgram := exprProgram) hCompileLeave hRel hDefined
+            hLength hLookupSource hReturns with
+        ⟨final, exprFuel, hRun, hStack, hPrefix⟩
+      exact
+        ⟨final, exprFuel, hRun, hStack,
+          by
+            simpa [Locals.Source.State.restrictTo] using
+              SpillStackPrefixRel.shared hPrefix,
+          SpillStackPrefixRel.scratchReady hPrefix⟩
+
+theorem compileStmt?_leave_sound_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    {values : List Word} {frame : Structured.ReturnDest}
+    {returnStack : List Structured.ReturnDest}
+    (hCompile :
+      compileStmt? range program returns sourceScope stackLayout layout stmt =
+        some plan)
+    (hSupported : StmtOpenSupported returns stmt)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel stmt source =
+        .ok (Source.Outcome.leave sourceAfter, sourceCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany returns sourceAfter.vars = some values)
+    (hReturnsInLeaveScope :
+      ∀ leaveScope name,
+        sourceCtx.leaveScope? = some leaveScope →
+        name ∈ returns →
+        name ∈ leaveScope)
+    (hReturns : target.returns = frame :: returnStack) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.leave (target.withEVM final)) ∧
+      final.stack = values.reverse ∧
+      SharedStateEqOutsideScratch range sourceAfter.shared
+        final.toSharedState ∧
+      ScratchRegionReady final.toMachineState range.base range.words := by
+  have hNonCallImpossible
+      (hCompileNon :
+        compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+            stmt =
+          some plan)
+      (hOwned :
+        SourceLowering.SourceToLocals.Stmt.SourceOwned returns stmt) :
+      False := by
+    rcases
+        compileNonCallStmtSpan?_expressionsBlock_sound_of_source_run
+          hSpec hWordBytes (exprProgram := exprProgram)
+          hCompileNon hOwned hScope hRel hDefined
+          hSourceRun with
+      ⟨result, _exprFuel, _hRun, hOutcomeRel⟩
+    cases result <;>
+      simpa [SpillOutcomeRel, Source.Outcome.leave] using hOutcomeRel
+  cases stmt with
+  | expr expr =>
+      exact False.elim
+        (hNonCallImpossible
+          (by simpa [compileStmt?] using hCompile)
+          (by simpa [StmtOpenSupported] using hSupported))
+  | let_ name value =>
+      exact False.elim
+        (hNonCallImpossible
+          (by simpa [compileStmt?] using hCompile)
+          (by simpa [StmtOpenSupported] using hSupported))
+  | assign name value =>
+      exact False.elim
+        (hNonCallImpossible
+          (by simpa [compileStmt?] using hCompile)
+          (by simpa [StmtOpenSupported] using hSupported))
+  | block body =>
+      exact False.elim
+        (hNonCallImpossible
+          (by simpa [compileStmt?] using hCompile)
+          (by simpa [StmtOpenSupported] using hSupported))
+  | if_ cond body =>
+      exact False.elim
+        (hNonCallImpossible
+          (by simpa [compileStmt?] using hCompile)
+          (by simpa [StmtOpenSupported] using hSupported))
+  | switch scrutinee cases defaultBody =>
+      exact False.elim
+        (hNonCallImpossible
+          (by simpa [compileStmt?] using hCompile)
+          (by simpa [StmtOpenSupported] using hSupported))
+  | for_ init cond post body =>
+      exact False.elim
+        (hNonCallImpossible
+          (by simpa [compileStmt?] using hCompile)
+          (by simpa [StmtOpenSupported] using hSupported))
+  | brk =>
+      exact False.elim
+        (hNonCallImpossible
+          (by simpa [compileStmt?] using hCompile)
+          (by simpa [StmtOpenSupported] using hSupported))
+  | cont =>
+      exact False.elim
+        (hNonCallImpossible
+          (by simpa [compileStmt?] using hCompile)
+          (by simpa [StmtOpenSupported] using hSupported))
+  | leave =>
+      exact
+        compileStmt?_leave_sound_exact_stack hSpec hWordBytes
+          hCompile hScope hRel hDefined hLength hSourceRun hLookup
+          hReturnsInLeaveScope hReturns
+  | call targets functionName args =>
+      exact False.elim (source_call_leave_false hSourceRun)
+  | terminal kind =>
+      exact False.elim
+        (hNonCallImpossible
+          (by simpa [compileStmt?] using hCompile)
+          (by simpa [StmtOpenSupported] using hSupported))
+  | terminalArgs kind args =>
+      exact False.elim
+        (hNonCallImpossible
+          (by simpa [compileStmt?] using hCompile)
+          (by simpa [StmtOpenSupported] using hSupported))
+
+def compileMainBody? (range : ScratchRange) (program : Program) :
+    Option Plan :=
+  compileBlockOpen? range program [] [] [] [] program.body
+
+def withScratchPrealloc (range : ScratchRange) (plan : Plan) : Plan :=
+  { plan with
+    block :=
+      ExpressionsBlock.append
+        (ExpressionsBlock.ofCode (scratchPreallocCode range))
+        plan.block }
+
+theorem compileMainBody?_noCallCreate
+    {range : ScratchRange} {program : Program} {plan : Plan}
+    (hCompile : compileMainBody? range program = some plan) :
+    plan.block.usesCallCreate = false :=
+  compileBlockOpen?_noCallCreate hCompile
+
+theorem withScratchPrealloc_noCallCreate
+    {range : ScratchRange} {plan : Plan}
+    (hPlan : plan.block.usesCallCreate = false) :
+    (withScratchPrealloc range plan).block.usesCallCreate = false := by
+  exact
+    expressionsBlock_append_noCallCreate
+      (expressionsBlock_ofCode_noCallCreate
+        (scratchPreallocCode_noCallCreate range))
+      hPlan
+
+def compileFunDef? (range : ScratchRange) (program : Program)
+    (fn : FunDef) : Option Expressions.Proc := do
+  let entryStack := fn.params.reverse
+  let init ←
+    compileLocalsBlockSpan? range fn.params entryStack
+      (layoutOfParamStack fn.params)
+      { stmts := initReturnsInSourceScopeOrder fn.returns }
+  let body ←
+    compileBlockOpen? range program fn.returns init.sourceScope
+      init.stackLayout init.layout fn.body
+  let fullBody ←
+    appendReturnFallthrough? range fn.returns
+      { sourceScope := body.sourceScope
+        stackLayout := body.stackLayout
+        layout := body.layout
+        block := ExpressionsBlock.append init.block body.block }
+  some
+    { name := fn.name
+      argc := fn.params.length
+      retc := fn.returns.length
+      body := fullBody.block }
+
+theorem compileFunDef?_eq_some_header
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    (hCompile : compileFunDef? range program fn = some proc) :
+    proc.name = fn.name ∧
+      proc.argc = fn.params.length ∧
+      proc.retc = fn.returns.length := by
+  unfold compileFunDef? at hCompile
+  cases hInit :
+      compileLocalsBlockSpan? range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params)
+        { stmts := initReturnsInSourceScopeOrder fn.returns } with
+  | none =>
+      simp [hInit] at hCompile
+  | some init =>
+      simp [hInit] at hCompile
+      cases hBody :
+          compileBlockOpen? range program fn.returns init.sourceScope
+            init.stackLayout init.layout fn.body with
+      | none =>
+          simp [hBody] at hCompile
+      | some body =>
+          simp [hBody] at hCompile
+          cases hFull :
+              appendReturnFallthrough? range fn.returns
+                { sourceScope := body.sourceScope
+                  stackLayout := body.stackLayout
+                  layout := body.layout
+                  block := ExpressionsBlock.append init.block body.block } with
+          | none =>
+              simp [hFull] at hCompile
+          | some fullBody =>
+              simp [hFull] at hCompile
+              cases hCompile
+              exact ⟨rfl, rfl, rfl⟩
+
+theorem compileFunDef?_eq_some_components
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    (hCompile : compileFunDef? range program fn = some proc) :
+    ∃ init body fullBody,
+      compileLocalsBlockSpan? range fn.params fn.params.reverse
+          (layoutOfParamStack fn.params)
+          { stmts := initReturnsInSourceScopeOrder fn.returns } =
+        some init ∧
+      compileBlockOpen? range program fn.returns init.sourceScope
+          init.stackLayout init.layout fn.body =
+        some body ∧
+      appendReturnFallthrough? range fn.returns
+          { sourceScope := body.sourceScope
+            stackLayout := body.stackLayout
+            layout := body.layout
+            block := ExpressionsBlock.append init.block body.block } =
+        some fullBody ∧
+      proc =
+        { name := fn.name
+          argc := fn.params.length
+          retc := fn.returns.length
+          body := fullBody.block } := by
+  unfold compileFunDef? at hCompile
+  cases hInit :
+      compileLocalsBlockSpan? range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params)
+        { stmts := initReturnsInSourceScopeOrder fn.returns } with
+  | none =>
+      simp [hInit] at hCompile
+  | some init =>
+      simp [hInit] at hCompile
+      cases hBody :
+          compileBlockOpen? range program fn.returns init.sourceScope
+            init.stackLayout init.layout fn.body with
+      | none =>
+          simp [hBody] at hCompile
+      | some body =>
+          simp [hBody] at hCompile
+          cases hFull :
+              appendReturnFallthrough? range fn.returns
+                { sourceScope := body.sourceScope
+                  stackLayout := body.stackLayout
+                  layout := body.layout
+                  block := ExpressionsBlock.append init.block body.block } with
+          | none =>
+              simp [hFull] at hCompile
+          | some fullBody =>
+              simp [hFull] at hCompile
+              cases hCompile
+              exact
+                ⟨init, body, fullBody,
+                  by simpa [hInit],
+                  by simpa [hBody],
+                  by simpa [hFull],
+                  rfl⟩
+
+theorem compileFunDef?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    (hCompile : compileFunDef? range program fn = some proc) :
+    proc.usesCallCreate = false := by
+  rcases compileFunDef?_eq_some_components hCompile with
+    ⟨init, body, fullBody, hInit, hBody, hFull, hProc⟩
+  subst proc
+  have hInitNo : init.block.usesCallCreate = false :=
+    compileLocalsBlockSpan?_noCallCreate hInit
+  have hBodyNo : body.block.usesCallCreate = false :=
+    compileBlockOpen?_noCallCreate hBody
+  have hCombined :
+      (ExpressionsBlock.append init.block body.block).usesCallCreate = false :=
+    expressionsBlock_append_noCallCreate hInitNo hBodyNo
+  simpa [Expressions.Proc.usesCallCreate] using
+    appendReturnFallthrough?_noCallCreate hFull hCombined
+
+theorem compileFunDef?_eq_some_init_sourceScope
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    (hCompile : compileFunDef? range program fn = some proc) :
+    ∃ init,
+      compileLocalsBlockSpan? range fn.params fn.params.reverse
+          (layoutOfParamStack fn.params)
+          { stmts := initReturnsInSourceScopeOrder fn.returns } =
+        some init ∧
+      init.sourceScope = fn.returns ++ fn.params := by
+  rcases compileFunDef?_eq_some_components hCompile with
+    ⟨init, _body, _fullBody, hInit, _hBody, _hFull, _hProc⟩
+  refine ⟨init, hInit, ?_⟩
+  have hScope := compileLocalsBlockSpan?_sourceScope_outEnv hInit
+  rw [hScope]
+  exact initReturnsInSourceScopeOrder_outEnv fn.returns fn.params
+
+theorem compileFunDef?_init_regular_sound
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    {exprProgram : Expressions.Program}
+    {sourceEntry : Source.State} {target : Expressions.RunState}
+    (hCompile : compileFunDef? range program fn = some proc)
+    (hRel :
+      SpillStateRel range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params) sourceEntry target.evm)
+    (hDefined :
+      SpillLayout.StoreDefined sourceEntry.vars
+        (layoutOfParamStack fn.params)) :
+    ∃ init initFinal exprFuel,
+      compileLocalsBlockSpan? range fn.params fn.params.reverse
+          (layoutOfParamStack fn.params)
+          { stmts := initReturnsInSourceScopeOrder fn.returns } =
+        some init ∧
+      Expressions.Block.run exprProgram exprFuel init.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM initFinal)) ∧
+      SpillStateRel range init.sourceScope init.stackLayout init.layout
+        (sourceEntry.withVars
+          (Source.Store.initReturns fn.returns sourceEntry.vars))
+        initFinal ∧
+      SpillLayout.StoreDefined
+        (Source.Store.initReturns fn.returns sourceEntry.vars) init.layout ∧
+      init.sourceScope = fn.returns ++ fn.params := by
+  rcases compileFunDef?_eq_some_components hCompile with
+    ⟨init, _body, _fullBody, hInit, _hBody, _hFull, _hProc⟩
+  let initCtx : Locals.Source.Ctx := { scope := fn.params }
+  have hInitRun :
+      Locals.Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+          program.toLocals initCtx (fn.returns.length + 1)
+          { stmts := initReturnsInSourceScopeOrder fn.returns } sourceEntry =
+        .ok
+          (Locals.Source.Outcome.regular
+            (sourceEntry.withVars
+              (Source.Store.initReturns fn.returns sourceEntry.vars)),
+            { initCtx with scope := fn.returns ++ initCtx.scope }) := by
+    exact
+      initReturnsInSourceScopeOrder_runOpen program.toLocals fn.returns
+        initCtx sourceEntry
+  rcases
+      compileLocalsBlockSpan?_expressionsBlock_sound_of_source_run
+        hSpec hWordBytes hInit (by rfl) hRel hDefined hInitRun with
+    ⟨result, exprFuel, hRun, hOutcomeRel⟩
+  rcases SpillOutcomeRel.regular_inv hOutcomeRel with
+    ⟨initFinal, hResult, hInitRel⟩
+  subst result
+  have hStoreDefined :
+      SpillLayout.StoreDefined
+        (Source.Store.initReturns fn.returns sourceEntry.vars) init.layout := by
+    intro bindingName location hMem
+    have hDefinedRaw :
+        SpillLayout.StoreDefined
+          (sourceEntry.withVars
+            (Source.Store.initReturns fn.returns sourceEntry.vars)).vars
+          init.layout :=
+      compileLocalsBlockSpan?_regular_storeDefined_of_source_run
+        hSpec hWordBytes hInit (by rfl) hDefined hInitRun
+    simpa [Locals.Source.State.withVars] using
+      hDefinedRaw (name := bindingName) (location := location) hMem
+  have hInitScope : init.sourceScope = fn.returns ++ fn.params := by
+    rcases compileFunDef?_eq_some_init_sourceScope hCompile with
+      ⟨init', hInit', hScope'⟩
+    rw [hInit] at hInit'
+    cases hInit'
+    exact hScope'
+  refine ⟨init, initFinal, exprFuel, hInit, ?_, hInitRel, hStoreDefined,
+    hInitScope⟩
+  simpa [SpillStmtCode.toExpressionsOutcome] using hRun
+
+theorem compileFunDef?_init_regular_sound_exact
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    {exprProgram : Expressions.Program}
+    {sourceEntry : Source.State} {target : Expressions.RunState}
+    (hCompile : compileFunDef? range program fn = some proc)
+    (hRel :
+      SpillStateRel range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params) sourceEntry target.evm)
+    (hDefined :
+      SpillLayout.StoreDefined sourceEntry.vars
+        (layoutOfParamStack fn.params))
+    (hLength : target.evm.stack.length = fn.params.reverse.length) :
+    ∃ init initFinal exprFuel,
+      compileLocalsBlockSpan? range fn.params fn.params.reverse
+          (layoutOfParamStack fn.params)
+          { stmts := initReturnsInSourceScopeOrder fn.returns } =
+        some init ∧
+      Expressions.Block.run exprProgram exprFuel init.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM initFinal)) ∧
+      SpillStateRel range init.sourceScope init.stackLayout init.layout
+        (sourceEntry.withVars
+          (Source.Store.initReturns fn.returns sourceEntry.vars))
+        initFinal ∧
+      SpillLayout.StoreDefined
+        (Source.Store.initReturns fn.returns sourceEntry.vars) init.layout ∧
+      initFinal.stack.length = init.stackLayout.length ∧
+      init.sourceScope = fn.returns ++ fn.params := by
+  rcases compileFunDef?_eq_some_components hCompile with
+    ⟨init, _body, _fullBody, hInit, _hBody, _hFull, _hProc⟩
+  let initCtx : Locals.Source.Ctx := { scope := fn.params }
+  have hInitRun :
+      Locals.Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured
+          program.toLocals initCtx (fn.returns.length + 1)
+          { stmts := initReturnsInSourceScopeOrder fn.returns } sourceEntry =
+        .ok
+          (Locals.Source.Outcome.regular
+            (sourceEntry.withVars
+              (Source.Store.initReturns fn.returns sourceEntry.vars)),
+            { initCtx with scope := fn.returns ++ initCtx.scope }) := by
+    exact
+      initReturnsInSourceScopeOrder_runOpen program.toLocals fn.returns
+        initCtx sourceEntry
+  rcases
+      compileLocalsBlockSpan?_regular_sound_exact_length
+        hSpec hWordBytes hInit (by rfl) hRel hDefined hLength hInitRun with
+    ⟨initFinal, exprFuel, hRun, hInitRel, hStoreDefinedRaw,
+      hInitLength, _hScopeAfter⟩
+  have hStoreDefined :
+      SpillLayout.StoreDefined
+        (Source.Store.initReturns fn.returns sourceEntry.vars) init.layout := by
+    intro bindingName location hMem
+    simpa [Locals.Source.State.withVars] using
+      hStoreDefinedRaw (name := bindingName) (location := location) hMem
+  have hInitScope : init.sourceScope = fn.returns ++ fn.params := by
+    rcases compileFunDef?_eq_some_init_sourceScope hCompile with
+      ⟨init', hInit', hScope'⟩
+    rw [hInit] at hInit'
+    cases hInit'
+    exact hScope'
+  exact
+    ⟨init, initFinal, exprFuel, hInit, hRun, hInitRel, hStoreDefined,
+      hInitLength, hInitScope⟩
+
+def compileFunDefs? (range : ScratchRange) (program : Program) :
+    List FunDef → Option (List Expressions.Proc)
+  | [] => some []
+  | fn :: rest => do
+      let proc ← compileFunDef? range program fn
+      let procs ← compileFunDefs? range program rest
+      some (proc :: procs)
+
+theorem compileFunDefs?_eq_some_headers
+    {range : ScratchRange} {program : Program}
+    {fns : List FunDef} {procs : List Expressions.Proc}
+    (hCompile : compileFunDefs? range program fns = some procs) :
+    procs.map (fun proc => proc.name) =
+        fns.map (fun fn => fn.name) ∧
+      procs.map (fun proc => proc.argc) =
+        fns.map (fun fn => fn.params.length) ∧
+      procs.map (fun proc => proc.retc) =
+        fns.map (fun fn => fn.returns.length) := by
+  revert procs
+  induction fns with
+  | nil =>
+      intro procs hCompile
+      unfold compileFunDefs? at hCompile
+      simp at hCompile
+      cases hCompile
+      simp
+  | cons fn rest ih =>
+      intro procs hCompile
+      unfold compileFunDefs? at hCompile
+      cases hHead : compileFunDef? range program fn with
+      | none =>
+          simp [hHead] at hCompile
+      | some proc =>
+          simp [hHead] at hCompile
+          cases hTail : compileFunDefs? range program rest with
+          | none =>
+              simp [hTail] at hCompile
+          | some tailProcs =>
+              simp [hTail] at hCompile
+              cases hCompile
+              rcases compileFunDef?_eq_some_header hHead with
+                ⟨hName, hArgc, hRetc⟩
+              rcases ih hTail with
+                ⟨hNames, hArgcs, hRetcs⟩
+              simp [hName, hArgc, hRetc, hNames, hArgcs, hRetcs]
+
+theorem compileFunDefs?_noCallCreate
+    {range : ScratchRange} {program : Program} :
+    ∀ {fns : List FunDef} {procs : List Expressions.Proc},
+      compileFunDefs? range program fns = some procs →
+      Expressions.ProcList.usesCallCreate procs = false
+  | [], procs, hCompile => by
+      simp [compileFunDefs?] at hCompile
+      cases hCompile
+      simp [Expressions.ProcList.usesCallCreate]
+  | fn :: rest, procs, hCompile => by
+      unfold compileFunDefs? at hCompile
+      cases hHead : compileFunDef? range program fn with
+      | none =>
+          simp [hHead] at hCompile
+      | some proc =>
+          simp [hHead] at hCompile
+          cases hTail : compileFunDefs? range program rest with
+          | none =>
+              simp [hTail] at hCompile
+          | some tailProcs =>
+              simp [hTail] at hCompile
+              cases hCompile
+              simp [Expressions.ProcList.usesCallCreate,
+                compileFunDef?_noCallCreate hHead,
+                compileFunDefs?_noCallCreate hTail]
+
+theorem compileFunDefs?_lookup_of_find?
+    {range : ScratchRange} {program : Program}
+    {fns : List FunDef} {procs : List Expressions.Proc}
+    {name : Name} {fn : FunDef}
+    (hCompile : compileFunDefs? range program fns = some procs)
+    (hFind : FunList.find? name fns = some fn) :
+    ∃ proc,
+      Expressions.ProcList.lookup? name procs = some proc ∧
+        proc.name = fn.name ∧
+        proc.argc = fn.params.length ∧
+        proc.retc = fn.returns.length := by
+  revert procs name fn
+  induction fns with
+  | nil =>
+      intro procs name fn hCompile hFind
+      simp [FunList.find?] at hFind
+  | cons head rest ih =>
+      intro procs name fn hCompile hFind
+      unfold compileFunDefs? at hCompile
+      cases hHeadCompile : compileFunDef? range program head with
+      | none =>
+          simp [hHeadCompile] at hCompile
+      | some headProc =>
+          simp [hHeadCompile] at hCompile
+          cases hTailCompile : compileFunDefs? range program rest with
+          | none =>
+              simp [hTailCompile] at hCompile
+          | some tailProcs =>
+              simp [hTailCompile] at hCompile
+              cases hCompile
+              rcases compileFunDef?_eq_some_header hHeadCompile with
+                ⟨hHeadName, hHeadArgc, hHeadRetc⟩
+              by_cases hName : head.name = name
+              · simp [FunList.find?, hName] at hFind
+                cases hFind
+                have hLookupName : headProc.name = name := by
+                  simpa [hName] using hHeadName
+                exact
+                  ⟨headProc,
+                    by simp [Expressions.ProcList.lookup?, hLookupName],
+                    hHeadName, hHeadArgc, hHeadRetc⟩
+              · have hTailFind :
+                    FunList.find? name rest = some fn := by
+                    simpa [FunList.find?, hName] using hFind
+                rcases ih (procs := tailProcs) (name := name) (fn := fn)
+                    hTailCompile hTailFind with
+                  ⟨proc, hLookup, hProcName, hArgc, hRetc⟩
+                have hHeadProcNameNe : headProc.name ≠ name := by
+                  intro hEq
+                  exact hName (by simpa [hHeadName] using hEq)
+                exact
+                  ⟨proc,
+                    by
+                      simp [Expressions.ProcList.lookup?,
+                        hHeadProcNameNe, hLookup],
+                    hProcName, hArgc, hRetc⟩
+
+theorem compileFunDefs?_lookup_of_find?_with_compile
+    {range : ScratchRange} {program : Program}
+    {fns : List FunDef} {procs : List Expressions.Proc}
+    {name : Name} {fn : FunDef}
+    (hCompile : compileFunDefs? range program fns = some procs)
+    (hFind : FunList.find? name fns = some fn) :
+    ∃ proc,
+      Expressions.ProcList.lookup? name procs = some proc ∧
+        compileFunDef? range program fn = some proc ∧
+        proc.name = fn.name ∧
+        proc.argc = fn.params.length ∧
+        proc.retc = fn.returns.length := by
+  revert procs name fn
+  induction fns with
+  | nil =>
+      intro procs name fn hCompile hFind
+      simp [FunList.find?] at hFind
+  | cons head rest ih =>
+      intro procs name fn hCompile hFind
+      unfold compileFunDefs? at hCompile
+      cases hHeadCompile : compileFunDef? range program head with
+      | none =>
+          simp [hHeadCompile] at hCompile
+      | some headProc =>
+          simp [hHeadCompile] at hCompile
+          cases hTailCompile : compileFunDefs? range program rest with
+          | none =>
+              simp [hTailCompile] at hCompile
+          | some tailProcs =>
+              simp [hTailCompile] at hCompile
+              cases hCompile
+              rcases compileFunDef?_eq_some_header hHeadCompile with
+                ⟨hHeadName, hHeadArgc, hHeadRetc⟩
+              by_cases hName : head.name = name
+              · simp [FunList.find?, hName] at hFind
+                cases hFind
+                have hLookupName : headProc.name = name := by
+                  simpa [hName] using hHeadName
+                exact
+                  ⟨headProc,
+                    by simp [Expressions.ProcList.lookup?, hLookupName],
+                    hHeadCompile, hHeadName, hHeadArgc, hHeadRetc⟩
+              · have hTailFind :
+                    FunList.find? name rest = some fn := by
+                    simpa [FunList.find?, hName] using hFind
+                rcases ih (procs := tailProcs) (name := name) (fn := fn)
+                    hTailCompile hTailFind with
+                  ⟨proc, hLookup, hProcCompile, hProcName, hArgc, hRetc⟩
+                have hHeadProcNameNe : headProc.name ≠ name := by
+                  intro hEq
+                  exact hName (by simpa [hHeadName] using hEq)
+                exact
+                  ⟨proc,
+                    by
+                      simp [Expressions.ProcList.lookup?,
+                        hHeadProcNameNe, hLookup],
+                    hProcCompile, hProcName, hArgc, hRetc⟩
+
+def compileExpressionsProgram? (range : ScratchRange) (program : Program) :
+    Option (Plan × Expressions.Program) := do
+  let procs ← compileFunDefs? range program program.functions
+  let bodyPlan ← compileMainBody? range program
+  let bodyPlan := withScratchPrealloc range bodyPlan
+  some (bodyPlan, { procs := procs, body := bodyPlan.block })
+
+theorem compileExpressionsProgram?_eq_some_components
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    (hCompile :
+      compileExpressionsProgram? range program = some (plan, exprProgram)) :
+    ∃ procs bodyPlan,
+      compileFunDefs? range program program.functions = some procs ∧
+        compileMainBody? range program = some bodyPlan ∧
+        plan = withScratchPrealloc range bodyPlan ∧
+        exprProgram = { procs := procs, body := plan.block } := by
+  unfold compileExpressionsProgram? at hCompile
+  cases hProcs : compileFunDefs? range program program.functions with
+  | none =>
+      simp [hProcs] at hCompile
+  | some procs =>
+      simp [hProcs] at hCompile
+      cases hBody : compileMainBody? range program with
+      | none =>
+          simp [hBody] at hCompile
+      | some bodyPlan =>
+          simp [hBody] at hCompile
+          rcases hCompile with ⟨rfl, rfl⟩
+          exact ⟨procs, bodyPlan, rfl, rfl, rfl, rfl⟩
+
+theorem compileExpressionsProgram?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    (hCompile :
+      compileExpressionsProgram? range program = some (plan, exprProgram)) :
+    exprProgram.usesCallCreate = false := by
+  rcases compileExpressionsProgram?_eq_some_components hCompile with
+    ⟨procs, bodyPlan, hProcs, hBody, hPlan, hExprProgram⟩
+  subst plan
+  subst exprProgram
+  have hProcsNo : Expressions.ProcList.usesCallCreate procs = false :=
+    compileFunDefs?_noCallCreate hProcs
+  have hBodyNo : bodyPlan.block.usesCallCreate = false :=
+    compileMainBody?_noCallCreate hBody
+  have hPreallocNo :
+      (withScratchPrealloc range bodyPlan).block.usesCallCreate = false :=
+    withScratchPrealloc_noCallCreate hBodyNo
+  simp [Expressions.Program.usesCallCreate, hProcsNo, hPreallocNo]
+
+theorem compileExpressionsProgram?_eq_some_proc_headers
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    (hCompile :
+      compileExpressionsProgram? range program = some (plan, exprProgram)) :
+    exprProgram.procs.map (fun proc => proc.name) =
+        program.functions.map (fun fn => fn.name) ∧
+      exprProgram.procs.map (fun proc => proc.argc) =
+        program.functions.map (fun fn => fn.params.length) ∧
+      exprProgram.procs.map (fun proc => proc.retc) =
+        program.functions.map (fun fn => fn.returns.length) := by
+  rcases compileExpressionsProgram?_eq_some_components hCompile with
+    ⟨procs, _bodyPlan, hProcs, _hBody, _hPlan, hExprProgram⟩
+  subst exprProgram
+  exact compileFunDefs?_eq_some_headers hProcs
+
+theorem compileExpressionsProgram?_lookup_of_find?
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {name : Name} {fn : FunDef}
+    (hCompile :
+      compileExpressionsProgram? range program = some (plan, exprProgram))
+    (hFind : FunList.find? name program.functions = some fn) :
+    ∃ proc,
+      Expressions.ProcList.lookup? name exprProgram.procs = some proc ∧
+        proc.name = fn.name ∧
+        proc.argc = fn.params.length ∧
+        proc.retc = fn.returns.length := by
+  rcases compileExpressionsProgram?_eq_some_components hCompile with
+    ⟨procs, _bodyPlan, hProcs, _hBody, _hPlan, hExprProgram⟩
+  subst exprProgram
+  exact compileFunDefs?_lookup_of_find? hProcs hFind
+
+theorem compileExpressionsProgram?_lookup_of_find?_with_compile
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {name : Name} {fn : FunDef}
+    (hCompile :
+      compileExpressionsProgram? range program = some (plan, exprProgram))
+    (hFind : FunList.find? name program.functions = some fn) :
+    ∃ proc,
+      Expressions.ProcList.lookup? name exprProgram.procs = some proc ∧
+        compileFunDef? range program fn = some proc ∧
+        proc.name = fn.name ∧
+        proc.argc = fn.params.length ∧
+        proc.retc = fn.returns.length := by
+  rcases compileExpressionsProgram?_eq_some_components hCompile with
+    ⟨procs, _bodyPlan, hProcs, _hBody, _hPlan, hExprProgram⟩
+  subst exprProgram
+  exact compileFunDefs?_lookup_of_find?_with_compile hProcs hFind
+
+theorem compileExpressionsProgram?_programSafe
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    (hCompile :
+      compileExpressionsProgram? range program = some (plan, exprProgram)) :
+    FunctionSourceNoMemoryTouch.ProgramSafe program where
+  body := by
+    rcases compileExpressionsProgram?_eq_some_components hCompile with
+      ⟨_procs, bodyPlan, _hProcs, hBody, _hPlan, _hExprProgram⟩
+    exact
+      FunctionSourceNoMemoryTouch.compileBlockOpen?_sourceNoMemoryTouch
+        hBody
+  functions := by
+    intro functionName fn hFind
+    rcases compileExpressionsProgram?_eq_some_components hCompile with
+      ⟨procs, _bodyPlan, hProcs, _hBody, _hPlan, _hExprProgram⟩
+    rcases compileFunDefs?_lookup_of_find?_with_compile hProcs hFind with
+      ⟨proc, _hLookup, hFunCompile, _hName, _hArgc, _hRetc⟩
+    rcases compileFunDef?_eq_some_components hFunCompile with
+      ⟨_init, body, _fullBody, _hInit, hBody, _hFull, _hProc⟩
+    exact
+      FunctionSourceNoMemoryTouch.compileBlockOpen?_sourceNoMemoryTouch
+        hBody
+
+theorem compileCall?_callee_lookup_in_generated
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {callPlan wholePlan : Plan}
+    {exprProgram : Expressions.Program}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some callPlan) :
+    ∃ fn proc,
+      FunList.find? functionName program.functions = some fn ∧
+      Expressions.ProcList.lookup? functionName exprProgram.procs =
+        some proc ∧
+      proc.name = fn.name ∧
+      proc.argc = fn.params.length ∧
+      proc.retc = fn.returns.length ∧
+      args.length = proc.argc ∧
+      targets.length = proc.retc := by
+  rcases compileCall?_eq_some hCompile with
+    ⟨fn, _spill, _saved, _argsCode, _storeCode, hFind, _hTargetsNodup,
+      hArgsLength, hTargetsLength, _hSafe, _hSpill, _hSaved,
+      _hArgsCode, _hStore, _hPlan⟩
+  rcases compileExpressionsProgram?_lookup_of_find? hProgram hFind with
+    ⟨proc, hLookup, hProcName, hProcArgc, hProcRetc⟩
+  exact
+    ⟨fn, proc, hFind, hLookup, hProcName, hProcArgc, hProcRetc,
+      by simpa [hProcArgc] using hArgsLength,
+      by simpa [hProcRetc] using hTargetsLength⟩
+
+theorem compileCall?_regular_components_sound_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {source sourceAfterArgs : Source.State}
+    {target : Expressions.RunState}
+    {argValues returnValues : List Word}
+    {sharedAfterCall : EvmYul.SharedState .EVM}
+    {returnStore : Source.Store}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hArgsEval :
+      Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured args source =
+        .ok (sourceAfterArgs, argValues))
+    (hAssign :
+      Source.Store.assignMany targets returnValues sourceAfterArgs.vars =
+        some returnStore)
+    (hCallReplay :
+      ∀ {saved : List (Name × Nat)}
+        {savedValues : List Word} {afterArgsEVM : EVMState}
+        {baseStack : EvmYul.Stack Word}
+        {spillScope : List Name} {spillLayout : SpillLayout.Layout},
+        saved = callerSaveEntries targets spillLayout →
+        SavedEntriesRel saved source.vars savedValues →
+        SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+          (argValues.reverse ++ savedValues.reverse) afterArgsEVM →
+        afterArgsEVM.stack =
+          argValues.reverse ++ savedValues.reverse ++ baseStack →
+        ∃ afterCall callFuel,
+          Expressions.Stmt.run exprProgram callFuel
+              (Expressions.Stmt.call functionName)
+              (target.withEVM afterArgsEVM) =
+            .ok
+              (Expressions.Outcome.regular
+                ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+          SharedStateEqOutsideScratch range sharedAfterCall
+            afterCall.toSharedState ∧
+          ScratchRegionReady afterCall.toMachineState range.base
+            range.words ∧
+          afterCall.stack =
+            returnValues.reverse ++ savedValues.reverse ++ baseStack) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        ((sourceAfterArgs.withShared sharedAfterCall).withVars returnStore)
+        final := by
+  rcases compileCall?_eq_some hCompile with
+    ⟨fn, spill, saved, argsCode, storeCode, hFind, hTargetsNodup,
+      _hArgsLength, _hTargetsLength, hSafe, hSpill, hSavedEq,
+      hArgsCode, hStoreCode, hPlan⟩
+  subst plan
+  rcases
+      SpillPlan.spillAllStack?_sound hSpec hWordBytes hSpill hRel
+        hDefined with
+    ⟨afterSpill, hSpillRun, hSpillRel, hSpillScope, hSpillStack,
+      _hSpillDefined⟩
+  have hSpillRelNil :
+      SpillStateRel range spill.sourceScope [] spill.layout source
+        afterSpill := by
+    simpa [hSpillStack] using hSpillRel
+  have hSpillBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (SpillStmtCode.toExpressionsBlock spill.code) target =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM afterSpill)) := by
+    rcases
+        SpillStmtCode.run_toExpressionsBlock_exists exprProgram hSpillRun with
+      ⟨fuel, hRun⟩
+    exact ⟨fuel, by simpa [SpillStmtCode.toExpressionsOutcome] using hRun⟩
+  have hSavedBindings :
+      ∀ {name slot}, (name, slot) ∈ saved →
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ spill.layout := by
+    intro name slot hMem
+    have hCallerMem :
+        (name, slot) ∈ callerSaveEntries targets spill.layout := by
+      simpa [hSavedEq] using hMem
+    exact (callerSaveEntries_sound hCallerMem).1
+  rcases
+      saveScratchCode_sound
+        (entries := saved) (range := range)
+        (sourceScope := spill.sourceScope) (stackLayout := [])
+        (layout := spill.layout) (source := source)
+        (target := afterSpill) (stackPrefix := [])
+        hSavedBindings (SpillStackPrefixRel.of_spillStateRel hSpillRelNil) with
+    ⟨savedValues, afterSave, hSavedRel, hSaveRun, hSaveRelRaw⟩
+  have hSaveRel :
+      SpillStackPrefixRel range spill.sourceScope [] spill.layout source
+        savedValues.reverse afterSave := by
+    simpa using hSaveRelRaw
+  have hSaveBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCode (saveScratchCode range saved))
+          (target.withEVM afterSpill) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM afterSave)) :=
+    expressionsBlock_ofCode_run_exists exprProgram hSaveRun
+  have hLowerArgsEval :
+      Locals.Source.Expr.ExprSeq.eval Locals.Source.PrimitiveSemantics.structured
+          (Lower.argExprs args) source =
+        .ok (sourceAfterArgs, argValues) :=
+    argList_eval_lower_argExprs_of_eval hArgsEval
+  have hArgSafe :
+      SourceNoMemoryTouch.ExprSeqSafe (Lower.argExprs args) :=
+    SourceNoMemoryTouch.exprSeq?_sound hSafe
+  have hSavedLength : savedValues.length = saved.length :=
+    SavedEntriesRel.length_eq hSavedRel
+  have hPrefixLen : savedValues.reverse.length = saved.length := by
+    simpa [hSavedLength]
+  rcases
+      SpillStackPrefixRel.compileSeqFullCode_bridge_structured
+        hArgSafe hSaveRel hPrefixLen hArgsCode hLowerArgsEval with
+    ⟨afterArgsEVM, hArgsRun, hArgsRel⟩
+  have hArgsBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCode argsCode) (target.withEVM afterSave) =
+          .ok
+            (Expressions.Outcome.regular
+              (target.withEVM afterArgsEVM)) :=
+    expressionsBlock_ofCode_run_exists exprProgram hArgsRun
+  rcases SpillStackPrefixRel.valueRel_base hArgsRel with
+    ⟨baseStack, hAfterArgsStackRaw, _hAfterArgsValues⟩
+  have hAfterArgsStack :
+      afterArgsEVM.stack =
+        argValues.reverse ++ savedValues.reverse ++ baseStack := by
+    simpa [List.append_assoc] using hAfterArgsStackRaw
+  rcases
+      hCallReplay hSavedEq hSavedRel hArgsRel hAfterArgsStack with
+    ⟨afterCall, callFuel, hCallRun, hCallShared, hCallReady,
+      hCallStack⟩
+  have hCallBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCall functionName)
+          (target.withEVM afterArgsEVM) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM afterCall)) := by
+    have hStmt :
+        ∃ fuel,
+          Expressions.Stmt.run exprProgram fuel
+            (Expressions.Stmt.call functionName)
+            (target.withEVM afterArgsEVM) =
+            .ok
+              (Expressions.Outcome.regular
+                (target.withEVM afterCall)) := by
+      refine ⟨callFuel, ?_⟩
+      simpa [Expressions.RunState.withEVM_withEVM] using hCallRun
+    exact expressionsBlock_ofCall_run_exists exprProgram hStmt
+  have hArgsVars : sourceAfterArgs.vars = source.vars :=
+    argList_eval_vars_eq hArgsEval
+  have hSavedRelArgs :
+      SavedEntriesRel saved
+        (sourceAfterArgs.withShared sharedAfterCall).vars savedValues := by
+    simpa [Locals.Source.State.withShared, hArgsVars] using hSavedRel
+  rcases
+      storeReturnedTargetsCode?_restoreScratchCode_steps_sound
+        hSpec hWordBytes
+        (range := range) (sourceScope := spill.sourceScope)
+        (layout := spill.layout) (returnValues := returnValues)
+        (savedValues := savedValues) (targetNames := targets)
+        (saved := saved) (storeCode := storeCode)
+        (source := sourceAfterArgs.withShared sharedAfterCall)
+        (target := afterCall) (returnStore := returnStore)
+        (baseStack := baseStack)
+        hStoreCode hAssign hTargetsNodup hSavedEq hSavedRelArgs
+        hCallShared hCallReady
+        (by
+          simpa [hSpillScope, hSpillStack] using hSpillRel.layoutWellFormed)
+        hCallStack with
+    ⟨afterStore, final, hStoreRun, hRestoreRun, hFinalRel⟩
+  have hStoreBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCode storeCode) (target.withEVM afterCall) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM afterStore)) :=
+    expressionsBlock_ofCode_run_exists exprProgram hStoreRun
+  have hRestoreBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCode (restoreScratchCode range saved))
+          (target.withEVM afterStore) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_ofCode_run_exists exprProgram hRestoreRun
+  have hStoreRestore :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (ExpressionsBlock.ofCode storeCode)
+            (ExpressionsBlock.ofCode (restoreScratchCode range saved)))
+          (target.withEVM afterCall) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram hStoreBlock hRestoreBlock
+  have hCallTail :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (ExpressionsBlock.ofCall functionName)
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCode storeCode)
+              (ExpressionsBlock.ofCode (restoreScratchCode range saved))))
+          (target.withEVM afterArgsEVM) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram hCallBlock hStoreRestore
+  have hArgsTail :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (ExpressionsBlock.ofCode argsCode)
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCall functionName)
+              (ExpressionsBlock.append
+                (ExpressionsBlock.ofCode storeCode)
+                (ExpressionsBlock.ofCode
+                  (restoreScratchCode range saved)))))
+          (target.withEVM afterSave) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram hArgsBlock hCallTail
+  have hSaveTail :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (ExpressionsBlock.ofCode (saveScratchCode range saved))
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCode argsCode)
+              (ExpressionsBlock.append
+                (ExpressionsBlock.ofCall functionName)
+                (ExpressionsBlock.append
+                  (ExpressionsBlock.ofCode storeCode)
+                  (ExpressionsBlock.ofCode
+                    (restoreScratchCode range saved))))))
+          (target.withEVM afterSpill) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram hSaveBlock hArgsTail
+  have hAll :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (SpillStmtCode.toExpressionsBlock spill.code)
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCode (saveScratchCode range saved))
+              (ExpressionsBlock.append
+                (ExpressionsBlock.ofCode argsCode)
+                (ExpressionsBlock.append
+                  (ExpressionsBlock.ofCall functionName)
+                  (ExpressionsBlock.append
+                    (ExpressionsBlock.ofCode storeCode)
+                    (ExpressionsBlock.ofCode
+                      (restoreScratchCode range saved)))))))
+          target =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram hSpillBlock hSaveTail
+  rcases hAll with ⟨exprFuel, hRun⟩
+  refine ⟨final, exprFuel, ?_, ?_⟩
+  · simpa [ExpressionsBlock.seqList] using hRun
+  · simpa [Locals.Source.State.withVars, Locals.Source.State.withShared]
+      using hFinalRel
+
+theorem compileCall?_regular_components_sound_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {source sourceAfterArgs : Source.State}
+    {target : Expressions.RunState}
+    {argValues returnValues : List Word}
+    {sharedAfterCall : EvmYul.SharedState .EVM}
+    {returnStore : Source.Store}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hArgsEval :
+      Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured args source =
+        .ok (sourceAfterArgs, argValues))
+    (hAssign :
+      Source.Store.assignMany targets returnValues sourceAfterArgs.vars =
+        some returnStore)
+    (hCallReplay :
+      ∀ {saved : List (Name × Nat)}
+        {savedValues : List Word} {afterArgsEVM : EVMState}
+        {baseStack : EvmYul.Stack Word}
+        {spillScope : List Name} {spillLayout : SpillLayout.Layout},
+        saved = callerSaveEntries targets spillLayout →
+        SavedEntriesRel saved source.vars savedValues →
+        SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+          (argValues.reverse ++ savedValues.reverse) afterArgsEVM →
+        afterArgsEVM.stack =
+          argValues.reverse ++ savedValues.reverse ++ baseStack →
+        ∃ afterCall callFuel,
+          Expressions.Stmt.run exprProgram callFuel
+              (Expressions.Stmt.call functionName)
+              (target.withEVM afterArgsEVM) =
+            .ok
+              (Expressions.Outcome.regular
+                ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+          SharedStateEqOutsideScratch range sharedAfterCall
+            afterCall.toSharedState ∧
+          ScratchRegionReady afterCall.toMachineState range.base
+            range.words ∧
+          afterCall.stack =
+            returnValues.reverse ++ savedValues.reverse ++ baseStack) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      final.stack = [] ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        ((sourceAfterArgs.withShared sharedAfterCall).withVars returnStore)
+        final := by
+  rcases compileCall?_eq_some hCompile with
+    ⟨fn, spill, saved, argsCode, storeCode, _hFind, hTargetsNodup,
+      _hArgsLength, _hTargetsLength, hSafe, hSpill, hSavedEq,
+      hArgsCode, hStoreCode, hPlan⟩
+  subst plan
+  rcases
+      spillAllStack?_sound_exact_empty hSpec hWordBytes hSpill hRel
+        hDefined hLength with
+    ⟨afterSpill, hSpillRun, hSpillRel, hSpillScope, hSpillStack,
+      _hSpillDefined, hAfterSpillStack⟩
+  have hSpillRelNil :
+      SpillStateRel range spill.sourceScope [] spill.layout source
+        afterSpill := by
+    simpa [hSpillStack] using hSpillRel
+  have hSpillBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (SpillStmtCode.toExpressionsBlock spill.code) target =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM afterSpill)) := by
+    rcases
+        SpillStmtCode.run_toExpressionsBlock_exists exprProgram hSpillRun with
+      ⟨fuel, hRun⟩
+    exact ⟨fuel, by simpa [SpillStmtCode.toExpressionsOutcome] using hRun⟩
+  have hSavedBindings :
+      ∀ {name slot}, (name, slot) ∈ saved →
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ spill.layout := by
+    intro name slot hMem
+    have hCallerMem :
+        (name, slot) ∈ callerSaveEntries targets spill.layout := by
+      simpa [hSavedEq] using hMem
+    exact (callerSaveEntries_sound hCallerMem).1
+  rcases
+      saveScratchCode_sound_exact_prefix
+        (entries := saved) (range := range)
+        (sourceScope := spill.sourceScope)
+        (layout := spill.layout) (source := source)
+        (target := afterSpill) (stackPrefix := [])
+        hSavedBindings (SpillStackPrefixRel.of_spillStateRel hSpillRelNil)
+        hAfterSpillStack with
+    ⟨savedValues, afterSave, hSavedRel, hSaveRun, hSaveStack,
+      hSaveRelRaw⟩
+  have hSaveRel :
+      SpillStackPrefixRel range spill.sourceScope [] spill.layout source
+        savedValues.reverse afterSave := by
+    simpa using hSaveRelRaw
+  have hSaveBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCode (saveScratchCode range saved))
+          (target.withEVM afterSpill) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM afterSave)) :=
+    expressionsBlock_ofCode_run_exists exprProgram hSaveRun
+  have hLowerArgsEval :
+      Locals.Source.Expr.ExprSeq.eval Locals.Source.PrimitiveSemantics.structured
+          (Lower.argExprs args) source =
+        .ok (sourceAfterArgs, argValues) :=
+    argList_eval_lower_argExprs_of_eval hArgsEval
+  have hArgSafe :
+      SourceNoMemoryTouch.ExprSeqSafe (Lower.argExprs args) :=
+    SourceNoMemoryTouch.exprSeq?_sound hSafe
+  have hSavedLength : savedValues.length = saved.length :=
+    SavedEntriesRel.length_eq hSavedRel
+  have hPrefixLen : savedValues.reverse.length = saved.length := by
+    simpa [hSavedLength]
+  have hSaveStackExact : afterSave.stack = savedValues.reverse := by
+    simpa using hSaveStack
+  rcases
+      compileSeqFullCode_exact_prefix_structured_nil
+        (exprs := Lower.argExprs args)
+        (range := range) (sourceScope := spill.sourceScope)
+        (layout := spill.layout) (source := source)
+        (source' := sourceAfterArgs)
+        (target := afterSave)
+        (stackPrefix := savedValues.reverse)
+        (offset := saved.length)
+        (values := argValues) (code := argsCode)
+        hArgSafe hSaveRel hSaveStackExact hPrefixLen hArgsCode
+        hLowerArgsEval with
+    ⟨afterArgsEVM, hArgsRun, hAfterArgsStackExact, hArgsRel⟩
+  have hArgsBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCode argsCode) (target.withEVM afterSave) =
+          .ok
+            (Expressions.Outcome.regular
+              (target.withEVM afterArgsEVM)) :=
+    expressionsBlock_ofCode_run_exists exprProgram hArgsRun
+  have hAfterArgsStack :
+      afterArgsEVM.stack =
+        argValues.reverse ++ savedValues.reverse ++ ([] : EvmYul.Stack Word) := by
+    simpa [List.append_assoc] using hAfterArgsStackExact
+  rcases
+      hCallReplay hSavedEq hSavedRel hArgsRel hAfterArgsStack with
+    ⟨afterCall, callFuel, hCallRun, hCallShared, hCallReady,
+      hCallStack⟩
+  have hCallBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCall functionName)
+          (target.withEVM afterArgsEVM) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM afterCall)) := by
+    have hStmt :
+        ∃ fuel,
+          Expressions.Stmt.run exprProgram fuel
+            (Expressions.Stmt.call functionName)
+            (target.withEVM afterArgsEVM) =
+            .ok
+              (Expressions.Outcome.regular
+                (target.withEVM afterCall)) := by
+      refine ⟨callFuel, ?_⟩
+      simpa [Expressions.RunState.withEVM_withEVM] using hCallRun
+    exact expressionsBlock_ofCall_run_exists exprProgram hStmt
+  have hArgsVars : sourceAfterArgs.vars = source.vars :=
+    argList_eval_vars_eq hArgsEval
+  have hSavedRelArgs :
+      SavedEntriesRel saved
+        (sourceAfterArgs.withShared sharedAfterCall).vars savedValues := by
+    simpa [Locals.Source.State.withShared, hArgsVars] using hSavedRel
+  rcases
+      storeReturnedTargetsCode?_restoreScratchCode_steps_sound_exact_stack
+        hSpec hWordBytes
+        (range := range) (sourceScope := spill.sourceScope)
+        (layout := spill.layout) (returnValues := returnValues)
+        (savedValues := savedValues) (targetNames := targets)
+        (saved := saved) (storeCode := storeCode)
+        (source := sourceAfterArgs.withShared sharedAfterCall)
+        (target := afterCall) (returnStore := returnStore)
+        (baseStack := [])
+        hStoreCode hAssign hTargetsNodup hSavedEq hSavedRelArgs
+        hCallShared hCallReady
+        (by
+          simpa [hSpillScope, hSpillStack] using hSpillRel.layoutWellFormed)
+        hCallStack with
+    ⟨afterStore, final, hStoreRun, _hAfterStoreStack, hRestoreRun,
+      hFinalStack, hFinalRel⟩
+  have hStoreBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCode storeCode) (target.withEVM afterCall) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM afterStore)) :=
+    expressionsBlock_ofCode_run_exists exprProgram hStoreRun
+  have hRestoreBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCode (restoreScratchCode range saved))
+          (target.withEVM afterStore) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_ofCode_run_exists exprProgram hRestoreRun
+  have hStoreRestore :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (ExpressionsBlock.ofCode storeCode)
+            (ExpressionsBlock.ofCode (restoreScratchCode range saved)))
+          (target.withEVM afterCall) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram hStoreBlock hRestoreBlock
+  have hCallTail :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (ExpressionsBlock.ofCall functionName)
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCode storeCode)
+              (ExpressionsBlock.ofCode (restoreScratchCode range saved))))
+          (target.withEVM afterArgsEVM) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram hCallBlock hStoreRestore
+  have hArgsTail :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (ExpressionsBlock.ofCode argsCode)
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCall functionName)
+              (ExpressionsBlock.append
+                (ExpressionsBlock.ofCode storeCode)
+                (ExpressionsBlock.ofCode
+                  (restoreScratchCode range saved)))))
+          (target.withEVM afterSave) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram hArgsBlock hCallTail
+  have hSaveTail :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (ExpressionsBlock.ofCode (saveScratchCode range saved))
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCode argsCode)
+              (ExpressionsBlock.append
+                (ExpressionsBlock.ofCall functionName)
+                (ExpressionsBlock.append
+                  (ExpressionsBlock.ofCode storeCode)
+                  (ExpressionsBlock.ofCode
+                    (restoreScratchCode range saved))))))
+          (target.withEVM afterSpill) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram hSaveBlock hArgsTail
+  have hAll :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (SpillStmtCode.toExpressionsBlock spill.code)
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCode (saveScratchCode range saved))
+              (ExpressionsBlock.append
+                (ExpressionsBlock.ofCode argsCode)
+                (ExpressionsBlock.append
+                  (ExpressionsBlock.ofCall functionName)
+                  (ExpressionsBlock.append
+                    (ExpressionsBlock.ofCode storeCode)
+                    (ExpressionsBlock.ofCode
+                      (restoreScratchCode range saved)))))))
+          target =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM final)) :=
+    expressionsBlock_append_regular_exists exprProgram hSpillBlock hSaveTail
+  rcases hAll with ⟨exprFuel, hRun⟩
+  refine ⟨final, exprFuel, ?_, ?_, ?_⟩
+  · simpa [ExpressionsBlock.seqList] using hRun
+  · exact hFinalStack
+  · simpa [Locals.Source.State.withVars, Locals.Source.State.withShared]
+      using hFinalRel
+
+theorem compileCall?_halt_components_sound_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {source sourceAfterArgs haltedState : Source.State}
+    {target : Expressions.RunState}
+    {argValues : List Word}
+    {kind : Assembly.HaltKind}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hArgsEval :
+      Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured args source =
+        .ok (sourceAfterArgs, argValues))
+    (hCallReplay :
+      ∀ {saved : List (Name × Nat)}
+        {savedValues : List Word} {afterArgsEVM : EVMState}
+        {baseStack : EvmYul.Stack Word}
+        {spillScope : List Name} {spillLayout : SpillLayout.Layout},
+        saved = callerSaveEntries targets spillLayout →
+        SavedEntriesRel saved source.vars savedValues →
+        SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+          (argValues.reverse ++ savedValues.reverse) afterArgsEVM →
+        afterArgsEVM.stack =
+          argValues.reverse ++ savedValues.reverse ++ baseStack →
+        ∃ haltTarget callFuel,
+          Expressions.Stmt.run exprProgram callFuel
+              (Expressions.Stmt.call functionName)
+              (target.withEVM afterArgsEVM) =
+            .ok (Expressions.Outcome.halt kind haltTarget) ∧
+          SharedStateEqOutsideScratch range haltedState.shared
+            haltTarget.evm.toSharedState) :
+    ∃ haltTarget exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.halt kind haltTarget) ∧
+      SharedStateEqOutsideScratch range haltedState.shared
+        haltTarget.evm.toSharedState := by
+  rcases compileCall?_eq_some hCompile with
+    ⟨_fn, spill, saved, argsCode, storeCode, _hFind, _hTargetsNodup,
+      _hArgsLength, _hTargetsLength, hSafe, hSpill, hSavedEq,
+      hArgsCode, _hStoreCode, hPlan⟩
+  subst plan
+  rcases
+      SpillPlan.spillAllStack?_sound hSpec hWordBytes hSpill hRel
+        hDefined with
+    ⟨afterSpill, hSpillRun, hSpillRel, hSpillScope, hSpillStack,
+      _hSpillDefined⟩
+  have hSpillRelNil :
+      SpillStateRel range spill.sourceScope [] spill.layout source
+        afterSpill := by
+    simpa [hSpillStack] using hSpillRel
+  have hSpillBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (SpillStmtCode.toExpressionsBlock spill.code) target =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM afterSpill)) := by
+    rcases
+        SpillStmtCode.run_toExpressionsBlock_exists exprProgram hSpillRun with
+      ⟨fuel, hRun⟩
+    exact ⟨fuel, by simpa [SpillStmtCode.toExpressionsOutcome] using hRun⟩
+  have hSavedBindings :
+      ∀ {name slot}, (name, slot) ∈ saved →
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ spill.layout := by
+    intro name slot hMem
+    have hCallerMem :
+        (name, slot) ∈ callerSaveEntries targets spill.layout := by
+      simpa [hSavedEq] using hMem
+    exact (callerSaveEntries_sound hCallerMem).1
+  rcases
+      saveScratchCode_sound
+        (entries := saved) (range := range)
+        (sourceScope := spill.sourceScope) (stackLayout := [])
+        (layout := spill.layout) (source := source)
+        (target := afterSpill) (stackPrefix := [])
+        hSavedBindings (SpillStackPrefixRel.of_spillStateRel hSpillRelNil) with
+    ⟨savedValues, afterSave, hSavedRel, hSaveRun, hSaveRelRaw⟩
+  have hSaveRel :
+      SpillStackPrefixRel range spill.sourceScope [] spill.layout source
+        savedValues.reverse afterSave := by
+    simpa using hSaveRelRaw
+  have hSaveBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCode (saveScratchCode range saved))
+          (target.withEVM afterSpill) =
+          .ok
+            (Expressions.Outcome.regular (target.withEVM afterSave)) :=
+    expressionsBlock_ofCode_run_exists exprProgram hSaveRun
+  have hLowerArgsEval :
+      Locals.Source.Expr.ExprSeq.eval Locals.Source.PrimitiveSemantics.structured
+          (Lower.argExprs args) source =
+        .ok (sourceAfterArgs, argValues) :=
+    argList_eval_lower_argExprs_of_eval hArgsEval
+  have hArgSafe :
+      SourceNoMemoryTouch.ExprSeqSafe (Lower.argExprs args) :=
+    SourceNoMemoryTouch.exprSeq?_sound hSafe
+  have hSavedLength : savedValues.length = saved.length :=
+    SavedEntriesRel.length_eq hSavedRel
+  have hPrefixLen : savedValues.reverse.length = saved.length := by
+    simpa [hSavedLength]
+  rcases
+      SpillStackPrefixRel.compileSeqFullCode_bridge_structured
+        hArgSafe hSaveRel hPrefixLen hArgsCode hLowerArgsEval with
+    ⟨afterArgsEVM, hArgsRun, hArgsRel⟩
+  have hArgsBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCode argsCode) (target.withEVM afterSave) =
+          .ok
+            (Expressions.Outcome.regular
+              (target.withEVM afterArgsEVM)) :=
+    expressionsBlock_ofCode_run_exists exprProgram hArgsRun
+  rcases SpillStackPrefixRel.valueRel_base hArgsRel with
+    ⟨baseStack, hAfterArgsStackRaw, _hAfterArgsValues⟩
+  have hAfterArgsStack :
+      afterArgsEVM.stack =
+        argValues.reverse ++ savedValues.reverse ++ baseStack := by
+    simpa [List.append_assoc] using hAfterArgsStackRaw
+  rcases
+      hCallReplay hSavedEq hSavedRel hArgsRel hAfterArgsStack with
+    ⟨haltTarget, callFuel, hCallRun, hCallShared⟩
+  have hCallBlock :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.ofCall functionName)
+          (target.withEVM afterArgsEVM) =
+          .ok (Expressions.Outcome.halt kind haltTarget) := by
+    have hStmt :
+        ∃ fuel,
+          Expressions.Stmt.run exprProgram fuel
+            (Expressions.Stmt.call functionName)
+            (target.withEVM afterArgsEVM) =
+            .ok (Expressions.Outcome.halt kind haltTarget) :=
+      ⟨callFuel, hCallRun⟩
+    exact expressionsBlock_ofCall_run_exists exprProgram hStmt
+  have hCallTail :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (ExpressionsBlock.ofCall functionName)
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCode storeCode)
+              (ExpressionsBlock.ofCode (restoreScratchCode range saved))))
+          (target.withEVM afterArgsEVM) =
+          .ok (Expressions.Outcome.halt kind haltTarget) :=
+    expressionsBlock_append_nonregular_exists exprProgram hCallBlock
+      (by simp [Expressions.Outcome.halt])
+  have hArgsTail :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (ExpressionsBlock.ofCode argsCode)
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCall functionName)
+              (ExpressionsBlock.append
+                (ExpressionsBlock.ofCode storeCode)
+                (ExpressionsBlock.ofCode
+                  (restoreScratchCode range saved)))))
+          (target.withEVM afterSave) =
+          .ok (Expressions.Outcome.halt kind haltTarget) :=
+    expressionsBlock_append_regular_exists exprProgram hArgsBlock hCallTail
+  have hSaveTail :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (ExpressionsBlock.ofCode (saveScratchCode range saved))
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCode argsCode)
+              (ExpressionsBlock.append
+                (ExpressionsBlock.ofCall functionName)
+                (ExpressionsBlock.append
+                  (ExpressionsBlock.ofCode storeCode)
+                  (ExpressionsBlock.ofCode
+                    (restoreScratchCode range saved))))))
+          (target.withEVM afterSpill) =
+          .ok (Expressions.Outcome.halt kind haltTarget) :=
+    expressionsBlock_append_regular_exists exprProgram hSaveBlock hArgsTail
+  have hAll :
+      ∃ fuel,
+        Expressions.Block.run exprProgram fuel
+          (ExpressionsBlock.append
+            (SpillStmtCode.toExpressionsBlock spill.code)
+            (ExpressionsBlock.append
+              (ExpressionsBlock.ofCode (saveScratchCode range saved))
+              (ExpressionsBlock.append
+                (ExpressionsBlock.ofCode argsCode)
+                (ExpressionsBlock.append
+                  (ExpressionsBlock.ofCall functionName)
+                  (ExpressionsBlock.append
+                    (ExpressionsBlock.ofCode storeCode)
+                    (ExpressionsBlock.ofCode
+                      (restoreScratchCode range saved)))))))
+          target =
+          .ok (Expressions.Outcome.halt kind haltTarget) :=
+    expressionsBlock_append_regular_exists exprProgram hSpillBlock hSaveTail
+  rcases hAll with ⟨exprFuel, hRun⟩
+  exact ⟨haltTarget, exprFuel,
+    by simpa [ExpressionsBlock.seqList] using hRun,
+    hCallShared⟩
+
+theorem compileCall?_regular_sound_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    {ctx : Source.Ctx} {fuel : Nat}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          ctx fuel (.call targets functionName args) source =
+        .ok (Source.Outcome.regular sourceAfter, ctx))
+    (hCallReplay :
+      ∀ {bodyFuel : Nat} {fn : FunDef}
+        {sourceAfterArgs : Source.State}
+        {argValues returnValues : List Word}
+        {sharedAfterCall : EvmYul.SharedState .EVM}
+        {returnStore : Source.Store}
+        {saved : List (Name × Nat)}
+        {savedValues : List Word} {afterArgsEVM : EVMState}
+        {baseStack : EvmYul.Stack Word}
+        {spillScope : List Name} {spillLayout : SpillLayout.Layout},
+        FunList.find? functionName program.functions = some fn →
+        Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+            args source =
+          .ok (sourceAfterArgs, argValues) →
+        Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+            program fn argValues bodyFuel sourceAfterArgs.shared =
+          .ok (.returned sharedAfterCall returnValues) →
+        Source.Store.assignMany targets returnValues sourceAfterArgs.vars =
+          some returnStore →
+        saved = callerSaveEntries targets spillLayout →
+        SavedEntriesRel saved source.vars savedValues →
+        SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+          (argValues.reverse ++ savedValues.reverse) afterArgsEVM →
+        afterArgsEVM.stack =
+          argValues.reverse ++ savedValues.reverse ++ baseStack →
+        ∃ afterCall callFuel,
+          Expressions.Stmt.run exprProgram callFuel
+              (Expressions.Stmt.call functionName)
+              (target.withEVM afterArgsEVM) =
+            .ok
+              (Expressions.Outcome.regular
+                ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+          SharedStateEqOutsideScratch range sharedAfterCall
+            afterCall.toSharedState ∧
+          ScratchRegionReady afterCall.toMachineState range.base
+            range.words ∧
+          afterCall.stack =
+            returnValues.reverse ++ savedValues.reverse ++ baseStack) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final := by
+  rcases compileCall?_eq_some hCompile with
+    ⟨fn, _spill, _saved, _argsCode, _storeCode, hFind, hTargetsNodup,
+      _hArgsLength, _hTargetsLength, _hSafe, _hSpill, _hSavedEq,
+      _hArgsCode, _hStoreCode, _hPlan⟩
+  cases fuel with
+  | zero =>
+      simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hSourceRun
+  | succ bodyFuel =>
+      unfold Source.Stmt.run at hSourceRun
+      simp [hTargetsNodup] at hSourceRun
+      cases hArgsEval :
+          Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+            args source with
+      | error err =>
+          simp [hArgsEval] at hSourceRun
+      | ok argResult =>
+          rcases argResult with ⟨sourceAfterArgs, argValues⟩
+          simp [hArgsEval, hFind] at hSourceRun
+          cases hBody :
+              Source.FunDef.runBody
+                Locals.Source.PrimitiveSemantics.structured program fn
+                argValues bodyFuel sourceAfterArgs.shared with
+          | error err =>
+              simp [hBody] at hSourceRun
+          | ok callResult =>
+              cases callResult with
+              | returned sharedAfterCall returnValues =>
+                  cases hAssign :
+                      Source.Store.assignMany targets returnValues
+                        sourceAfterArgs.vars with
+                  | none =>
+                      simp [hBody, hAssign, Source.invalid,
+                        Structured.invalid] at hSourceRun
+                  | some returnStore =>
+                      simp [hBody, hAssign] at hSourceRun
+                      cases hSourceRun
+                      exact
+                        compileCall?_regular_components_sound_given_callReplay
+                          hSpec hWordBytes hCompile hRel hDefined hArgsEval
+                          hAssign
+                          (by
+                            intro saved savedValues afterArgsEVM baseStack
+                              spillScope spillLayout hSavedEq hSavedRel
+                              hArgsRel hStack
+                            exact
+                              hCallReplay hFind hArgsEval hBody hAssign
+                                hSavedEq hSavedRel hArgsRel hStack)
+              | halted kind haltedState =>
+                  simp [hBody] at hSourceRun
+                  cases hSourceRun
+
+theorem compileCall?_regular_sound_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    {ctx : Source.Ctx} {fuel : Nat}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          ctx fuel (.call targets functionName args) source =
+        .ok (Source.Outcome.regular sourceAfter, ctx))
+    (hCallReplay :
+      ∀ {bodyFuel : Nat} {fn : FunDef}
+        {sourceAfterArgs : Source.State}
+        {argValues returnValues : List Word}
+        {sharedAfterCall : EvmYul.SharedState .EVM}
+        {returnStore : Source.Store}
+        {saved : List (Name × Nat)}
+        {savedValues : List Word} {afterArgsEVM : EVMState}
+        {baseStack : EvmYul.Stack Word}
+        {spillScope : List Name} {spillLayout : SpillLayout.Layout},
+        FunList.find? functionName program.functions = some fn →
+        Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+            args source =
+          .ok (sourceAfterArgs, argValues) →
+        Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+            program fn argValues bodyFuel sourceAfterArgs.shared =
+          .ok (.returned sharedAfterCall returnValues) →
+        Source.Store.assignMany targets returnValues sourceAfterArgs.vars =
+          some returnStore →
+        saved = callerSaveEntries targets spillLayout →
+        SavedEntriesRel saved source.vars savedValues →
+        SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+          (argValues.reverse ++ savedValues.reverse) afterArgsEVM →
+        afterArgsEVM.stack =
+          argValues.reverse ++ savedValues.reverse ++ baseStack →
+        ∃ afterCall callFuel,
+          Expressions.Stmt.run exprProgram callFuel
+              (Expressions.Stmt.call functionName)
+              (target.withEVM afterArgsEVM) =
+            .ok
+              (Expressions.Outcome.regular
+                ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+          SharedStateEqOutsideScratch range sharedAfterCall
+            afterCall.toSharedState ∧
+          ScratchRegionReady afterCall.toMachineState range.base
+            range.words ∧
+          afterCall.stack =
+            returnValues.reverse ++ savedValues.reverse ++ baseStack) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      final.stack = [] ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final := by
+  rcases compileCall?_eq_some hCompile with
+    ⟨fn, _spill, _saved, _argsCode, _storeCode, hFind, hTargetsNodup,
+      _hArgsLength, _hTargetsLength, _hSafe, _hSpill, _hSavedEq,
+      _hArgsCode, _hStoreCode, _hPlan⟩
+  cases fuel with
+  | zero =>
+      simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hSourceRun
+  | succ bodyFuel =>
+      unfold Source.Stmt.run at hSourceRun
+      simp [hTargetsNodup] at hSourceRun
+      cases hArgsEval :
+          Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+            args source with
+      | error err =>
+          simp [hArgsEval] at hSourceRun
+      | ok argResult =>
+          rcases argResult with ⟨sourceAfterArgs, argValues⟩
+          simp [hArgsEval, hFind] at hSourceRun
+          cases hBody :
+              Source.FunDef.runBody
+                Locals.Source.PrimitiveSemantics.structured program fn
+                argValues bodyFuel sourceAfterArgs.shared with
+          | error err =>
+              simp [hBody] at hSourceRun
+          | ok callResult =>
+              cases callResult with
+              | returned sharedAfterCall returnValues =>
+                  cases hAssign :
+                      Source.Store.assignMany targets returnValues
+                        sourceAfterArgs.vars with
+                  | none =>
+                      simp [hBody, hAssign, Source.invalid,
+                        Structured.invalid] at hSourceRun
+                  | some returnStore =>
+                      simp [hBody, hAssign] at hSourceRun
+                      cases hSourceRun
+                      exact
+                        compileCall?_regular_components_sound_exact_given_callReplay
+                          hSpec hWordBytes hCompile hRel hDefined hLength
+                          hArgsEval hAssign
+                          (by
+                            intro saved savedValues afterArgsEVM baseStack
+                              spillScope spillLayout hSavedEq hSavedRel
+                              hArgsRel hStack
+                            exact
+                              hCallReplay hFind hArgsEval hBody hAssign
+                                hSavedEq hSavedRel hArgsRel hStack)
+              | halted kind haltedState =>
+                  simp [hBody] at hSourceRun
+                  cases hSourceRun
+
+theorem compileCall?_regular_sound_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    {ctx : Source.Ctx} {fuel : Nat}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          ctx fuel (.call targets functionName args) source =
+        .ok (Source.Outcome.regular sourceAfter, ctx))
+    (hCallReplay :
+      ∀ {bodyFuel : Nat} {fn : FunDef}
+        {sourceAfterArgs : Source.State}
+        {argValues returnValues : List Word}
+        {sharedAfterCall : EvmYul.SharedState .EVM}
+        {returnStore : Source.Store}
+        {saved : List (Name × Nat)}
+        {savedValues : List Word} {afterArgsEVM : EVMState}
+        {baseStack : EvmYul.Stack Word}
+        {spillScope : List Name} {spillLayout : SpillLayout.Layout},
+        bodyFuel < fuel →
+        FunList.find? functionName program.functions = some fn →
+        Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+            args source =
+          .ok (sourceAfterArgs, argValues) →
+        Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+            program fn argValues bodyFuel sourceAfterArgs.shared =
+          .ok (.returned sharedAfterCall returnValues) →
+        Source.Store.assignMany targets returnValues sourceAfterArgs.vars =
+          some returnStore →
+        saved = callerSaveEntries targets spillLayout →
+        SavedEntriesRel saved source.vars savedValues →
+        SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+          (argValues.reverse ++ savedValues.reverse) afterArgsEVM →
+        afterArgsEVM.stack =
+          argValues.reverse ++ savedValues.reverse ++ baseStack →
+        ∃ afterCall callFuel,
+          Expressions.Stmt.run exprProgram callFuel
+              (Expressions.Stmt.call functionName)
+              (target.withEVM afterArgsEVM) =
+            .ok
+              (Expressions.Outcome.regular
+                ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+          SharedStateEqOutsideScratch range sharedAfterCall
+            afterCall.toSharedState ∧
+          ScratchRegionReady afterCall.toMachineState range.base
+            range.words ∧
+          afterCall.stack =
+            returnValues.reverse ++ savedValues.reverse ++ baseStack) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      final.stack = [] ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final := by
+  rcases compileCall?_eq_some hCompile with
+    ⟨fn, _spill, _saved, _argsCode, _storeCode, hFind, hTargetsNodup,
+      _hArgsLength, _hTargetsLength, _hSafe, _hSpill, _hSavedEq,
+      _hArgsCode, _hStoreCode, _hPlan⟩
+  cases fuel with
+  | zero =>
+      simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hSourceRun
+  | succ bodyFuel =>
+      unfold Source.Stmt.run at hSourceRun
+      simp [hTargetsNodup] at hSourceRun
+      cases hArgsEval :
+          Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+            args source with
+      | error err =>
+          simp [hArgsEval] at hSourceRun
+      | ok argResult =>
+          rcases argResult with ⟨sourceAfterArgs, argValues⟩
+          simp [hArgsEval, hFind] at hSourceRun
+          cases hBody :
+              Source.FunDef.runBody
+                Locals.Source.PrimitiveSemantics.structured program fn
+                argValues bodyFuel sourceAfterArgs.shared with
+          | error err =>
+              simp [hBody] at hSourceRun
+          | ok callResult =>
+              cases callResult with
+              | returned sharedAfterCall returnValues =>
+                  cases hAssign :
+                      Source.Store.assignMany targets returnValues
+                        sourceAfterArgs.vars with
+                  | none =>
+                      simp [hBody, hAssign, Source.invalid,
+                        Structured.invalid] at hSourceRun
+                  | some returnStore =>
+                      simp [hBody, hAssign] at hSourceRun
+                      cases hSourceRun
+                      exact
+                        compileCall?_regular_components_sound_exact_given_callReplay
+                          hSpec hWordBytes hCompile hRel hDefined hLength
+                          hArgsEval hAssign
+                          (by
+                            intro saved savedValues afterArgsEVM baseStack
+                              spillScope spillLayout hSavedEq hSavedRel
+                              hArgsRel hStack
+                            exact
+                              hCallReplay (Nat.lt_succ_self bodyFuel)
+                                hFind hArgsEval hBody hAssign hSavedEq
+                                hSavedRel hArgsRel hStack)
+              | halted kind haltedState =>
+                  simp [hBody] at hSourceRun
+                  cases hSourceRun
+
+theorem compileCall?_regular_sound_meta_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    {ctx : Source.Ctx} {fuel : Nat}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hScope : ctx.scope = sourceScope)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          ctx fuel (.call targets functionName args) source =
+        .ok (Source.Outcome.regular sourceAfter, ctx))
+    (hCallReplay :
+      ∀ {bodyFuel : Nat} {fn : FunDef}
+        {sourceAfterArgs : Source.State}
+        {argValues returnValues : List Word}
+        {sharedAfterCall : EvmYul.SharedState .EVM}
+        {returnStore : Source.Store}
+        {saved : List (Name × Nat)}
+        {savedValues : List Word} {afterArgsEVM : EVMState}
+        {baseStack : EvmYul.Stack Word}
+        {spillScope : List Name} {spillLayout : SpillLayout.Layout},
+        FunList.find? functionName program.functions = some fn →
+        Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+            args source =
+          .ok (sourceAfterArgs, argValues) →
+        Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+            program fn argValues bodyFuel sourceAfterArgs.shared =
+          .ok (.returned sharedAfterCall returnValues) →
+        Source.Store.assignMany targets returnValues sourceAfterArgs.vars =
+          some returnStore →
+        saved = callerSaveEntries targets spillLayout →
+        SavedEntriesRel saved source.vars savedValues →
+        SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+          (argValues.reverse ++ savedValues.reverse) afterArgsEVM →
+        afterArgsEVM.stack =
+          argValues.reverse ++ savedValues.reverse ++ baseStack →
+        ∃ afterCall callFuel,
+          Expressions.Stmt.run exprProgram callFuel
+              (Expressions.Stmt.call functionName)
+              (target.withEVM afterArgsEVM) =
+            .ok
+              (Expressions.Outcome.regular
+                ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+          SharedStateEqOutsideScratch range sharedAfterCall
+            afterCall.toSharedState ∧
+          ScratchRegionReady afterCall.toMachineState range.base
+            range.words ∧
+          afterCall.stack =
+            returnValues.reverse ++ savedValues.reverse ++ baseStack) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      ctx.scope = plan.sourceScope := by
+  rcases compileCall?_regular_sound_given_callReplay
+      hSpec hWordBytes hCompile hRel hDefined hSourceRun hCallReplay with
+    ⟨final, exprFuel, hRun, hFinalRel⟩
+  rcases compileCall?_eq_some hCompile with
+    ⟨_compiledFn, spill, _saved, _argsCode, _storeCode, _hFind,
+      _hTargetsNodup, _hArgsLength, _hTargetsLength, _hSafe, hSpill,
+      _hSavedEq, _hArgsCode, _hStoreCode, hPlan⟩
+  have hPlanScopeStack := compileCall?_sourceScope_stackLayout hCompile
+  have hStoreDefined :
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout := by
+    cases fuel with
+    | zero =>
+        simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hSourceRun
+    | succ bodyFuel =>
+        rcases
+            Source.Stmt.call_regular_parts
+              (prim := Locals.Source.PrimitiveSemantics.structured)
+              (fuel := bodyFuel) hSourceRun with
+          ⟨sourceAfterArgs, argValues, fn, sharedAfterCall, returnValues,
+            returnStore, _hTargets, hArgsEval, _hFind, _hBody, hAssign,
+            hSourceAfter⟩
+        subst sourceAfter
+        have hSpillDefined :
+            SpillLayout.StoreDefined source.vars spill.layout :=
+          by
+            intro name location hMem
+            exact
+              (SpillPlan.spillAllStack?_storeDefined
+                (store := source.vars) hSpill hDefined) hMem
+        have hAfterArgsDefined :
+            SpillLayout.StoreDefined sourceAfterArgs.vars spill.layout := by
+          intro name location hMem
+          have hValue := hSpillDefined (name := name)
+            (location := location) hMem
+          simpa [argList_eval_vars_eq hArgsEval] using hValue
+        have hReturnDefined :
+            SpillLayout.StoreDefined returnStore spill.layout :=
+          assignMany_storeDefined_same_layout
+            (layout := spill.layout) hAssign hAfterArgsDefined
+        subst plan
+        intro name location hMem
+        exact hReturnDefined (name := name) (location := location) hMem
+  refine ⟨final, exprFuel, hRun, hFinalRel, hStoreDefined, ?_⟩
+  rw [hPlanScopeStack.1]
+  exact hScope
+
+theorem compileCall?_regular_sound_meta_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    {ctx : Source.Ctx} {fuel : Nat}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hScope : ctx.scope = sourceScope)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          ctx fuel (.call targets functionName args) source =
+        .ok (Source.Outcome.regular sourceAfter, ctx))
+    (hCallReplay :
+      ∀ {bodyFuel : Nat} {fn : FunDef}
+        {sourceAfterArgs : Source.State}
+        {argValues returnValues : List Word}
+        {sharedAfterCall : EvmYul.SharedState .EVM}
+        {returnStore : Source.Store}
+        {saved : List (Name × Nat)}
+        {savedValues : List Word} {afterArgsEVM : EVMState}
+        {baseStack : EvmYul.Stack Word}
+        {spillScope : List Name} {spillLayout : SpillLayout.Layout},
+        FunList.find? functionName program.functions = some fn →
+        Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+            args source =
+          .ok (sourceAfterArgs, argValues) →
+        Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+            program fn argValues bodyFuel sourceAfterArgs.shared =
+          .ok (.returned sharedAfterCall returnValues) →
+        Source.Store.assignMany targets returnValues sourceAfterArgs.vars =
+          some returnStore →
+        saved = callerSaveEntries targets spillLayout →
+        SavedEntriesRel saved source.vars savedValues →
+        SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+          (argValues.reverse ++ savedValues.reverse) afterArgsEVM →
+        afterArgsEVM.stack =
+          argValues.reverse ++ savedValues.reverse ++ baseStack →
+        ∃ afterCall callFuel,
+          Expressions.Stmt.run exprProgram callFuel
+              (Expressions.Stmt.call functionName)
+              (target.withEVM afterArgsEVM) =
+            .ok
+              (Expressions.Outcome.regular
+                ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+          SharedStateEqOutsideScratch range sharedAfterCall
+            afterCall.toSharedState ∧
+          ScratchRegionReady afterCall.toMachineState range.base
+            range.words ∧
+          afterCall.stack =
+            returnValues.reverse ++ savedValues.reverse ++ baseStack) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      final.stack.length = plan.stackLayout.length ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      ctx.scope = plan.sourceScope := by
+  rcases compileCall?_regular_sound_exact_given_callReplay
+      hSpec hWordBytes hCompile hRel hDefined hLength hSourceRun
+      hCallReplay with
+    ⟨final, exprFuel, hRun, hFinalStack, hFinalRel⟩
+  rcases compileCall?_eq_some hCompile with
+    ⟨_compiledFn, spill, _saved, _argsCode, _storeCode, _hFind,
+      _hTargetsNodup, _hArgsLength, _hTargetsLength, _hSafe, hSpill,
+      _hSavedEq, _hArgsCode, _hStoreCode, hPlan⟩
+  have hPlanScopeStack := compileCall?_sourceScope_stackLayout hCompile
+  have hStoreDefined :
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout := by
+    cases fuel with
+    | zero =>
+        simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hSourceRun
+    | succ bodyFuel =>
+        rcases
+            Source.Stmt.call_regular_parts
+              (prim := Locals.Source.PrimitiveSemantics.structured)
+              (fuel := bodyFuel) hSourceRun with
+          ⟨sourceAfterArgs, argValues, fn, sharedAfterCall, returnValues,
+            returnStore, _hTargets, hArgsEval, _hFind, _hBody, hAssign,
+            hSourceAfter⟩
+        subst sourceAfter
+        have hSpillDefined :
+            SpillLayout.StoreDefined source.vars spill.layout :=
+          by
+            intro name location hMem
+            exact
+              (SpillPlan.spillAllStack?_storeDefined
+                (store := source.vars) hSpill hDefined) hMem
+        have hAfterArgsDefined :
+            SpillLayout.StoreDefined sourceAfterArgs.vars spill.layout := by
+          intro name location hMem
+          have hValue := hSpillDefined (name := name)
+            (location := location) hMem
+          simpa [argList_eval_vars_eq hArgsEval] using hValue
+        have hReturnDefined :
+            SpillLayout.StoreDefined returnStore spill.layout :=
+          assignMany_storeDefined_same_layout
+            (layout := spill.layout) hAssign hAfterArgsDefined
+        subst plan
+        intro name location hMem
+        exact hReturnDefined (name := name) (location := location) hMem
+  refine ⟨final, exprFuel, hRun, ?_, hFinalRel, hStoreDefined, ?_⟩
+  · rw [hFinalStack, hPlanScopeStack.2]
+    rfl
+  · rw [hPlanScopeStack.1]
+    exact hScope
+
+def CallReplayFor (range : ScratchRange) (program : Program)
+    (exprProgram : Expressions.Program) (target : Expressions.RunState)
+    (source : Source.State) (targets : List Name) (functionName : Name)
+    (args : List (Expr 1)) : Prop :=
+  ∀ {bodyFuel : Nat} {fn : FunDef}
+    {sourceAfterArgs : Source.State}
+    {argValues returnValues : List Word}
+    {sharedAfterCall : EvmYul.SharedState .EVM}
+    {returnStore : Source.Store}
+    {saved : List (Name × Nat)}
+    {savedValues : List Word} {afterArgsEVM : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout},
+    FunList.find? functionName program.functions = some fn →
+    Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+        args source =
+      .ok (sourceAfterArgs, argValues) →
+    Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+        program fn argValues bodyFuel sourceAfterArgs.shared =
+      .ok (.returned sharedAfterCall returnValues) →
+    Source.Store.assignMany targets returnValues sourceAfterArgs.vars =
+      some returnStore →
+    saved = callerSaveEntries targets spillLayout →
+    SavedEntriesRel saved source.vars savedValues →
+    SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+      (argValues.reverse ++ savedValues.reverse) afterArgsEVM →
+    afterArgsEVM.stack =
+      argValues.reverse ++ savedValues.reverse ++ baseStack →
+    ∃ afterCall callFuel,
+      Expressions.Stmt.run exprProgram callFuel
+          (Expressions.Stmt.call functionName)
+          (target.withEVM afterArgsEVM) =
+        .ok
+          (Expressions.Outcome.regular
+            ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+      SharedStateEqOutsideScratch range sharedAfterCall
+        afterCall.toSharedState ∧
+      ScratchRegionReady afterCall.toMachineState range.base
+        range.words ∧
+      afterCall.stack =
+        returnValues.reverse ++ savedValues.reverse ++ baseStack
+
+def CallReplayForBelow (maxBodyFuel : Nat) (range : ScratchRange)
+    (program : Program) (exprProgram : Expressions.Program)
+    (target : Expressions.RunState) (source : Source.State)
+    (targets : List Name) (functionName : Name) (args : List (Expr 1)) :
+    Prop :=
+  ∀ {bodyFuel : Nat} {fn : FunDef}
+    {sourceAfterArgs : Source.State}
+    {argValues returnValues : List Word}
+    {sharedAfterCall : EvmYul.SharedState .EVM}
+    {returnStore : Source.Store}
+    {saved : List (Name × Nat)}
+    {savedValues : List Word} {afterArgsEVM : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout},
+    bodyFuel < maxBodyFuel →
+    FunList.find? functionName program.functions = some fn →
+    Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+        args source =
+      .ok (sourceAfterArgs, argValues) →
+    Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+        program fn argValues bodyFuel sourceAfterArgs.shared =
+      .ok (.returned sharedAfterCall returnValues) →
+    Source.Store.assignMany targets returnValues sourceAfterArgs.vars =
+      some returnStore →
+    saved = callerSaveEntries targets spillLayout →
+    SavedEntriesRel saved source.vars savedValues →
+    SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+      (argValues.reverse ++ savedValues.reverse) afterArgsEVM →
+    afterArgsEVM.stack =
+      argValues.reverse ++ savedValues.reverse ++ baseStack →
+    ∃ afterCall callFuel,
+      Expressions.Stmt.run exprProgram callFuel
+          (Expressions.Stmt.call functionName)
+          (target.withEVM afterArgsEVM) =
+        .ok
+          (Expressions.Outcome.regular
+            ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+      SharedStateEqOutsideScratch range sharedAfterCall
+        afterCall.toSharedState ∧
+      ScratchRegionReady afterCall.toMachineState range.base
+        range.words ∧
+      afterCall.stack =
+        returnValues.reverse ++ savedValues.reverse ++ baseStack
+
+theorem CallReplayFor.toBelow
+    {maxBodyFuel : Nat} {range : ScratchRange} {program : Program}
+    {exprProgram : Expressions.Program} {target : Expressions.RunState}
+    {source : Source.State} {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)}
+    (hReplay :
+      CallReplayFor range program exprProgram target source targets
+        functionName args) :
+    CallReplayForBelow maxBodyFuel range program exprProgram target source
+      targets functionName args := by
+  intro bodyFuel fn sourceAfterArgs argValues returnValues sharedAfterCall
+    returnStore saved savedValues afterArgsEVM baseStack spillScope spillLayout
+  intro _hLt hFind hArgs hBody hAssign hSaved hSavedRel hPrefix hStack
+  exact
+    hReplay hFind hArgs hBody hAssign hSaved hSavedRel hPrefix hStack
+
+theorem CallReplayForBelow.mono
+    {smaller larger : Nat} (hLe : smaller ≤ larger)
+    {range : ScratchRange} {program : Program}
+    {exprProgram : Expressions.Program} {target : Expressions.RunState}
+    {source : Source.State} {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)}
+    (hReplay :
+      CallReplayForBelow larger range program exprProgram target source
+        targets functionName args) :
+    CallReplayForBelow smaller range program exprProgram target source targets
+      functionName args := by
+  intro bodyFuel fn sourceAfterArgs argValues returnValues sharedAfterCall
+    returnStore saved savedValues afterArgsEVM baseStack spillScope spillLayout
+  intro hLt hFind hArgs hBody hAssign hSaved hSavedRel hPrefix hStack
+  exact
+    hReplay (Nat.lt_of_lt_of_le hLt hLe) hFind hArgs hBody hAssign
+      hSaved hSavedRel hPrefix hStack
+
+def CallHaltReplayFor (range : ScratchRange) (program : Program)
+    (exprProgram : Expressions.Program) (target : Expressions.RunState)
+    (source : Source.State) (targets : List Name) (functionName : Name)
+    (args : List (Expr 1)) : Prop :=
+  ∀ {bodyFuel : Nat} {fn : FunDef}
+    {sourceAfterArgs haltedState : Source.State}
+    {argValues : List Word}
+    {kind : Assembly.HaltKind}
+    {saved : List (Name × Nat)}
+    {savedValues : List Word} {afterArgsEVM : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout},
+    FunList.find? functionName program.functions = some fn →
+    Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+        args source =
+      .ok (sourceAfterArgs, argValues) →
+    Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+        program fn argValues bodyFuel sourceAfterArgs.shared =
+      .ok (.halted kind haltedState) →
+    saved = callerSaveEntries targets spillLayout →
+    SavedEntriesRel saved source.vars savedValues →
+    SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+      (argValues.reverse ++ savedValues.reverse) afterArgsEVM →
+    afterArgsEVM.stack =
+      argValues.reverse ++ savedValues.reverse ++ baseStack →
+    ∃ haltTarget callFuel,
+      Expressions.Stmt.run exprProgram callFuel
+          (Expressions.Stmt.call functionName)
+          (target.withEVM afterArgsEVM) =
+        .ok (Expressions.Outcome.halt kind haltTarget) ∧
+      SharedStateEqOutsideScratch range haltedState.shared
+        haltTarget.evm.toSharedState
+
+def CallHaltReplayForBelow (maxBodyFuel : Nat) (range : ScratchRange)
+    (program : Program) (exprProgram : Expressions.Program)
+    (target : Expressions.RunState) (source : Source.State)
+    (targets : List Name) (functionName : Name) (args : List (Expr 1)) :
+    Prop :=
+  ∀ {bodyFuel : Nat} {fn : FunDef}
+    {sourceAfterArgs haltedState : Source.State}
+    {argValues : List Word}
+    {kind : Assembly.HaltKind}
+    {saved : List (Name × Nat)}
+    {savedValues : List Word} {afterArgsEVM : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout},
+    bodyFuel < maxBodyFuel →
+    FunList.find? functionName program.functions = some fn →
+    Source.ArgList.eval Locals.Source.PrimitiveSemantics.structured
+        args source =
+      .ok (sourceAfterArgs, argValues) →
+    Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+        program fn argValues bodyFuel sourceAfterArgs.shared =
+      .ok (.halted kind haltedState) →
+    saved = callerSaveEntries targets spillLayout →
+    SavedEntriesRel saved source.vars savedValues →
+    SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+      (argValues.reverse ++ savedValues.reverse) afterArgsEVM →
+    afterArgsEVM.stack =
+      argValues.reverse ++ savedValues.reverse ++ baseStack →
+    ∃ haltTarget callFuel,
+      Expressions.Stmt.run exprProgram callFuel
+          (Expressions.Stmt.call functionName)
+          (target.withEVM afterArgsEVM) =
+        .ok (Expressions.Outcome.halt kind haltTarget) ∧
+      SharedStateEqOutsideScratch range haltedState.shared
+        haltTarget.evm.toSharedState
+
+theorem CallHaltReplayFor.toBelow
+    {maxBodyFuel : Nat} {range : ScratchRange} {program : Program}
+    {exprProgram : Expressions.Program} {target : Expressions.RunState}
+    {source : Source.State} {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)}
+    (hReplay :
+      CallHaltReplayFor range program exprProgram target source targets
+        functionName args) :
+    CallHaltReplayForBelow maxBodyFuel range program exprProgram target source
+      targets functionName args := by
+  intro bodyFuel fn sourceAfterArgs haltedState argValues kind saved
+    savedValues afterArgsEVM baseStack spillScope spillLayout
+  intro _hLt hFind hArgs hBody hSaved hSavedRel hPrefix hStack
+  exact
+    hReplay hFind hArgs hBody hSaved hSavedRel hPrefix hStack
+
+theorem CallHaltReplayForBelow.mono
+    {smaller larger : Nat} (hLe : smaller ≤ larger)
+    {range : ScratchRange} {program : Program}
+    {exprProgram : Expressions.Program} {target : Expressions.RunState}
+    {source : Source.State} {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)}
+    (hReplay :
+      CallHaltReplayForBelow larger range program exprProgram target source
+        targets functionName args) :
+    CallHaltReplayForBelow smaller range program exprProgram target source
+      targets functionName args := by
+  intro bodyFuel fn sourceAfterArgs haltedState argValues kind saved
+    savedValues afterArgsEVM baseStack spillScope spillLayout
+  intro hLt hFind hArgs hBody hSaved hSavedRel hPrefix hStack
+  exact
+    hReplay (Nat.lt_of_lt_of_le hLt hLe) hFind hArgs hBody hSaved
+      hSavedRel hPrefix hStack
+
+theorem compileCall?_halt_sound_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {source haltedState : Source.State}
+    {target : Expressions.RunState}
+    {ctx : Source.Ctx} {fuel : Nat}
+    {kind : Assembly.HaltKind}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          ctx fuel (.call targets functionName args) source =
+        .ok (Source.Outcome.halt kind haltedState, ctx))
+    (hCallReplay :
+      CallHaltReplayForBelow fuel range program exprProgram target source
+        targets functionName args) :
+    ∃ haltTarget exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.halt kind haltTarget) ∧
+      SharedStateEqOutsideScratch range haltedState.shared
+        haltTarget.evm.toSharedState := by
+  cases fuel with
+  | zero =>
+      simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hSourceRun
+  | succ bodyFuel =>
+      rcases
+          Source.Stmt.call_halted_parts
+            (prim := Locals.Source.PrimitiveSemantics.structured)
+            (program := program) (ctx := ctx) (fuel := bodyFuel)
+            hSourceRun with
+        ⟨sourceAfterArgs, argValues, fn, _hTargetsNodup, hArgsEval, hFind,
+          hBodyRun⟩
+      have hFind' :
+          FunList.find? functionName program.functions = some fn := by
+        simpa [FunList.find?, Source.FunList.find?] using hFind
+      exact
+        compileCall?_halt_components_sound_given_callReplay
+          hSpec hWordBytes hCompile hRel hDefined hArgsEval
+          (by
+            intro saved savedValues afterArgsEVM baseStack spillScope
+              spillLayout hSaved hSavedRel hPrefix hStack
+            exact
+              hCallReplay (Nat.lt_succ_self bodyFuel) hFind' hArgsEval
+                hBodyRun hSaved hSavedRel hPrefix hStack)
+
+theorem compileCall?_regular_sound_meta_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout}
+    {targets : List Name} {functionName : Name}
+    {args : List (Expr 1)} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    {ctx : Source.Ctx} {fuel : Nat}
+    (hCompile :
+      compileCall? range program sourceScope stackLayout layout targets
+          functionName args =
+        some plan)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hScope : ctx.scope = sourceScope)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          ctx fuel (.call targets functionName args) source =
+        .ok (Source.Outcome.regular sourceAfter, ctx))
+    (hCallReplay :
+      CallReplayForBelow fuel range program exprProgram target source targets
+        functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      final.stack.length = plan.stackLayout.length ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      ctx.scope = plan.sourceScope := by
+  rcases
+      compileCall?_regular_sound_exact_given_callReplayBelow
+        hSpec hWordBytes hCompile hRel hDefined hLength hSourceRun
+        (by
+          intro bodyFuel fn sourceAfterArgs argValues returnValues
+            sharedAfterCall returnStore saved savedValues afterArgsEVM baseStack
+            spillScope spillLayout hLt hFind hArgs hBody hAssign hSaved
+            hSavedRel hPrefix hStack
+          exact
+            hCallReplay hLt hFind hArgs hBody hAssign hSaved hSavedRel
+              hPrefix hStack) with
+    ⟨final, exprFuel, hRun, hFinalStack, hFinalRel⟩
+  rcases compileCall?_eq_some hCompile with
+    ⟨_compiledFn, spill, _saved, _argsCode, _storeCode, _hFind,
+      _hTargetsNodup, _hArgsLength, _hTargetsLength, _hSafe, hSpill,
+      _hSavedEq, _hArgsCode, _hStoreCode, hPlan⟩
+  have hPlanScopeStack := compileCall?_sourceScope_stackLayout hCompile
+  have hStoreDefined :
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout := by
+    cases fuel with
+    | zero =>
+        simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hSourceRun
+    | succ bodyFuel =>
+        rcases
+            Source.Stmt.call_regular_parts
+              (prim := Locals.Source.PrimitiveSemantics.structured)
+              (fuel := bodyFuel) hSourceRun with
+          ⟨sourceAfterArgs, argValues, fn, sharedAfterCall, returnValues,
+            returnStore, _hTargets, hArgsEval, _hFind, _hBody, hAssign,
+            hSourceAfter⟩
+        subst sourceAfter
+        have hSpillDefined :
+            SpillLayout.StoreDefined source.vars spill.layout := by
+          intro name location hMem
+          exact
+            (SpillPlan.spillAllStack?_storeDefined
+              (store := source.vars) hSpill hDefined) hMem
+        have hAfterArgsDefined :
+            SpillLayout.StoreDefined sourceAfterArgs.vars spill.layout := by
+          intro name location hMem
+          have hValue := hSpillDefined (name := name)
+            (location := location) hMem
+          simpa [argList_eval_vars_eq hArgsEval] using hValue
+        have hReturnDefined :
+            SpillLayout.StoreDefined returnStore spill.layout :=
+          assignMany_storeDefined_same_layout
+            (layout := spill.layout) hAssign hAfterArgsDefined
+        subst plan
+        intro name location hMem
+        exact hReturnDefined (name := name) (location := location) hMem
+  refine ⟨final, exprFuel, hRun, ?_, hFinalRel, hStoreDefined, ?_⟩
+  · rw [hFinalStack, hPlanScopeStack.2]
+    rfl
+  · rw [hPlanScopeStack.1]
+    exact hScope
+
+theorem compileStmt?_regular_sound_meta_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    (hCompile :
+      compileStmt? range program returns sourceScope stackLayout layout stmt =
+        some plan)
+    (hSupported : StmtRegularOpenSupported returns stmt)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel stmt source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter))
+    (hCallReplay :
+      ∀ {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        stmt = .call targets functionName args →
+          CallReplayFor range program exprProgram target source targets
+            functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      sourceCtxAfter.scope = plan.sourceScope := by
+  cases stmt with
+  | expr expr =>
+      have hCompileNon :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+              (.expr expr) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hOwned :
+          SourceLowering.SourceToLocals.Stmt.SourceOwned returns (.expr expr) :=
+        by simpa [StmtRegularOpenSupported] using hSupported
+      exact
+        compileNonCallStmtSpan?_regular_sound_meta_of_source_run
+          hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hSourceRun
+  | let_ name value =>
+      have hCompileNon :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+              (.let_ name value) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hOwned :
+          SourceLowering.SourceToLocals.Stmt.SourceOwned returns
+            (.let_ name value) :=
+        by simpa [StmtRegularOpenSupported] using hSupported
+      exact
+        compileNonCallStmtSpan?_regular_sound_meta_of_source_run
+          hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hSourceRun
+  | assign name value =>
+      have hCompileNon :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+              (.assign name value) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hOwned :
+          SourceLowering.SourceToLocals.Stmt.SourceOwned returns
+            (.assign name value) :=
+        by simpa [StmtRegularOpenSupported] using hSupported
+      exact
+        compileNonCallStmtSpan?_regular_sound_meta_of_source_run
+          hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hSourceRun
+  | block body =>
+      have hCompileNon :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+              (.block body) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hOwned :
+          SourceLowering.SourceToLocals.Stmt.SourceOwned returns
+            (.block body) :=
+        by simpa [StmtRegularOpenSupported] using hSupported
+      exact
+        compileNonCallStmtSpan?_regular_sound_meta_of_source_run
+          hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hSourceRun
+  | if_ cond body =>
+      have hCompileNon :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+              (.if_ cond body) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hOwned :
+          SourceLowering.SourceToLocals.Stmt.SourceOwned returns
+            (.if_ cond body) :=
+        by simpa [StmtRegularOpenSupported] using hSupported
+      exact
+        compileNonCallStmtSpan?_regular_sound_meta_of_source_run
+          hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hSourceRun
+  | switch scrutinee cases defaultBody =>
+      have hCompileNon :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+              (.switch scrutinee cases defaultBody) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hOwned :
+          SourceLowering.SourceToLocals.Stmt.SourceOwned returns
+            (.switch scrutinee cases defaultBody) :=
+        by simpa [StmtRegularOpenSupported] using hSupported
+      exact
+        compileNonCallStmtSpan?_regular_sound_meta_of_source_run
+          hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hSourceRun
+  | for_ init cond post body =>
+      have hCompileNon :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+              (.for_ init cond post body) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hOwned :
+          SourceLowering.SourceToLocals.Stmt.SourceOwned returns
+            (.for_ init cond post body) :=
+        by simpa [StmtRegularOpenSupported] using hSupported
+      exact
+        compileNonCallStmtSpan?_regular_sound_meta_of_source_run
+          hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hSourceRun
+  | brk =>
+      have hCompileNon :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+              .brk =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hOwned :
+          SourceLowering.SourceToLocals.Stmt.SourceOwned returns .brk :=
+        by simpa [StmtRegularOpenSupported] using hSupported
+      exact
+        compileNonCallStmtSpan?_regular_sound_meta_of_source_run
+          hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hSourceRun
+  | cont =>
+      have hCompileNon :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+              .cont =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hOwned :
+          SourceLowering.SourceToLocals.Stmt.SourceOwned returns .cont :=
+        by simpa [StmtRegularOpenSupported] using hSupported
+      exact
+        compileNonCallStmtSpan?_regular_sound_meta_of_source_run
+          hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hSourceRun
+  | leave =>
+      simp [StmtRegularOpenSupported] at hSupported
+  | call targets functionName args =>
+      have hCompileCall :
+          compileCall? range program sourceScope stackLayout layout targets
+              functionName args =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hCtx : sourceCtxAfter = sourceCtx :=
+        source_call_regular_ctx hSourceRun
+      subst sourceCtxAfter
+      exact
+        compileCall?_regular_sound_meta_given_callReplay
+          hSpec hWordBytes hCompileCall hRel hDefined hScope hSourceRun
+          (by
+            intro bodyFuel fn sourceAfterArgs argValues returnValues
+              sharedAfterCall returnStore saved savedValues afterArgsEVM
+              baseStack spillScope spillLayout hFind hArgsEval hBody hAssign
+              hSavedEq hSavedRel hArgsRel hStack
+            exact
+              (hCallReplay rfl) hFind hArgsEval hBody hAssign hSavedEq
+                hSavedRel hArgsRel hStack)
+  | terminal kind =>
+      have hCompileNon :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+              (.terminal kind) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hOwned :
+          SourceLowering.SourceToLocals.Stmt.SourceOwned returns
+            (.terminal kind) :=
+        by simpa [StmtRegularOpenSupported] using hSupported
+      exact
+        compileNonCallStmtSpan?_regular_sound_meta_of_source_run
+          hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hSourceRun
+  | terminalArgs kind args =>
+      have hCompileNon :
+          compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+              (.terminalArgs kind args) =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hOwned :
+          SourceLowering.SourceToLocals.Stmt.SourceOwned returns
+            (.terminalArgs kind args) :=
+        by simpa [StmtRegularOpenSupported] using hSupported
+      exact
+        compileNonCallStmtSpan?_regular_sound_meta_of_source_run
+          hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hSourceRun
+
+theorem compileStmtList?_regular_sound_meta_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {stmts : List Stmt} {plan : Plan}
+      {exprProgram : Expressions.Program}
+      {sourceCtx sourceCtxAfter : Source.Ctx}
+      {fuel : Nat} {source sourceAfter : Source.State}
+      {target : Expressions.RunState},
+      compileStmtList? range program returns sourceScope stackLayout layout
+          stmts =
+        some plan →
+      StmtListRegularOpenSupported returns stmts →
+      sourceCtx.scope = sourceScope →
+      SpillStateRel range sourceScope stackLayout layout source target.evm →
+      SpillLayout.StoreDefined source.vars layout →
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel { stmts := stmts } source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter) →
+      (∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayFor range program exprProgram callTarget callSource targets
+          functionName args) →
+      ∃ final exprFuel,
+        Expressions.Block.run exprProgram exprFuel plan.block target =
+          .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+        SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+          sourceAfter final ∧
+        SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+        sourceCtxAfter.scope = plan.sourceScope
+  | [], plan, exprProgram, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hCompile, _hSupported, hScope, hRel, hDefined,
+      hSourceRun, _hCallReplay => by
+      have hPlan := compileStmtList?_eq_some_nil hCompile
+      subst plan
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          simp [Source.Block.runOpen] at hSourceRun
+          rcases hSourceRun with ⟨hOutcome, hCtx⟩
+          cases hOutcome
+          cases hCtx
+          refine ⟨target.evm, 1, ?_, ?_, ?_, ?_⟩
+          · simp [Expressions.Block.run, Structured.RunState.withEVM]
+          · simpa using hRel
+          · exact hDefined
+          · exact hScope
+  | stmt :: rest, plan, exprProgram, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceFinal, target, hCompile, hSupported, hScope, hRel, hDefined,
+      hSourceRun, hCallReplay => by
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          rcases compileStmtList?_eq_some_cons hCompile with
+            ⟨head, tail, hHeadCompile, hTailCompile, hPlan⟩
+          rcases hSupported with ⟨hHeadSupported, hTailSupported⟩
+          cases hStmtRun :
+              Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+                program sourceCtx fuel stmt source with
+          | error err =>
+              simp [Source.Block.runOpen, hStmtRun] at hSourceRun
+          | ok stmtResult =>
+              rcases stmtResult with ⟨headOutcome, sourceCtxMid⟩
+              cases headOutcome with
+              | mk sourceHead mode =>
+                  cases mode with
+                  | regular =>
+                      have hTailSourceRun :
+                          Source.Block.runOpen
+                              Locals.Source.PrimitiveSemantics.structured
+                              program sourceCtxMid fuel { stmts := rest }
+                              sourceHead =
+                            .ok (Source.Outcome.regular sourceFinal,
+                              sourceCtxAfter) := by
+                        simpa [Source.Block.runOpen, hStmtRun] using
+                          hSourceRun
+                      rcases
+                          compileStmt?_regular_sound_meta_given_callReplay
+                            hSpec hWordBytes hHeadCompile hHeadSupported hScope
+                            hRel hDefined hStmtRun
+                            (by
+                              intro targets functionName args hEq
+                              subst stmt
+                              exact hCallReplay) with
+                        ⟨headFinal, headFuel, hHeadRun, hHeadRel,
+                          hHeadDefined, hHeadScope⟩
+                      rcases
+                          compileStmtList?_regular_sound_meta_given_callReplay
+                            hSpec hWordBytes
+                            (target := target.withEVM headFinal)
+                            hTailCompile hTailSupported
+                            hHeadScope
+                            (by
+                              simpa [Structured.RunState.withEVM]
+                                using hHeadRel)
+                            hHeadDefined hTailSourceRun
+                            hCallReplay with
+                        ⟨final, tailFuel, hTailRun, hTailRel, hTailDefined,
+                          hTailScope⟩
+                      subst plan
+                      have hRun :
+                          ∃ exprFuel,
+                            Expressions.Block.run exprProgram exprFuel
+                              (ExpressionsBlock.append head.block tail.block)
+                              target =
+                            .ok
+                              (Expressions.Outcome.regular
+                                (target.withEVM final)) := by
+                        exact
+                          expressionsBlock_append_regular_exists exprProgram
+                            ⟨headFuel, hHeadRun⟩
+                            ⟨tailFuel, by
+                              simpa [Expressions.RunState.withEVM_withEVM]
+                                using hTailRun⟩
+                      rcases hRun with ⟨exprFuel, hRun⟩
+                      exact
+                        ⟨final, exprFuel, hRun, hTailRel, hTailDefined,
+                          hTailScope⟩
+                  | brk =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.brk]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | cont =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.cont]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | leave =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.leave]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | halt kind =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.halt]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+
+theorem compileBlockOpen?_regular_sound_meta_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan)
+    (hSupported : BlockRegularOpenSupported returns block)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel block source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter))
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayFor range program exprProgram callTarget callSource targets
+          functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      sourceCtxAfter.scope = plan.sourceScope := by
+  cases block with
+  | mk stmts =>
+      exact
+        compileStmtList?_regular_sound_meta_given_callReplay
+          hSpec hWordBytes (stmts := stmts)
+          (plan := plan) (exprProgram := exprProgram)
+          (sourceCtx := sourceCtx) (sourceCtxAfter := sourceCtxAfter)
+          (fuel := fuel) (source := source) (sourceAfter := sourceAfter)
+          (target := target)
+          (compileBlockOpen?_eq_some hCompile)
+          hSupported hScope hRel hDefined hSourceRun hCallReplay
+
+theorem compileStmt?_regular_sound_meta_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    (hCompile :
+      compileStmt? range program returns sourceScope stackLayout layout stmt =
+        some plan)
+    (hSupported : StmtRegularOpenSupported returns stmt)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel stmt source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter))
+    (hCallReplay :
+      ∀ {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        stmt = .call targets functionName args →
+          CallReplayFor range program exprProgram target source targets
+            functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      final.stack.length = plan.stackLayout.length ∧
+      sourceCtxAfter.scope = plan.sourceScope := by
+  have hNonCallExact
+      (hCompileNon :
+        compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+            stmt =
+          some plan)
+      (hOwned :
+        SourceLowering.SourceToLocals.Stmt.SourceOwned returns stmt) :
+      ∃ final exprFuel,
+        Expressions.Block.run exprProgram exprFuel plan.block target =
+          .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+        SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+          sourceAfter final ∧
+        SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+        final.stack.length = plan.stackLayout.length ∧
+        sourceCtxAfter.scope = plan.sourceScope :=
+    compileNonCallStmtSpan?_regular_sound_meta_exact_of_source_run
+      hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hLength
+      hSourceRun
+  cases stmt with
+  | expr expr =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | let_ name value =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | assign name value =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | block body =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | if_ cond body =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | switch scrutinee cases defaultBody =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | for_ init cond post body =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | brk =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | cont =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | leave =>
+      simp [StmtRegularOpenSupported] at hSupported
+  | call targets functionName args =>
+      have hCompileCall :
+          compileCall? range program sourceScope stackLayout layout targets
+              functionName args =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hCtx : sourceCtxAfter = sourceCtx :=
+        source_call_regular_ctx hSourceRun
+      subst sourceCtxAfter
+      rcases
+          compileCall?_regular_sound_meta_exact_given_callReplay
+            hSpec hWordBytes hCompileCall hRel hDefined hLength
+            (ctx := sourceCtx) hScope hSourceRun
+            (by
+              intro bodyFuel fn sourceAfterArgs argValues returnValues
+                sharedAfterCall returnStore saved savedValues afterArgsEVM
+                baseStack spillScope spillLayout hFind hArgsEval hBody
+                hAssign hSavedEq hSavedRel hArgsRel hStack
+              exact
+                (hCallReplay rfl) hFind hArgsEval hBody hAssign hSavedEq
+                  hSavedRel hArgsRel hStack) with
+        ⟨final, exprFuel, hRun, hFinalLength, hFinalRel, hStoreDefined,
+          hScopeAfter⟩
+      exact
+        ⟨final, exprFuel, hRun, hFinalRel, hStoreDefined, hFinalLength,
+          hScopeAfter⟩
+  | terminal kind =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | terminalArgs kind args =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+
+theorem compileStmt?_regular_sound_meta_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    (hCompile :
+      compileStmt? range program returns sourceScope stackLayout layout stmt =
+        some plan)
+    (hSupported : StmtRegularOpenSupported returns stmt)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel stmt source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter))
+    (hCallReplay :
+      ∀ {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        stmt = .call targets functionName args →
+          CallReplayForBelow fuel range program exprProgram target source
+            targets functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      final.stack.length = plan.stackLayout.length ∧
+      sourceCtxAfter.scope = plan.sourceScope := by
+  have hNonCallExact
+      (hCompileNon :
+        compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+            stmt =
+          some plan)
+      (hOwned :
+        SourceLowering.SourceToLocals.Stmt.SourceOwned returns stmt) :
+      ∃ final exprFuel,
+        Expressions.Block.run exprProgram exprFuel plan.block target =
+          .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+        SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+          sourceAfter final ∧
+        SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+        final.stack.length = plan.stackLayout.length ∧
+        sourceCtxAfter.scope = plan.sourceScope :=
+    compileNonCallStmtSpan?_regular_sound_meta_exact_of_source_run
+      hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hLength
+      hSourceRun
+  cases stmt with
+  | expr expr =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | let_ name value =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | assign name value =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | block body =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | if_ cond body =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | switch scrutinee cases defaultBody =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | for_ init cond post body =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | brk =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | cont =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | leave =>
+      simp [StmtRegularOpenSupported] at hSupported
+  | call targets functionName args =>
+      have hCompileCall :
+          compileCall? range program sourceScope stackLayout layout targets
+              functionName args =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hCtx : sourceCtxAfter = sourceCtx :=
+        source_call_regular_ctx hSourceRun
+      subst sourceCtxAfter
+      rcases
+          compileCall?_regular_sound_meta_exact_given_callReplayBelow
+            hSpec hWordBytes hCompileCall hRel hDefined hLength
+            (ctx := sourceCtx) hScope hSourceRun (hCallReplay rfl) with
+        ⟨final, exprFuel, hRun, hFinalLength, hFinalRel, hStoreDefined,
+          hScopeAfter⟩
+      exact
+        ⟨final, exprFuel, hRun, hFinalRel, hStoreDefined, hFinalLength,
+          hScopeAfter⟩
+  | terminal kind =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+  | terminalArgs kind args =>
+      exact hNonCallExact
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtRegularOpenSupported] using hSupported)
+
+theorem compileStmtList?_regular_sound_meta_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {stmts : List Stmt} {plan : Plan}
+      {exprProgram : Expressions.Program}
+      {sourceCtx sourceCtxAfter : Source.Ctx}
+      {fuel : Nat} {source sourceAfter : Source.State}
+      {target : Expressions.RunState},
+      compileStmtList? range program returns sourceScope stackLayout layout
+          stmts =
+        some plan →
+      StmtListRegularOpenSupported returns stmts →
+      sourceCtx.scope = sourceScope →
+      SpillStateRel range sourceScope stackLayout layout source target.evm →
+      SpillLayout.StoreDefined source.vars layout →
+      target.evm.stack.length = stackLayout.length →
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel { stmts := stmts } source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter) →
+      (∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayFor range program exprProgram callTarget callSource targets
+          functionName args) →
+      ∃ final exprFuel,
+        Expressions.Block.run exprProgram exprFuel plan.block target =
+          .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+        SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+          sourceAfter final ∧
+        SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+        final.stack.length = plan.stackLayout.length ∧
+        sourceCtxAfter.scope = plan.sourceScope
+  | [], plan, exprProgram, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hCompile, _hSupported, hScope, hRel, hDefined,
+      hLength, hSourceRun, _hCallReplay => by
+      have hPlan := compileStmtList?_eq_some_nil hCompile
+      subst plan
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          simp [Source.Block.runOpen] at hSourceRun
+          rcases hSourceRun with ⟨hOutcome, hCtx⟩
+          cases hOutcome
+          cases hCtx
+          refine ⟨target.evm, 1, ?_, ?_, ?_, ?_, ?_⟩
+          · simp [Expressions.Block.run, Structured.RunState.withEVM]
+          · simpa using hRel
+          · exact hDefined
+          · exact hLength
+          · exact hScope
+  | stmt :: rest, plan, exprProgram, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceFinal, target, hCompile, hSupported, hScope, hRel, hDefined,
+      hLength, hSourceRun, hCallReplay => by
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          rcases compileStmtList?_eq_some_cons hCompile with
+            ⟨head, tail, hHeadCompile, hTailCompile, hPlan⟩
+          rcases hSupported with ⟨hHeadSupported, hTailSupported⟩
+          cases hStmtRun :
+              Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+                program sourceCtx fuel stmt source with
+          | error err =>
+              simp [Source.Block.runOpen, hStmtRun] at hSourceRun
+          | ok stmtResult =>
+              rcases stmtResult with ⟨headOutcome, sourceCtxMid⟩
+              cases headOutcome with
+              | mk sourceHead mode =>
+                  cases mode with
+                  | regular =>
+                      have hTailSourceRun :
+                          Source.Block.runOpen
+                              Locals.Source.PrimitiveSemantics.structured
+                              program sourceCtxMid fuel { stmts := rest }
+                              sourceHead =
+                            .ok (Source.Outcome.regular sourceFinal,
+                              sourceCtxAfter) := by
+                        simpa [Source.Block.runOpen, hStmtRun] using
+                          hSourceRun
+                      rcases
+                          compileStmt?_regular_sound_meta_exact_given_callReplay
+                            hSpec hWordBytes hHeadCompile hHeadSupported
+                            hScope hRel hDefined hLength hStmtRun
+                            (by
+                              intro targets functionName args hEq
+                              subst stmt
+                              exact hCallReplay) with
+                        ⟨headFinal, headFuel, hHeadRun, hHeadRel,
+                          hHeadDefined, hHeadLength, hHeadScope⟩
+                      rcases
+                          compileStmtList?_regular_sound_meta_exact_given_callReplay
+                            hSpec hWordBytes
+                            (target := target.withEVM headFinal)
+                            hTailCompile hTailSupported hHeadScope
+                            (by
+                              simpa [Structured.RunState.withEVM]
+                                using hHeadRel)
+                            hHeadDefined
+                            (by
+                              simpa [Structured.RunState.withEVM] using
+                                hHeadLength)
+                            hTailSourceRun hCallReplay with
+                        ⟨final, tailFuel, hTailRun, hTailRel, hTailDefined,
+                          hTailLength, hTailScope⟩
+                      subst plan
+                      have hRun :
+                          ∃ exprFuel,
+                            Expressions.Block.run exprProgram exprFuel
+                              (ExpressionsBlock.append head.block tail.block)
+                              target =
+                            .ok
+                              (Expressions.Outcome.regular
+                                (target.withEVM final)) := by
+                        exact
+                          expressionsBlock_append_regular_exists exprProgram
+                            ⟨headFuel, hHeadRun⟩
+                            ⟨tailFuel, by
+                              simpa [Expressions.RunState.withEVM_withEVM]
+                                using hTailRun⟩
+                      rcases hRun with ⟨exprFuel, hRun⟩
+                      exact
+                        ⟨final, exprFuel, hRun, hTailRel, hTailDefined,
+                          hTailLength, hTailScope⟩
+                  | brk =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.brk]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | cont =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.cont]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | leave =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.leave]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | halt kind =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.halt]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+
+theorem compileStmtList?_regular_sound_meta_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {stmts : List Stmt} {plan : Plan}
+      {exprProgram : Expressions.Program}
+      {sourceCtx sourceCtxAfter : Source.Ctx}
+      {fuel : Nat} {source sourceAfter : Source.State}
+      {target : Expressions.RunState},
+      compileStmtList? range program returns sourceScope stackLayout layout
+          stmts =
+        some plan →
+      StmtListRegularOpenSupported returns stmts →
+      sourceCtx.scope = sourceScope →
+      SpillStateRel range sourceScope stackLayout layout source target.evm →
+      SpillLayout.StoreDefined source.vars layout →
+      target.evm.stack.length = stackLayout.length →
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel { stmts := stmts } source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter) →
+      (∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow fuel range program exprProgram callTarget callSource
+          targets functionName args) →
+      ∃ final exprFuel,
+        Expressions.Block.run exprProgram exprFuel plan.block target =
+          .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+        SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+          sourceAfter final ∧
+        SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+        final.stack.length = plan.stackLayout.length ∧
+        sourceCtxAfter.scope = plan.sourceScope
+  | [], plan, exprProgram, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, hCompile, _hSupported, hScope, hRel, hDefined,
+      hLength, hSourceRun, _hCallReplay => by
+      have hPlan := compileStmtList?_eq_some_nil hCompile
+      subst plan
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          simp [Source.Block.runOpen] at hSourceRun
+          rcases hSourceRun with ⟨hOutcome, hCtx⟩
+          cases hOutcome
+          cases hCtx
+          refine ⟨target.evm, 1, ?_, ?_, ?_, ?_, ?_⟩
+          · simp [Expressions.Block.run, Structured.RunState.withEVM]
+          · simpa using hRel
+          · exact hDefined
+          · exact hLength
+          · exact hScope
+  | stmt :: rest, plan, exprProgram, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceFinal, target, hCompile, hSupported, hScope, hRel, hDefined,
+      hLength, hSourceRun, hCallReplay => by
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          rcases compileStmtList?_eq_some_cons hCompile with
+            ⟨head, tail, hHeadCompile, hTailCompile, hPlan⟩
+          rcases hSupported with ⟨hHeadSupported, hTailSupported⟩
+          have hCallReplayPred :
+              ∀ {callTarget : Expressions.RunState}
+                {callSource : Source.State}
+                {targets : List Name} {functionName : Name}
+                {args : List (Expr 1)},
+                CallReplayForBelow fuel range program exprProgram callTarget
+                  callSource targets functionName args := by
+            intro callTarget callSource targets functionName args
+            exact CallReplayForBelow.mono (Nat.le_succ fuel) hCallReplay
+          cases hStmtRun :
+              Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+                program sourceCtx fuel stmt source with
+          | error err =>
+              simp [Source.Block.runOpen, hStmtRun] at hSourceRun
+          | ok stmtResult =>
+              rcases stmtResult with ⟨headOutcome, sourceCtxMid⟩
+              cases headOutcome with
+              | mk sourceHead mode =>
+                  cases mode with
+                  | regular =>
+                      have hTailSourceRun :
+                          Source.Block.runOpen
+                              Locals.Source.PrimitiveSemantics.structured
+                              program sourceCtxMid fuel { stmts := rest }
+                              sourceHead =
+                            .ok (Source.Outcome.regular sourceFinal,
+                              sourceCtxAfter) := by
+                        simpa [Source.Block.runOpen, hStmtRun] using
+                          hSourceRun
+                      rcases
+                          compileStmt?_regular_sound_meta_exact_given_callReplayBelow
+                            hSpec hWordBytes hHeadCompile hHeadSupported
+                            hScope hRel hDefined hLength hStmtRun
+                            (by
+                              intro targets functionName args hEq
+                              subst stmt
+                              exact hCallReplayPred) with
+                        ⟨headFinal, headFuel, hHeadRun, hHeadRel,
+                          hHeadDefined, hHeadLength, hHeadScope⟩
+                      rcases
+                          compileStmtList?_regular_sound_meta_exact_given_callReplayBelow
+                            hSpec hWordBytes
+                            (target := target.withEVM headFinal)
+                            hTailCompile hTailSupported hHeadScope
+                            (by
+                              simpa [Structured.RunState.withEVM]
+                                using hHeadRel)
+                            hHeadDefined
+                            (by
+                              simpa [Structured.RunState.withEVM] using
+                                hHeadLength)
+                            hTailSourceRun hCallReplayPred with
+                        ⟨final, tailFuel, hTailRun, hTailRel, hTailDefined,
+                          hTailLength, hTailScope⟩
+                      subst plan
+                      have hRun :
+                          ∃ exprFuel,
+                            Expressions.Block.run exprProgram exprFuel
+                              (ExpressionsBlock.append head.block tail.block)
+                              target =
+                            .ok
+                              (Expressions.Outcome.regular
+                                (target.withEVM final)) := by
+                        exact
+                          expressionsBlock_append_regular_exists exprProgram
+                            ⟨headFuel, hHeadRun⟩
+                            ⟨tailFuel, by
+                              simpa [Expressions.RunState.withEVM_withEVM]
+                                using hTailRun⟩
+                      rcases hRun with ⟨exprFuel, hRun⟩
+                      exact
+                        ⟨final, exprFuel, hRun, hTailRel, hTailDefined,
+                          hTailLength, hTailScope⟩
+                  | brk =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.brk]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | cont =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.cont]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | leave =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.leave]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | halt kind =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.halt]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+
+theorem compileBlockOpen?_regular_sound_meta_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan)
+    (hSupported : BlockRegularOpenSupported returns block)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel block source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter))
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayFor range program exprProgram callTarget callSource targets
+          functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      final.stack.length = plan.stackLayout.length ∧
+      sourceCtxAfter.scope = plan.sourceScope := by
+  cases block with
+  | mk stmts =>
+      exact
+        compileStmtList?_regular_sound_meta_exact_given_callReplay
+          hSpec hWordBytes (stmts := stmts)
+          (plan := plan) (exprProgram := exprProgram)
+          (sourceCtx := sourceCtx) (sourceCtxAfter := sourceCtxAfter)
+          (fuel := fuel) (source := source) (sourceAfter := sourceAfter)
+          (target := target)
+          (compileBlockOpen?_eq_some hCompile)
+          hSupported hScope hRel hDefined hLength hSourceRun hCallReplay
+
+theorem compileBlockOpen?_regular_sound_meta_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan)
+    (hSupported : BlockRegularOpenSupported returns block)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel block source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter))
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow fuel range program exprProgram callTarget callSource
+          targets functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      final.stack.length = plan.stackLayout.length ∧
+      sourceCtxAfter.scope = plan.sourceScope := by
+  cases block with
+  | mk stmts =>
+      exact
+        compileStmtList?_regular_sound_meta_exact_given_callReplayBelow
+          hSpec hWordBytes (stmts := stmts)
+          (plan := plan) (exprProgram := exprProgram)
+          (sourceCtx := sourceCtx) (sourceCtxAfter := sourceCtxAfter)
+          (fuel := fuel) (source := source) (sourceAfter := sourceAfter)
+          (target := target)
+          (compileBlockOpen?_eq_some hCompile)
+          hSupported hScope hRel hDefined hLength hSourceRun hCallReplay
+
+theorem compileStmt?_halt_sound_meta_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    {kind : Assembly.HaltKind}
+    (hCompile :
+      compileStmt? range program returns sourceScope stackLayout layout stmt =
+        some plan)
+    (hSupported : StmtOpenSupported returns stmt)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel stmt source =
+        .ok (Source.Outcome.halt kind sourceAfter, sourceCtxAfter))
+    (hCallReplay :
+      ∀ {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        stmt = .call targets functionName args →
+          CallHaltReplayForBelow fuel range program exprProgram target source
+            targets functionName args) :
+    ∃ haltTarget exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.halt kind haltTarget) ∧
+      SharedStateEqOutsideScratch range sourceAfter.shared
+        haltTarget.evm.toSharedState := by
+  have hNonCallHalt
+      (hCompileNon :
+        compileNonCallStmtSpan? range returns sourceScope stackLayout layout
+            stmt =
+          some plan)
+      (hOwned :
+        SourceLowering.SourceToLocals.Stmt.SourceOwned returns stmt) :
+      ∃ haltTarget exprFuel,
+        Expressions.Block.run exprProgram exprFuel plan.block target =
+          .ok (Expressions.Outcome.halt kind haltTarget) ∧
+        SharedStateEqOutsideScratch range sourceAfter.shared
+          haltTarget.evm.toSharedState := by
+    rcases
+        compileNonCallStmtSpan?_expressionsBlock_sound_of_source_run
+          hSpec hWordBytes hCompileNon hOwned hScope hRel hDefined hSourceRun
+      with ⟨result, exprFuel, hRun, hOutcomeRel⟩
+    rcases SpillOutcomeRel.halt_inv hOutcomeRel with
+      ⟨haltEVM, hResult, hHaltRel⟩
+    subst result
+    exact
+      ⟨target.withEVM haltEVM, exprFuel,
+        by simpa [SpillStmtCode.toExpressionsOutcome] using hRun,
+        by simpa [SpillHaltRel] using hHaltRel⟩
+  cases stmt with
+  | expr expr =>
+      exact hNonCallHalt
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtOpenSupported] using hSupported)
+  | let_ name value =>
+      exact hNonCallHalt
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtOpenSupported] using hSupported)
+  | assign name value =>
+      exact hNonCallHalt
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtOpenSupported] using hSupported)
+  | block body =>
+      exact hNonCallHalt
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtOpenSupported] using hSupported)
+  | if_ cond body =>
+      exact hNonCallHalt
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtOpenSupported] using hSupported)
+  | switch scrutinee cases defaultBody =>
+      exact hNonCallHalt
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtOpenSupported] using hSupported)
+  | for_ init cond post body =>
+      exact hNonCallHalt
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtOpenSupported] using hSupported)
+  | brk =>
+      exact hNonCallHalt
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtOpenSupported] using hSupported)
+  | cont =>
+      exact hNonCallHalt
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtOpenSupported] using hSupported)
+  | leave =>
+      unfold Source.Stmt.run at hSourceRun
+      cases hLeave : sourceCtx.leaveScope? with
+      | none =>
+          simp [hLeave, Source.invalid, Structured.invalid] at hSourceRun
+      | some leaveScope =>
+          simp [hLeave, Source.Outcome.leave, Source.Outcome.halt]
+            at hSourceRun
+          rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+          cases hOutcome
+  | call targets functionName args =>
+      have hCompileCall :
+          compileCall? range program sourceScope stackLayout layout targets
+              functionName args =
+            some plan := by
+        simpa [compileStmt?] using hCompile
+      have hCtx : sourceCtxAfter = sourceCtx :=
+        Source.Stmt.run_nonregular_ctx hSourceRun
+          (by
+            intro hMode
+            cases hMode)
+      subst sourceCtxAfter
+      exact
+        compileCall?_halt_sound_given_callReplayBelow
+          hSpec hWordBytes hCompileCall hRel hDefined
+          (ctx := sourceCtx) hSourceRun (hCallReplay rfl)
+  | terminal kind =>
+      exact hNonCallHalt
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtOpenSupported] using hSupported)
+  | terminalArgs kind args =>
+      exact hNonCallHalt
+        (by simpa [compileStmt?] using hCompile)
+        (by simpa [StmtOpenSupported] using hSupported)
+
+theorem compileStmtList?_halt_sound_meta_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {stmts : List Stmt} {plan : Plan}
+      {exprProgram : Expressions.Program}
+      {sourceCtx sourceCtxAfter : Source.Ctx}
+      {fuel : Nat} {source sourceAfter : Source.State}
+      {target : Expressions.RunState} {kind : Assembly.HaltKind},
+      compileStmtList? range program returns sourceScope stackLayout layout
+          stmts =
+        some plan →
+      StmtListOpenSupported returns stmts →
+      sourceCtx.scope = sourceScope →
+      SpillStateRel range sourceScope stackLayout layout source target.evm →
+      SpillLayout.StoreDefined source.vars layout →
+      target.evm.stack.length = stackLayout.length →
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel { stmts := stmts } source =
+        .ok (Source.Outcome.halt kind sourceAfter, sourceCtxAfter) →
+      (∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow fuel range program exprProgram callTarget callSource
+          targets functionName args) →
+      (∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallHaltReplayForBelow fuel range program exprProgram callTarget
+          callSource targets functionName args) →
+      ∃ haltTarget exprFuel,
+        Expressions.Block.run exprProgram exprFuel plan.block target =
+          .ok (Expressions.Outcome.halt kind haltTarget) ∧
+        SharedStateEqOutsideScratch range sourceAfter.shared
+          haltTarget.evm.toSharedState
+  | [], plan, exprProgram, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, kind, hCompile, _hSupported, _hScope, _hRel,
+      _hDefined, _hLength, hSourceRun, _hCallReplay, _hHaltReplay => by
+      have hPlan := compileStmtList?_eq_some_nil hCompile
+      subst plan
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          simp [Source.Block.runOpen, Source.Outcome.regular] at hSourceRun
+          cases hSourceRun.1
+  | stmt :: rest, plan, exprProgram, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceFinal, target, kind, hCompile, hSupported, hScope, hRel,
+      hDefined, hLength, hSourceRun, hCallReplay, hHaltReplay => by
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          have hCallReplayPred :
+              ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+                {targets : List Name} {functionName : Name}
+                {args : List (Expr 1)},
+                CallReplayForBelow fuel range program exprProgram callTarget
+                  callSource targets functionName args := by
+            intro callTarget callSource targets functionName args
+            exact CallReplayForBelow.mono (Nat.le_succ fuel) hCallReplay
+          have hHaltReplayPred :
+              ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+                {targets : List Name} {functionName : Name}
+                {args : List (Expr 1)},
+                CallHaltReplayForBelow fuel range program exprProgram
+                  callTarget callSource targets functionName args := by
+            intro callTarget callSource targets functionName args
+            exact CallHaltReplayForBelow.mono (Nat.le_succ fuel) hHaltReplay
+          rcases compileStmtList?_eq_some_cons hCompile with
+            ⟨head, tail, hHeadCompile, hTailCompile, hPlan⟩
+          rcases hSupported with ⟨hHeadSupported, hTailSupported⟩
+          cases hStmtRun :
+              Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+                program sourceCtx fuel stmt source with
+          | error err =>
+              simp [Source.Block.runOpen, hStmtRun] at hSourceRun
+          | ok stmtResult =>
+              rcases stmtResult with ⟨headOutcome, sourceCtxMid⟩
+              cases headOutcome with
+              | mk sourceHead mode =>
+                  cases mode with
+                  | regular =>
+                      have hTailSourceRun :
+                          Source.Block.runOpen
+                              Locals.Source.PrimitiveSemantics.structured
+                              program sourceCtxMid fuel { stmts := rest }
+                              sourceHead =
+                            .ok (Source.Outcome.halt kind sourceFinal,
+                              sourceCtxAfter) := by
+                        simpa [Source.Block.runOpen, hStmtRun] using
+                          hSourceRun
+                      have hHeadRegularSupported :
+                          StmtRegularOpenSupported returns stmt :=
+                        by
+                          cases stmt <;>
+                            try
+                              simpa [StmtOpenSupported,
+                                StmtRegularOpenSupported] using
+                                hHeadSupported
+                          case leave =>
+                            unfold Source.Stmt.run at hStmtRun
+                            cases hLeave : sourceCtx.leaveScope? with
+                            | none =>
+                                simp [hLeave, Source.invalid,
+                                  Structured.invalid] at hStmtRun
+                            | some scope =>
+                                simp [hLeave, Source.Outcome.leave]
+                                  at hStmtRun
+                                cases hStmtRun.1
+                      rcases
+                          compileStmt?_regular_sound_meta_exact_given_callReplayBelow
+                            hSpec hWordBytes hHeadCompile
+                            hHeadRegularSupported hScope hRel hDefined
+                            hLength hStmtRun
+                            (by
+                              intro targets functionName args hEq
+                              subst stmt
+                              exact hCallReplayPred) with
+                        ⟨headFinal, headFuel, hHeadRun, hHeadRel,
+                          hHeadDefined, hHeadLength, hHeadScope⟩
+                      rcases
+                          compileStmtList?_halt_sound_meta_given_callReplayBelow
+                            hSpec hWordBytes
+                            (target := target.withEVM headFinal)
+                            hTailCompile hTailSupported hHeadScope
+                            (by
+                              simpa [Structured.RunState.withEVM] using
+                                hHeadRel)
+                            hHeadDefined
+                            (by
+                              simpa [Structured.RunState.withEVM] using
+                                hHeadLength)
+                            hTailSourceRun hCallReplayPred hHaltReplayPred with
+                        ⟨haltTarget, tailFuel, hTailRun, hTailRel⟩
+                      subst plan
+                      rcases
+                          expressionsBlock_append_regular_exists exprProgram
+                            ⟨headFuel, hHeadRun⟩
+                            ⟨tailFuel, by
+                              simpa [Expressions.RunState.withEVM_withEVM]
+                                using hTailRun⟩ with
+                        ⟨exprFuel, hRun⟩
+                      exact ⟨haltTarget, exprFuel, hRun, hTailRel⟩
+                  | brk =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.brk]
+                        at hSourceRun
+                      cases hSourceRun.1
+                  | cont =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.cont]
+                        at hSourceRun
+                      cases hSourceRun.1
+                  | leave =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.leave]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | halt headKind =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.halt]
+                        at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, hCtx⟩
+                      cases hOutcome
+                      cases hCtx
+                      rcases
+                          compileStmt?_halt_sound_meta_given_callReplayBelow
+                            hSpec hWordBytes hHeadCompile hHeadSupported
+                            hScope hRel hDefined hStmtRun
+                            (by
+                              intro targets functionName args hEq
+                              subst stmt
+                              exact hHaltReplayPred) with
+                        ⟨headTarget, headFuel, hHeadRun, hHeadRel⟩
+                      subst plan
+                      rcases
+                          expressionsBlock_append_nonregular_exists exprProgram
+                            (left := head.block) (right := tail.block)
+                            (state := target)
+                            ⟨headFuel, hHeadRun⟩
+                            (by simp [Expressions.Outcome.halt]) with
+                        ⟨exprFuel, hRun⟩
+                      exact
+                        ⟨headTarget, exprFuel, hRun, hHeadRel⟩
+
+theorem compileBlockOpen?_halt_sound_meta_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState} {kind : Assembly.HaltKind}
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan)
+    (hSupported : BlockOpenSupported returns block)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel block source =
+        .ok (Source.Outcome.halt kind sourceAfter, sourceCtxAfter))
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow fuel range program exprProgram callTarget callSource
+          targets functionName args)
+    (hHaltReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallHaltReplayForBelow fuel range program exprProgram callTarget
+          callSource targets functionName args) :
+    ∃ haltTarget exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.halt kind haltTarget) ∧
+      SharedStateEqOutsideScratch range sourceAfter.shared
+        haltTarget.evm.toSharedState := by
+  cases block with
+  | mk stmts =>
+      exact
+        compileStmtList?_halt_sound_meta_given_callReplayBelow
+          hSpec hWordBytes (stmts := stmts)
+          (plan := plan) (exprProgram := exprProgram)
+          (sourceCtx := sourceCtx) (sourceCtxAfter := sourceCtxAfter)
+          (fuel := fuel) (source := source) (sourceAfter := sourceAfter)
+          (target := target) (kind := kind)
+          (compileBlockOpen?_eq_some hCompile)
+          hSupported hScope hRel hDefined hLength hSourceRun hCallReplay
+          hHaltReplay
+
+theorem stmtRegularOpenSupported_of_openSupported_regular_run
+    {returns : List Name} {program : Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {stmt : Stmt}
+    (hSupported : StmtOpenSupported returns stmt)
+    (hSourceRun :
+      Source.Stmt.run Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel stmt source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    StmtRegularOpenSupported returns stmt := by
+  cases stmt <;>
+    try simpa [StmtOpenSupported, StmtRegularOpenSupported] using hSupported
+  case leave =>
+    unfold Source.Stmt.run at hSourceRun
+    cases hLeave : sourceCtx.leaveScope? with
+    | none =>
+        simp [hLeave, Source.invalid, Structured.invalid] at hSourceRun
+    | some scope =>
+        simp [hLeave, Source.Outcome.leave] at hSourceRun
+        cases hSourceRun.1
+
+theorem stmtListRegularOpenSupported_of_openSupported_regular_run
+    {returns : List Name} {program : Program} :
+    ∀ {stmts : List Stmt}
+      {sourceCtx sourceCtxAfter : Source.Ctx}
+      {fuel : Nat} {source sourceAfter : Source.State},
+      StmtListOpenSupported returns stmts →
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel { stmts := stmts } source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter) →
+      StmtListRegularOpenSupported returns stmts
+  | [], sourceCtx, sourceCtxAfter, fuel, source, sourceAfter,
+      _hSupported, hSourceRun => by
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          simp [Source.Block.runOpen] at hSourceRun
+          exact True.intro
+  | stmt :: rest, sourceCtx, sourceCtxAfter, fuel, source, sourceAfter,
+      hSupported, hSourceRun => by
+      rcases hSupported with ⟨hHeadSupported, hTailSupported⟩
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          cases hStmtRun :
+              Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+                program sourceCtx fuel stmt source with
+          | error err =>
+              simp [Source.Block.runOpen, hStmtRun] at hSourceRun
+          | ok stmtResult =>
+              rcases stmtResult with ⟨headOutcome, sourceCtxMid⟩
+              cases headOutcome with
+              | mk sourceHead mode =>
+                  cases mode with
+                  | regular =>
+                      have hTailSourceRun :
+                          Source.Block.runOpen
+                              Locals.Source.PrimitiveSemantics.structured
+                              program sourceCtxMid fuel { stmts := rest }
+                              sourceHead =
+                            .ok (Source.Outcome.regular sourceAfter,
+                              sourceCtxAfter) := by
+                        simpa [Source.Block.runOpen, hStmtRun] using
+                          hSourceRun
+                      exact
+                        ⟨stmtRegularOpenSupported_of_openSupported_regular_run
+                            hHeadSupported hStmtRun,
+                          stmtListRegularOpenSupported_of_openSupported_regular_run
+                            hTailSupported hTailSourceRun⟩
+                  | brk =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.brk]
+                        at hSourceRun
+                      cases hSourceRun.1
+                  | cont =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.cont]
+                        at hSourceRun
+                      cases hSourceRun.1
+                  | leave =>
+                      simp [Source.Block.runOpen, hStmtRun,
+                        Source.Outcome.leave] at hSourceRun
+                      cases hSourceRun.1
+                  | halt kind =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.halt]
+                        at hSourceRun
+                      cases hSourceRun.1
+
+theorem blockRegularOpenSupported_of_openSupported_regular_run
+    {returns : List Name} {program : Program}
+    {block : Block}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    (hSupported : BlockOpenSupported returns block)
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel block source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    BlockRegularOpenSupported returns block := by
+  cases block with
+  | mk stmts =>
+      exact
+        stmtListRegularOpenSupported_of_openSupported_regular_run
+          hSupported hSourceRun
+
+theorem compileStmtList?_leave_sound_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {stmts : List Stmt} {plan : Plan}
+      {exprProgram : Expressions.Program}
+      {sourceCtx sourceCtxAfter : Source.Ctx}
+      {fuel : Nat} {source sourceAfter : Source.State}
+      {target : Expressions.RunState}
+      {values : List Word} {frame : Structured.ReturnDest}
+      {returnStack : List Structured.ReturnDest},
+      compileStmtList? range program returns sourceScope stackLayout layout
+          stmts =
+        some plan →
+      StmtListOpenSupported returns stmts →
+      sourceCtx.scope = sourceScope →
+      SpillStateRel range sourceScope stackLayout layout source target.evm →
+      SpillLayout.StoreDefined source.vars layout →
+      target.evm.stack.length = stackLayout.length →
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel { stmts := stmts } source =
+        .ok (Source.Outcome.leave sourceAfter, sourceCtxAfter) →
+      Source.Store.lookupMany returns sourceAfter.vars = some values →
+      (∀ leaveScope name,
+        sourceCtx.leaveScope? = some leaveScope →
+        name ∈ returns →
+        name ∈ leaveScope) →
+      target.returns = frame :: returnStack →
+      (∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayFor range program exprProgram callTarget callSource targets
+          functionName args) →
+      ∃ final exprFuel,
+        Expressions.Block.run exprProgram exprFuel plan.block target =
+          .ok (Expressions.Outcome.leave (target.withEVM final)) ∧
+        final.stack = values.reverse ∧
+        SharedStateEqOutsideScratch range sourceAfter.shared
+          final.toSharedState ∧
+        ScratchRegionReady final.toMachineState range.base range.words
+  | [], plan, exprProgram, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, values, frame, returnStack, hCompile, _hSupported,
+      _hScope, _hRel, _hDefined, _hLength, hSourceRun, _hLookup,
+      _hReturnsInLeaveScope, _hReturns, _hCallReplay => by
+      have hPlan := compileStmtList?_eq_some_nil hCompile
+      subst plan
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          simp [Source.Block.runOpen, Source.Outcome.regular] at hSourceRun
+          cases hSourceRun.1
+  | stmt :: rest, plan, exprProgram, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceFinal, target, values, frame, returnStack, hCompile, hSupported,
+      hScope, hRel, hDefined, hLength, hSourceRun, hLookup,
+      hReturnsInLeaveScope, hReturns, hCallReplay => by
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          rcases compileStmtList?_eq_some_cons hCompile with
+            ⟨head, tail, hHeadCompile, hTailCompile, hPlan⟩
+          rcases hSupported with ⟨hHeadSupported, hTailSupported⟩
+          cases hStmtRun :
+              Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+                program sourceCtx fuel stmt source with
+          | error err =>
+              simp [Source.Block.runOpen, hStmtRun] at hSourceRun
+          | ok stmtResult =>
+              rcases stmtResult with ⟨headOutcome, sourceCtxMid⟩
+              cases headOutcome with
+              | mk sourceHead mode =>
+                  cases mode with
+                  | regular =>
+                      have hTailSourceRun :
+                          Source.Block.runOpen
+                              Locals.Source.PrimitiveSemantics.structured
+                              program sourceCtxMid fuel { stmts := rest }
+                              sourceHead =
+                            .ok (Source.Outcome.leave sourceFinal,
+                              sourceCtxAfter) := by
+                        simpa [Source.Block.runOpen, hStmtRun] using
+                          hSourceRun
+                      have hHeadRegularSupported :
+                          StmtRegularOpenSupported returns stmt :=
+                        stmtRegularOpenSupported_of_openSupported_regular_run
+                          hHeadSupported hStmtRun
+                      rcases
+                          compileStmt?_regular_sound_meta_exact_given_callReplay
+                            hSpec hWordBytes hHeadCompile
+                            hHeadRegularSupported hScope hRel hDefined
+                            hLength hStmtRun
+                            (by
+                              intro targets functionName args hEq
+                              subst stmt
+                              exact hCallReplay) with
+                        ⟨headFinal, headFuel, hHeadRun, hHeadRel,
+                          hHeadDefined, hHeadLength, hHeadScope⟩
+                      have hLeaveScopeEq :
+                          sourceCtxMid.leaveScope? =
+                            sourceCtx.leaveScope? :=
+                        source_stmt_regular_leaveScope_eq hStmtRun
+                      have hReturnsInMid :
+                          ∀ leaveScope name,
+                            sourceCtxMid.leaveScope? = some leaveScope →
+                            name ∈ returns →
+                            name ∈ leaveScope := by
+                        intro leaveScope name hMid hNameMem
+                        exact hReturnsInLeaveScope leaveScope name
+                          (by simpa [hLeaveScopeEq] using hMid) hNameMem
+                      rcases
+                          compileStmtList?_leave_sound_exact_given_callReplay
+                            hSpec hWordBytes
+                            (target := target.withEVM headFinal)
+                            hTailCompile hTailSupported hHeadScope
+                            (by
+                              simpa [Structured.RunState.withEVM] using
+                                hHeadRel)
+                            hHeadDefined
+                            (by
+                              simpa [Structured.RunState.withEVM] using
+                                hHeadLength)
+                            hTailSourceRun hLookup hReturnsInMid
+                            (by simpa [Structured.RunState.withEVM] using
+                              hReturns)
+                            hCallReplay with
+                        ⟨final, tailFuel, hTailRun, hFinalStack, hFinalShared,
+                          hFinalReady⟩
+                      subst plan
+                      rcases
+                          expressionsBlock_append_regular_exists exprProgram
+                            ⟨headFuel, hHeadRun⟩
+                            ⟨tailFuel, by
+                              simpa [Expressions.RunState.withEVM_withEVM]
+                                using hTailRun⟩ with
+                        ⟨exprFuel, hRun⟩
+                      exact
+                        ⟨final, exprFuel, hRun, hFinalStack, hFinalShared,
+                          hFinalReady⟩
+                  | brk =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.brk]
+                        at hSourceRun
+                      cases hSourceRun.1
+                  | cont =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.cont]
+                        at hSourceRun
+                      cases hSourceRun.1
+                  | leave =>
+                      simp [Source.Block.runOpen, hStmtRun,
+                        Source.Outcome.leave] at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                      rcases
+                          compileStmt?_leave_sound_exact_given_callReplay
+                            hSpec hWordBytes hHeadCompile hHeadSupported
+                            hScope hRel hDefined hLength hStmtRun hLookup
+                            hReturnsInLeaveScope hReturns with
+                        ⟨final, headFuel, hHeadRun, hFinalStack,
+                          hFinalShared, hFinalReady⟩
+                      subst plan
+                      rcases
+                          expressionsBlock_append_nonregular_exists exprProgram
+                            (left := head.block) (right := tail.block)
+                            (state := target)
+                            ⟨headFuel, hHeadRun⟩
+                            (by simp [Expressions.Outcome.leave]) with
+                        ⟨exprFuel, hRun⟩
+                      exact
+                        ⟨final, exprFuel, hRun, hFinalStack, hFinalShared,
+                          hFinalReady⟩
+                  | halt kind =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.halt]
+                        at hSourceRun
+                      cases hSourceRun.1
+
+theorem compileStmtList?_leave_sound_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {stmts : List Stmt} {plan : Plan}
+      {exprProgram : Expressions.Program}
+      {sourceCtx sourceCtxAfter : Source.Ctx}
+      {fuel : Nat} {source sourceAfter : Source.State}
+      {target : Expressions.RunState}
+      {values : List Word} {frame : Structured.ReturnDest}
+      {returnStack : List Structured.ReturnDest},
+      compileStmtList? range program returns sourceScope stackLayout layout
+          stmts =
+        some plan →
+      StmtListOpenSupported returns stmts →
+      sourceCtx.scope = sourceScope →
+      SpillStateRel range sourceScope stackLayout layout source target.evm →
+      SpillLayout.StoreDefined source.vars layout →
+      target.evm.stack.length = stackLayout.length →
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel { stmts := stmts } source =
+        .ok (Source.Outcome.leave sourceAfter, sourceCtxAfter) →
+      Source.Store.lookupMany returns sourceAfter.vars = some values →
+      (∀ leaveScope name,
+        sourceCtx.leaveScope? = some leaveScope →
+        name ∈ returns →
+        name ∈ leaveScope) →
+      target.returns = frame :: returnStack →
+      (∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow fuel range program exprProgram callTarget callSource
+          targets functionName args) →
+      ∃ final exprFuel,
+        Expressions.Block.run exprProgram exprFuel plan.block target =
+          .ok (Expressions.Outcome.leave (target.withEVM final)) ∧
+        final.stack = values.reverse ∧
+        SharedStateEqOutsideScratch range sourceAfter.shared
+          final.toSharedState ∧
+        ScratchRegionReady final.toMachineState range.base range.words
+  | [], plan, exprProgram, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceAfter, target, values, frame, returnStack, hCompile, _hSupported,
+      _hScope, _hRel, _hDefined, _hLength, hSourceRun, _hLookup,
+      _hReturnsInLeaveScope, _hReturns, _hCallReplay => by
+      have hPlan := compileStmtList?_eq_some_nil hCompile
+      subst plan
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          simp [Source.Block.runOpen, Source.Outcome.regular] at hSourceRun
+          cases hSourceRun.1
+  | stmt :: rest, plan, exprProgram, sourceCtx, sourceCtxAfter, fuel, source,
+      sourceFinal, target, values, frame, returnStack, hCompile, hSupported,
+      hScope, hRel, hDefined, hLength, hSourceRun, hLookup,
+      hReturnsInLeaveScope, hReturns, hCallReplay => by
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hSourceRun
+      | succ fuel =>
+          have hCallReplayPred :
+              ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+                {targets : List Name} {functionName : Name}
+                {args : List (Expr 1)},
+                CallReplayForBelow fuel range program exprProgram callTarget
+                  callSource targets functionName args := by
+            intro callTarget callSource targets functionName args
+            exact CallReplayForBelow.mono (Nat.le_succ fuel) hCallReplay
+          rcases compileStmtList?_eq_some_cons hCompile with
+            ⟨head, tail, hHeadCompile, hTailCompile, hPlan⟩
+          rcases hSupported with ⟨hHeadSupported, hTailSupported⟩
+          cases hStmtRun :
+              Source.Stmt.run Locals.Source.PrimitiveSemantics.structured
+                program sourceCtx fuel stmt source with
+          | error err =>
+              simp [Source.Block.runOpen, hStmtRun] at hSourceRun
+          | ok stmtResult =>
+              rcases stmtResult with ⟨headOutcome, sourceCtxMid⟩
+              cases headOutcome with
+              | mk sourceHead mode =>
+                  cases mode with
+                  | regular =>
+                      have hTailSourceRun :
+                          Source.Block.runOpen
+                              Locals.Source.PrimitiveSemantics.structured
+                              program sourceCtxMid fuel { stmts := rest }
+                              sourceHead =
+                            .ok (Source.Outcome.leave sourceFinal,
+                              sourceCtxAfter) := by
+                        simpa [Source.Block.runOpen, hStmtRun] using
+                          hSourceRun
+                      have hHeadRegularSupported :
+                          StmtRegularOpenSupported returns stmt :=
+                        stmtRegularOpenSupported_of_openSupported_regular_run
+                          hHeadSupported hStmtRun
+                      rcases
+                          compileStmt?_regular_sound_meta_exact_given_callReplayBelow
+                            hSpec hWordBytes hHeadCompile
+                            hHeadRegularSupported hScope hRel hDefined
+                            hLength hStmtRun
+                            (by
+                              intro targets functionName args hEq
+                              subst stmt
+                              exact hCallReplayPred) with
+                        ⟨headFinal, headFuel, hHeadRun, hHeadRel,
+                          hHeadDefined, hHeadLength, hHeadScope⟩
+                      have hLeaveScopeEq :
+                          sourceCtxMid.leaveScope? =
+                            sourceCtx.leaveScope? :=
+                        source_stmt_regular_leaveScope_eq hStmtRun
+                      have hReturnsInMid :
+                          ∀ leaveScope name,
+                            sourceCtxMid.leaveScope? = some leaveScope →
+                            name ∈ returns →
+                            name ∈ leaveScope := by
+                        intro leaveScope name hMid hNameMem
+                        exact hReturnsInLeaveScope leaveScope name
+                          (by simpa [hLeaveScopeEq] using hMid) hNameMem
+                      rcases
+                          compileStmtList?_leave_sound_exact_given_callReplayBelow
+                            hSpec hWordBytes
+                            (target := target.withEVM headFinal)
+                            hTailCompile hTailSupported hHeadScope
+                            (by
+                              simpa [Structured.RunState.withEVM] using
+                                hHeadRel)
+                            hHeadDefined
+                            (by
+                              simpa [Structured.RunState.withEVM] using
+                                hHeadLength)
+                            hTailSourceRun hLookup hReturnsInMid
+                            (by simpa [Structured.RunState.withEVM] using
+                              hReturns)
+                            hCallReplayPred with
+                        ⟨final, tailFuel, hTailRun, hFinalStack, hFinalShared,
+                          hFinalReady⟩
+                      subst plan
+                      rcases
+                          expressionsBlock_append_regular_exists exprProgram
+                            ⟨headFuel, hHeadRun⟩
+                            ⟨tailFuel, by
+                              simpa [Expressions.RunState.withEVM_withEVM]
+                                using hTailRun⟩ with
+                        ⟨exprFuel, hRun⟩
+                      exact
+                        ⟨final, exprFuel, hRun, hFinalStack, hFinalShared,
+                          hFinalReady⟩
+                  | brk =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.brk]
+                        at hSourceRun
+                      cases hSourceRun.1
+                  | cont =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.cont]
+                        at hSourceRun
+                      cases hSourceRun.1
+                  | leave =>
+                      simp [Source.Block.runOpen, hStmtRun,
+                        Source.Outcome.leave] at hSourceRun
+                      rcases hSourceRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                      rcases
+                          compileStmt?_leave_sound_exact_given_callReplay
+                            hSpec hWordBytes hHeadCompile hHeadSupported
+                            hScope hRel hDefined hLength hStmtRun hLookup
+                            hReturnsInLeaveScope hReturns with
+                        ⟨final, headFuel, hHeadRun, hFinalStack,
+                          hFinalShared, hFinalReady⟩
+                      subst plan
+                      rcases
+                          expressionsBlock_append_nonregular_exists exprProgram
+                            (left := head.block) (right := tail.block)
+                            (state := target)
+                            ⟨headFuel, hHeadRun⟩
+                            (by simp [Expressions.Outcome.leave]) with
+                        ⟨exprFuel, hRun⟩
+                      exact
+                        ⟨final, exprFuel, hRun, hFinalStack, hFinalShared,
+                          hFinalReady⟩
+                  | halt kind =>
+                      simp [Source.Block.runOpen, hStmtRun, Source.Outcome.halt]
+                        at hSourceRun
+                      cases hSourceRun.1
+
+theorem compileBlockOpen?_leave_sound_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    {values : List Word} {frame : Structured.ReturnDest}
+    {returnStack : List Structured.ReturnDest}
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan)
+    (hSupported : BlockOpenSupported returns block)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel block source =
+        .ok (Source.Outcome.leave sourceAfter, sourceCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany returns sourceAfter.vars = some values)
+    (hReturnsInLeaveScope :
+      ∀ leaveScope name,
+        sourceCtx.leaveScope? = some leaveScope →
+        name ∈ returns →
+        name ∈ leaveScope)
+    (hReturns : target.returns = frame :: returnStack)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayFor range program exprProgram callTarget callSource targets
+          functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.leave (target.withEVM final)) ∧
+      final.stack = values.reverse ∧
+      SharedStateEqOutsideScratch range sourceAfter.shared
+        final.toSharedState ∧
+      ScratchRegionReady final.toMachineState range.base range.words := by
+  cases block with
+  | mk stmts =>
+      exact
+        compileStmtList?_leave_sound_exact_given_callReplay
+          hSpec hWordBytes (stmts := stmts)
+          (plan := plan) (exprProgram := exprProgram)
+          (sourceCtx := sourceCtx) (sourceCtxAfter := sourceCtxAfter)
+          (fuel := fuel) (source := source) (sourceAfter := sourceAfter)
+          (target := target) (values := values) (frame := frame)
+          (returnStack := returnStack)
+          (compileBlockOpen?_eq_some hCompile)
+          hSupported hScope hRel hDefined hLength hSourceRun hLookup
+          hReturnsInLeaveScope hReturns hCallReplay
+
+theorem compileBlockOpen?_leave_sound_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    {values : List Word} {frame : Structured.ReturnDest}
+    {returnStack : List Structured.ReturnDest}
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan)
+    (hSupported : BlockOpenSupported returns block)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel block source =
+        .ok (Source.Outcome.leave sourceAfter, sourceCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany returns sourceAfter.vars = some values)
+    (hReturnsInLeaveScope :
+      ∀ leaveScope name,
+        sourceCtx.leaveScope? = some leaveScope →
+        name ∈ returns →
+        name ∈ leaveScope)
+    (hReturns : target.returns = frame :: returnStack)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow fuel range program exprProgram callTarget callSource
+          targets functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.leave (target.withEVM final)) ∧
+      final.stack = values.reverse ∧
+      SharedStateEqOutsideScratch range sourceAfter.shared
+        final.toSharedState ∧
+      ScratchRegionReady final.toMachineState range.base range.words := by
+  cases block with
+  | mk stmts =>
+      exact
+        compileStmtList?_leave_sound_exact_given_callReplayBelow
+          hSpec hWordBytes (stmts := stmts)
+          (plan := plan) (exprProgram := exprProgram)
+          (sourceCtx := sourceCtx) (sourceCtxAfter := sourceCtxAfter)
+          (fuel := fuel) (source := source) (sourceAfter := sourceAfter)
+          (target := target) (values := values) (frame := frame)
+          (returnStack := returnStack)
+          (compileBlockOpen?_eq_some hCompile)
+          hSupported hScope hRel hDefined hLength hSourceRun hLookup
+          hReturnsInLeaveScope hReturns hCallReplay
+
+theorem compileFunDef?_regular_body_returned_sound_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    {exprProgram : Expressions.Program}
+    {sourceEntry bodyAfter : Source.State}
+    {bodyCtxAfter : Source.Ctx}
+    {bodyFuel : Nat} {returnValues : List Word}
+    {target : Expressions.RunState}
+    (hCompile : compileFunDef? range program fn = some proc)
+    (hSupported : BlockRegularOpenSupported fn.returns fn.body)
+    (hRel :
+      SpillStateRel range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params) sourceEntry target.evm)
+    (hDefined :
+      SpillLayout.StoreDefined sourceEntry.vars
+        (layoutOfParamStack fn.params))
+    (hLength : target.evm.stack.length = fn.params.reverse.length)
+    (hBodyRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+          (sourceEntry.withVars
+            (Source.Store.initReturns fn.returns sourceEntry.vars)) =
+        .ok (Source.Outcome.regular bodyAfter, bodyCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany fn.returns bodyAfter.vars =
+        some returnValues)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayFor range program exprProgram callTarget callSource targets
+          functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel proc.body target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      final.stack = returnValues.reverse ∧
+      SharedStateEqOutsideScratch range bodyAfter.shared final.toSharedState ∧
+      ScratchRegionReady final.toMachineState range.base range.words := by
+  rcases compileFunDef?_eq_some_components hCompile with
+    ⟨init, body, fullBody, hInit, hBody, hFull, hProc⟩
+  rcases
+      compileFunDef?_init_regular_sound_exact hSpec hWordBytes
+        (exprProgram := exprProgram) hCompile hRel hDefined hLength with
+    ⟨init', initFinal, initFuel, hInit', hInitRun, hInitRel,
+      hInitDefined, hInitLength, hInitScope⟩
+  rw [hInit] at hInit'
+  cases hInit'
+  have hBodyScope :
+      (Source.FunDef.bodyCtx fn).scope = init.sourceScope := by
+    rw [hInitScope]
+    simp [Source.FunDef.bodyCtx]
+  rcases
+      compileBlockOpen?_regular_sound_meta_exact_given_callReplay
+        hSpec hWordBytes (exprProgram := exprProgram)
+        (target := target.withEVM initFinal) hBody hSupported
+        hBodyScope
+        (by
+          simpa [Structured.RunState.withEVM] using hInitRel)
+        hInitDefined
+        (by
+          simpa [Structured.RunState.withEVM] using hInitLength)
+        hBodyRun hCallReplay with
+    ⟨bodyFinal, bodyFuelExpr, hBodyTargetRun, hBodyRel, hBodyDefined,
+      hBodyLength, _hBodyScopeAfter⟩
+  have hInitBodyRun :
+      ∃ exprFuel,
+        Expressions.Block.run exprProgram exprFuel
+          (ExpressionsBlock.append init.block body.block) target =
+        .ok (Expressions.Outcome.regular (target.withEVM bodyFinal)) := by
+    exact
+      expressionsBlock_append_regular_exists exprProgram
+        ⟨initFuel, hInitRun⟩
+        ⟨bodyFuelExpr, by
+          simpa [Expressions.RunState.withEVM_withEVM] using
+            hBodyTargetRun⟩
+  let combined : Plan :=
+    { sourceScope := body.sourceScope
+      stackLayout := body.stackLayout
+      layout := body.layout
+      block := ExpressionsBlock.append init.block body.block }
+  have hPlanRun :
+      ∃ exprFuel,
+        Expressions.Block.run exprProgram exprFuel combined.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM bodyFinal)) := by
+    simpa [combined] using hInitBodyRun
+  have hFullCombined :
+      appendReturnFallthrough? range fn.returns combined = some fullBody := by
+    simpa [combined] using hFull
+  rcases
+      appendReturnFallthrough?_regular_sound_exact_stack hSpec hWordBytes
+        (exprProgram := exprProgram) hFullCombined hPlanRun hBodyRel hBodyDefined
+        hLookup hBodyLength with
+    ⟨final, fullFuel, hFullRun, hFinalStack, hFinalRel⟩
+  subst proc
+  exact
+    ⟨final, fullFuel,
+      by simpa using hFullRun,
+      hFinalStack,
+      hFinalRel.1,
+      hFinalRel.2.1⟩
+
+theorem compileFunDef?_regular_body_returned_sound_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    {exprProgram : Expressions.Program}
+    {sourceEntry bodyAfter : Source.State}
+    {bodyCtxAfter : Source.Ctx}
+    {bodyFuel : Nat} {returnValues : List Word}
+    {target : Expressions.RunState}
+    (hCompile : compileFunDef? range program fn = some proc)
+    (hSupported : BlockRegularOpenSupported fn.returns fn.body)
+    (hRel :
+      SpillStateRel range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params) sourceEntry target.evm)
+    (hDefined :
+      SpillLayout.StoreDefined sourceEntry.vars
+        (layoutOfParamStack fn.params))
+    (hLength : target.evm.stack.length = fn.params.reverse.length)
+    (hBodyRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+          (sourceEntry.withVars
+            (Source.Store.initReturns fn.returns sourceEntry.vars)) =
+        .ok (Source.Outcome.regular bodyAfter, bodyCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany fn.returns bodyAfter.vars =
+        some returnValues)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow bodyFuel range program exprProgram callTarget
+          callSource targets functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel proc.body target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      final.stack = returnValues.reverse ∧
+      SharedStateEqOutsideScratch range bodyAfter.shared final.toSharedState ∧
+      ScratchRegionReady final.toMachineState range.base range.words := by
+  rcases compileFunDef?_eq_some_components hCompile with
+    ⟨init, body, fullBody, hInit, hBody, hFull, hProc⟩
+  rcases
+      compileFunDef?_init_regular_sound_exact hSpec hWordBytes
+        (exprProgram := exprProgram) hCompile hRel hDefined hLength with
+    ⟨init', initFinal, initFuel, hInit', hInitRun, hInitRel,
+      hInitDefined, hInitLength, hInitScope⟩
+  rw [hInit] at hInit'
+  cases hInit'
+  have hBodyScope :
+      (Source.FunDef.bodyCtx fn).scope = init.sourceScope := by
+    rw [hInitScope]
+    simp [Source.FunDef.bodyCtx]
+  rcases
+      compileBlockOpen?_regular_sound_meta_exact_given_callReplayBelow
+        hSpec hWordBytes (exprProgram := exprProgram)
+        (target := target.withEVM initFinal) hBody hSupported
+        hBodyScope
+        (by
+          simpa [Structured.RunState.withEVM] using hInitRel)
+        hInitDefined
+        (by
+          simpa [Structured.RunState.withEVM] using hInitLength)
+        hBodyRun hCallReplay with
+    ⟨bodyFinal, bodyFuelExpr, hBodyTargetRun, hBodyRel, hBodyDefined,
+      hBodyLength, _hBodyScopeAfter⟩
+  have hInitBodyRun :
+      ∃ exprFuel,
+        Expressions.Block.run exprProgram exprFuel
+          (ExpressionsBlock.append init.block body.block) target =
+        .ok (Expressions.Outcome.regular (target.withEVM bodyFinal)) := by
+    exact
+      expressionsBlock_append_regular_exists exprProgram
+        ⟨initFuel, hInitRun⟩
+        ⟨bodyFuelExpr, by
+          simpa [Expressions.RunState.withEVM_withEVM] using
+            hBodyTargetRun⟩
+  let combined : Plan :=
+    { sourceScope := body.sourceScope
+      stackLayout := body.stackLayout
+      layout := body.layout
+      block := ExpressionsBlock.append init.block body.block }
+  have hPlanRun :
+      ∃ exprFuel,
+        Expressions.Block.run exprProgram exprFuel combined.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM bodyFinal)) := by
+    simpa [combined] using hInitBodyRun
+  have hFullCombined :
+      appendReturnFallthrough? range fn.returns combined = some fullBody := by
+    simpa [combined] using hFull
+  rcases
+      appendReturnFallthrough?_regular_sound_exact_stack hSpec hWordBytes
+        (exprProgram := exprProgram) hFullCombined hPlanRun hBodyRel hBodyDefined
+        hLookup hBodyLength with
+    ⟨final, fullFuel, hFullRun, hFinalStack, hFinalRel⟩
+  subst proc
+  exact
+    ⟨final, fullFuel,
+      by simpa using hFullRun,
+      hFinalStack,
+      hFinalRel.1,
+      hFinalRel.2.1⟩
+
+theorem compileFunDef?_leave_body_returned_sound_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    {exprProgram : Expressions.Program}
+    {sourceEntry bodyAfter : Source.State}
+    {bodyCtxAfter : Source.Ctx}
+    {bodyFuel : Nat} {returnValues : List Word}
+    {target : Expressions.RunState}
+    {frame : Structured.ReturnDest}
+    {returnStack : List Structured.ReturnDest}
+    (hCompile : compileFunDef? range program fn = some proc)
+    (hSupported : BlockOpenSupported fn.returns fn.body)
+    (hRel :
+      SpillStateRel range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params) sourceEntry target.evm)
+    (hDefined :
+      SpillLayout.StoreDefined sourceEntry.vars
+        (layoutOfParamStack fn.params))
+    (hLength : target.evm.stack.length = fn.params.reverse.length)
+    (hBodyRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+          (sourceEntry.withVars
+            (Source.Store.initReturns fn.returns sourceEntry.vars)) =
+        .ok (Source.Outcome.leave bodyAfter, bodyCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany fn.returns bodyAfter.vars =
+        some returnValues)
+    (hReturns : target.returns = frame :: returnStack)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayFor range program exprProgram callTarget callSource targets
+          functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel proc.body target =
+        .ok (Expressions.Outcome.leave (target.withEVM final)) ∧
+      final.stack = returnValues.reverse ∧
+      SharedStateEqOutsideScratch range bodyAfter.shared final.toSharedState ∧
+      ScratchRegionReady final.toMachineState range.base range.words := by
+  rcases compileFunDef?_eq_some_components hCompile with
+    ⟨init, body, fullBody, hInit, hBody, hFull, hProc⟩
+  rcases
+      compileFunDef?_init_regular_sound_exact hSpec hWordBytes
+        (exprProgram := exprProgram) hCompile hRel hDefined hLength with
+    ⟨init', initFinal, initFuel, hInit', hInitRun, hInitRel,
+      hInitDefined, hInitLength, hInitScope⟩
+  rw [hInit] at hInit'
+  cases hInit'
+  have hBodyScope :
+      (Source.FunDef.bodyCtx fn).scope = init.sourceScope := by
+    rw [hInitScope]
+    simp [Source.FunDef.bodyCtx]
+  have hReturnsInLeaveScope :
+      ∀ leaveScope name,
+        (Source.FunDef.bodyCtx fn).leaveScope? = some leaveScope →
+        name ∈ fn.returns →
+        name ∈ leaveScope := by
+    intro leaveScope name hLeave hNameMem
+    simp [Source.FunDef.bodyCtx, Source.Ctx.withLeaveScope] at hLeave
+    subst leaveScope
+    exact List.mem_append_left fn.params hNameMem
+  rcases
+      compileBlockOpen?_leave_sound_exact_given_callReplay
+        hSpec hWordBytes (exprProgram := exprProgram)
+        (target := target.withEVM initFinal) hBody hSupported hBodyScope
+        (by
+          simpa [Structured.RunState.withEVM] using hInitRel)
+        hInitDefined
+        (by
+          simpa [Structured.RunState.withEVM] using hInitLength)
+        hBodyRun hLookup hReturnsInLeaveScope
+        (by simpa [Structured.RunState.withEVM] using hReturns)
+        hCallReplay with
+    ⟨bodyFinal, bodyFuelExpr, hBodyTargetRun, hBodyFinalStack,
+      hBodyShared, hBodyReady⟩
+  have hInitBodyRun :
+      ∃ exprFuel,
+        Expressions.Block.run exprProgram exprFuel
+          (ExpressionsBlock.append init.block body.block) target =
+        .ok (Expressions.Outcome.leave (target.withEVM bodyFinal)) := by
+    exact
+      expressionsBlock_append_regular_exists exprProgram
+        ⟨initFuel, hInitRun⟩
+        ⟨bodyFuelExpr, by
+          simpa [Expressions.RunState.withEVM_withEVM] using
+            hBodyTargetRun⟩
+  let combined : Plan :=
+    { sourceScope := body.sourceScope
+      stackLayout := body.stackLayout
+      layout := body.layout
+      block := ExpressionsBlock.append init.block body.block }
+  have hPlanRun :
+      ∃ exprFuel,
+        Expressions.Block.run exprProgram exprFuel combined.block target =
+        .ok (Expressions.Outcome.leave (target.withEVM bodyFinal)) := by
+    simpa [combined] using hInitBodyRun
+  have hFullCombined :
+      appendReturnFallthrough? range fn.returns combined = some fullBody := by
+    simpa [combined] using hFull
+  rcases
+      appendReturnFallthrough?_leave_passthrough
+        (exprProgram := exprProgram) hFullCombined hPlanRun with
+    ⟨fullFuel, hFullRun⟩
+  subst proc
+  exact
+    ⟨bodyFinal, fullFuel,
+      by simpa using hFullRun,
+      hBodyFinalStack,
+      hBodyShared,
+      hBodyReady⟩
+
+theorem compileFunDef?_leave_body_returned_sound_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    {exprProgram : Expressions.Program}
+    {sourceEntry bodyAfter : Source.State}
+    {bodyCtxAfter : Source.Ctx}
+    {bodyFuel : Nat} {returnValues : List Word}
+    {target : Expressions.RunState}
+    {frame : Structured.ReturnDest}
+    {returnStack : List Structured.ReturnDest}
+    (hCompile : compileFunDef? range program fn = some proc)
+    (hSupported : BlockOpenSupported fn.returns fn.body)
+    (hRel :
+      SpillStateRel range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params) sourceEntry target.evm)
+    (hDefined :
+      SpillLayout.StoreDefined sourceEntry.vars
+        (layoutOfParamStack fn.params))
+    (hLength : target.evm.stack.length = fn.params.reverse.length)
+    (hBodyRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+          (sourceEntry.withVars
+            (Source.Store.initReturns fn.returns sourceEntry.vars)) =
+        .ok (Source.Outcome.leave bodyAfter, bodyCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany fn.returns bodyAfter.vars =
+        some returnValues)
+    (hReturns : target.returns = frame :: returnStack)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow bodyFuel range program exprProgram callTarget
+          callSource targets functionName args) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel proc.body target =
+        .ok (Expressions.Outcome.leave (target.withEVM final)) ∧
+      final.stack = returnValues.reverse ∧
+      SharedStateEqOutsideScratch range bodyAfter.shared final.toSharedState ∧
+      ScratchRegionReady final.toMachineState range.base range.words := by
+  rcases compileFunDef?_eq_some_components hCompile with
+    ⟨init, body, fullBody, hInit, hBody, hFull, hProc⟩
+  rcases
+      compileFunDef?_init_regular_sound_exact hSpec hWordBytes
+        (exprProgram := exprProgram) hCompile hRel hDefined hLength with
+    ⟨init', initFinal, initFuel, hInit', hInitRun, hInitRel,
+      hInitDefined, hInitLength, hInitScope⟩
+  rw [hInit] at hInit'
+  cases hInit'
+  have hBodyScope :
+      (Source.FunDef.bodyCtx fn).scope = init.sourceScope := by
+    rw [hInitScope]
+    simp [Source.FunDef.bodyCtx]
+  have hReturnsInLeaveScope :
+      ∀ leaveScope name,
+        (Source.FunDef.bodyCtx fn).leaveScope? = some leaveScope →
+        name ∈ fn.returns →
+        name ∈ leaveScope := by
+    intro leaveScope name hLeave hNameMem
+    simp [Source.FunDef.bodyCtx, Source.Ctx.withLeaveScope] at hLeave
+    subst leaveScope
+    exact List.mem_append_left fn.params hNameMem
+  rcases
+      compileBlockOpen?_leave_sound_exact_given_callReplayBelow
+        hSpec hWordBytes (exprProgram := exprProgram)
+        (target := target.withEVM initFinal) hBody hSupported hBodyScope
+        (by
+          simpa [Structured.RunState.withEVM] using hInitRel)
+        hInitDefined
+        (by
+          simpa [Structured.RunState.withEVM] using hInitLength)
+        hBodyRun hLookup hReturnsInLeaveScope
+        (by simpa [Structured.RunState.withEVM] using hReturns)
+        hCallReplay with
+    ⟨bodyFinal, bodyFuelExpr, hBodyTargetRun, hBodyFinalStack,
+      hBodyShared, hBodyReady⟩
+  have hInitBodyRun :
+      ∃ exprFuel,
+        Expressions.Block.run exprProgram exprFuel
+          (ExpressionsBlock.append init.block body.block) target =
+        .ok (Expressions.Outcome.leave (target.withEVM bodyFinal)) := by
+    exact
+      expressionsBlock_append_regular_exists exprProgram
+        ⟨initFuel, hInitRun⟩
+        ⟨bodyFuelExpr, by
+          simpa [Expressions.RunState.withEVM_withEVM] using
+            hBodyTargetRun⟩
+  let combined : Plan :=
+    { sourceScope := body.sourceScope
+      stackLayout := body.stackLayout
+      layout := body.layout
+      block := ExpressionsBlock.append init.block body.block }
+  have hPlanRun :
+      ∃ exprFuel,
+        Expressions.Block.run exprProgram exprFuel combined.block target =
+        .ok (Expressions.Outcome.leave (target.withEVM bodyFinal)) := by
+    simpa [combined] using hInitBodyRun
+  have hFullCombined :
+      appendReturnFallthrough? range fn.returns combined = some fullBody := by
+    simpa [combined] using hFull
+  rcases
+      appendReturnFallthrough?_leave_passthrough
+        (exprProgram := exprProgram) hFullCombined hPlanRun with
+    ⟨fullFuel, hFullRun⟩
+  subst proc
+  exact
+    ⟨bodyFinal, fullFuel,
+      by simpa using hFullRun,
+      hBodyFinalStack,
+      hBodyShared,
+      hBodyReady⟩
+
+theorem compileFunDef?_regular_body_call_stmt_sound_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    {functionName : Name} {fn : FunDef}
+    {sourceAfterArgs bodyAfter : Source.State}
+    {bodyCtxAfter : Source.Ctx}
+    {argValues returnValues savedValues : List Word}
+    {paramStore : Source.Store}
+    {afterArgsEVM : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout}
+    {bodyFuel : Nat} {target : Expressions.RunState}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hFind : FunList.find? functionName program.functions = some fn)
+    (hSupported : BlockRegularOpenSupported fn.returns fn.body)
+    (hParamsNoDup : fn.params.Nodup)
+    (hInsert :
+      Source.Store.insertMany fn.params argValues
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hBodyRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+          (({ shared := sourceAfterArgs.shared, vars := paramStore } :
+              Source.State).withVars
+              (Source.Store.initReturns fn.returns paramStore)) =
+        .ok (Source.Outcome.regular bodyAfter, bodyCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany fn.returns bodyAfter.vars =
+        some returnValues)
+    (hPrefix :
+      SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+        (argValues.reverse ++ savedValues.reverse) afterArgsEVM)
+    (hStack :
+      afterArgsEVM.stack =
+        argValues.reverse ++ savedValues.reverse ++ baseStack)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {nestedFunctionName : Name}
+        {args : List (Expr 1)},
+        CallReplayFor range program exprProgram callTarget callSource targets
+          nestedFunctionName args) :
+    ∃ afterCall callFuel,
+      Expressions.Stmt.run exprProgram callFuel
+          (Expressions.Stmt.call functionName)
+          (target.withEVM afterArgsEVM) =
+        .ok
+          (Expressions.Outcome.regular
+            ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+      SharedStateEqOutsideScratch range bodyAfter.shared
+        afterCall.toSharedState ∧
+      ScratchRegionReady afterCall.toMachineState range.base range.words ∧
+      afterCall.stack =
+        returnValues.reverse ++ savedValues.reverse ++ baseStack := by
+  rcases
+      compileExpressionsProgram?_lookup_of_find?_with_compile hProgram hFind
+    with
+    ⟨proc, hProcLookup, hCompileProc, _hProcName, hProcArgc, hProcRetc⟩
+  have hArgsLength :
+      argValues.length = fn.params.length :=
+    Source.Store.insertMany_length hInsert
+  let callerStack : EvmYul.Stack Word := savedValues.reverse ++ baseStack
+  have hSplit :
+      Structured.StackFrame.splitArgs? proc.argc afterArgsEVM.stack =
+        some (argValues.reverse, callerStack) := by
+    apply stackFrame_splitArgs?_append_exact
+    · simpa [callerStack, List.append_assoc] using hStack
+    · rw [hProcArgc, List.length_reverse, hArgsLength]
+  let callEVM : EVMState := { afterArgsEVM with stack := argValues.reverse }
+  let callState : Expressions.RunState :=
+    ((target.withEVM afterArgsEVM).withEVM callEVM).pushReturn
+      callerStack proc.retc
+  have hEntryRel :
+      SpillStateRel range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params)
+        { shared := sourceAfterArgs.shared, vars := paramStore }
+        callState.evm := by
+    simpa [callState, callEVM, Structured.RunState.pushReturn,
+      Structured.RunState.withEVM] using
+      layoutOfParamStack_spillStateRel_of_prefix
+        (range := range) (params := fn.params) (values := argValues)
+        (savedValues := savedValues) (paramStore := paramStore)
+        (sourceAfterArgs := sourceAfterArgs)
+        (afterArgsEVM := afterArgsEVM)
+        (spillScope := spillScope) (spillLayout := spillLayout)
+        hInsert hParamsNoDup hPrefix
+  have hEntryDefined :
+      SpillLayout.StoreDefined paramStore
+        (layoutOfParamStack fn.params) :=
+    layoutOfParamStack_storeDefined_of_insertMany hInsert hParamsNoDup
+  have hEntryLength :
+      callState.evm.stack.length = fn.params.reverse.length := by
+    simp [callState, callEVM, Structured.RunState.pushReturn,
+      Structured.RunState.withEVM, List.length_reverse, hArgsLength]
+  rcases
+      compileFunDef?_regular_body_returned_sound_exact_given_callReplay
+        hSpec hWordBytes (exprProgram := exprProgram)
+        hCompileProc hSupported hEntryRel hEntryDefined hEntryLength
+        hBodyRun hLookup hCallReplay with
+    ⟨bodyFinal, bodyExprFuel, hBodyTargetRun, hBodyFinalStack,
+      hBodyShared, hBodyReady⟩
+  let frame : Structured.ReturnDest :=
+    { callerStack := callerStack, retc := proc.retc }
+  have hReturnLength :
+      returnValues.reverse.length = frame.retc := by
+    simp [frame, hProcRetc, List.length_reverse,
+      Source.Store.lookupMany_length hLookup]
+  have hAttach :
+      Structured.StackFrame.attachReturns? frame bodyFinal.stack =
+        some (returnValues.reverse ++ callerStack) := by
+    rw [hBodyFinalStack]
+    exact stackFrame_attachReturns?_append_exact hReturnLength
+  have hBodyTargetRunExpanded :
+      Expressions.Block.run exprProgram bodyExprFuel proc.body
+          { evm := callEVM, returns := frame :: target.returns } =
+        .ok
+          (Expressions.Outcome.regular
+            { evm := bodyFinal, returns := frame :: target.returns }) := by
+    simpa [callState, frame, Structured.RunState.withEVM,
+      Structured.RunState.pushReturn] using hBodyTargetRun
+  let afterCall : EVMState :=
+    { bodyFinal with stack := returnValues.reverse ++ callerStack }
+  refine ⟨afterCall, bodyExprFuel + 1, ?_, ?_, ?_, ?_⟩
+  · simp [Expressions.Stmt.run, hProcLookup, hSplit, callEVM,
+      hBodyTargetRunExpanded, Structured.RunState.withEVM,
+      Structured.RunState.pushReturn, Structured.RunState.popReturn?,
+      frame, hAttach, afterCall]
+  · simpa [afterCall] using hBodyShared
+  · simpa [afterCall] using hBodyReady
+  · simp [afterCall, callerStack, List.append_assoc]
+
+theorem compileFunDef?_regular_body_call_stmt_sound_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    {functionName : Name} {fn : FunDef}
+    {sourceAfterArgs bodyAfter : Source.State}
+    {bodyCtxAfter : Source.Ctx}
+    {argValues returnValues savedValues : List Word}
+    {paramStore : Source.Store}
+    {afterArgsEVM : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout}
+    {bodyFuel : Nat} {target : Expressions.RunState}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hFind : FunList.find? functionName program.functions = some fn)
+    (hSupported : BlockRegularOpenSupported fn.returns fn.body)
+    (hParamsNoDup : fn.params.Nodup)
+    (hInsert :
+      Source.Store.insertMany fn.params argValues
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hBodyRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+          (({ shared := sourceAfterArgs.shared, vars := paramStore } :
+              Source.State).withVars
+              (Source.Store.initReturns fn.returns paramStore)) =
+        .ok (Source.Outcome.regular bodyAfter, bodyCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany fn.returns bodyAfter.vars =
+        some returnValues)
+    (hPrefix :
+      SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+        (argValues.reverse ++ savedValues.reverse) afterArgsEVM)
+    (hStack :
+      afterArgsEVM.stack =
+        argValues.reverse ++ savedValues.reverse ++ baseStack)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {nestedFunctionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow bodyFuel range program exprProgram callTarget
+          callSource targets nestedFunctionName args) :
+    ∃ afterCall callFuel,
+      Expressions.Stmt.run exprProgram callFuel
+          (Expressions.Stmt.call functionName)
+          (target.withEVM afterArgsEVM) =
+        .ok
+          (Expressions.Outcome.regular
+            ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+      SharedStateEqOutsideScratch range bodyAfter.shared
+        afterCall.toSharedState ∧
+      ScratchRegionReady afterCall.toMachineState range.base range.words ∧
+      afterCall.stack =
+        returnValues.reverse ++ savedValues.reverse ++ baseStack := by
+  rcases
+      compileExpressionsProgram?_lookup_of_find?_with_compile hProgram hFind
+    with
+    ⟨proc, hProcLookup, hCompileProc, _hProcName, hProcArgc, hProcRetc⟩
+  have hArgsLength :
+      argValues.length = fn.params.length :=
+    Source.Store.insertMany_length hInsert
+  let callerStack : EvmYul.Stack Word := savedValues.reverse ++ baseStack
+  have hSplit :
+      Structured.StackFrame.splitArgs? proc.argc afterArgsEVM.stack =
+        some (argValues.reverse, callerStack) := by
+    apply stackFrame_splitArgs?_append_exact
+    · simpa [callerStack, List.append_assoc] using hStack
+    · rw [hProcArgc, List.length_reverse, hArgsLength]
+  let callEVM : EVMState := { afterArgsEVM with stack := argValues.reverse }
+  let callState : Expressions.RunState :=
+    ((target.withEVM afterArgsEVM).withEVM callEVM).pushReturn
+      callerStack proc.retc
+  have hEntryRel :
+      SpillStateRel range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params)
+        { shared := sourceAfterArgs.shared, vars := paramStore }
+        callState.evm := by
+    simpa [callState, callEVM, Structured.RunState.pushReturn,
+      Structured.RunState.withEVM] using
+      layoutOfParamStack_spillStateRel_of_prefix
+        (range := range) (params := fn.params) (values := argValues)
+        (savedValues := savedValues) (paramStore := paramStore)
+        (sourceAfterArgs := sourceAfterArgs)
+        (afterArgsEVM := afterArgsEVM)
+        (spillScope := spillScope) (spillLayout := spillLayout)
+        hInsert hParamsNoDup hPrefix
+  have hEntryDefined :
+      SpillLayout.StoreDefined paramStore
+        (layoutOfParamStack fn.params) :=
+    layoutOfParamStack_storeDefined_of_insertMany hInsert hParamsNoDup
+  have hEntryLength :
+      callState.evm.stack.length = fn.params.reverse.length := by
+    simp [callState, callEVM, Structured.RunState.pushReturn,
+      Structured.RunState.withEVM, List.length_reverse, hArgsLength]
+  rcases
+      compileFunDef?_regular_body_returned_sound_exact_given_callReplayBelow
+        hSpec hWordBytes (exprProgram := exprProgram)
+        hCompileProc hSupported hEntryRel hEntryDefined hEntryLength
+        hBodyRun hLookup hCallReplay with
+    ⟨bodyFinal, bodyExprFuel, hBodyTargetRun, hBodyFinalStack,
+      hBodyShared, hBodyReady⟩
+  let frame : Structured.ReturnDest :=
+    { callerStack := callerStack, retc := proc.retc }
+  have hReturnLength :
+      returnValues.reverse.length = frame.retc := by
+    simp [frame, hProcRetc, List.length_reverse,
+      Source.Store.lookupMany_length hLookup]
+  have hAttach :
+      Structured.StackFrame.attachReturns? frame bodyFinal.stack =
+        some (returnValues.reverse ++ callerStack) := by
+    rw [hBodyFinalStack]
+    exact stackFrame_attachReturns?_append_exact hReturnLength
+  have hBodyTargetRunExpanded :
+      Expressions.Block.run exprProgram bodyExprFuel proc.body
+          { evm := callEVM, returns := frame :: target.returns } =
+        .ok
+          (Expressions.Outcome.regular
+            { evm := bodyFinal, returns := frame :: target.returns }) := by
+    simpa [callState, frame, Structured.RunState.withEVM,
+      Structured.RunState.pushReturn] using hBodyTargetRun
+  let afterCall : EVMState :=
+    { bodyFinal with stack := returnValues.reverse ++ callerStack }
+  refine ⟨afterCall, bodyExprFuel + 1, ?_, ?_, ?_, ?_⟩
+  · simp [Expressions.Stmt.run, hProcLookup, hSplit, callEVM,
+      hBodyTargetRunExpanded, Structured.RunState.withEVM,
+      Structured.RunState.pushReturn, Structured.RunState.popReturn?,
+      frame, hAttach, afterCall]
+  · simpa [afterCall] using hBodyShared
+  · simpa [afterCall] using hBodyReady
+  · simp [afterCall, callerStack, List.append_assoc]
+
+theorem compileFunDef?_leave_body_call_stmt_sound_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    {functionName : Name} {fn : FunDef}
+    {sourceAfterArgs bodyAfter : Source.State}
+    {bodyCtxAfter : Source.Ctx}
+    {argValues returnValues savedValues : List Word}
+    {paramStore : Source.Store}
+    {afterArgsEVM : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout}
+    {bodyFuel : Nat} {target : Expressions.RunState}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hFind : FunList.find? functionName program.functions = some fn)
+    (hSupported : BlockOpenSupported fn.returns fn.body)
+    (hParamsNoDup : fn.params.Nodup)
+    (hInsert :
+      Source.Store.insertMany fn.params argValues
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hBodyRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+          (({ shared := sourceAfterArgs.shared, vars := paramStore } :
+              Source.State).withVars
+              (Source.Store.initReturns fn.returns paramStore)) =
+        .ok (Source.Outcome.leave bodyAfter, bodyCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany fn.returns bodyAfter.vars =
+        some returnValues)
+    (hPrefix :
+      SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+        (argValues.reverse ++ savedValues.reverse) afterArgsEVM)
+    (hStack :
+      afterArgsEVM.stack =
+        argValues.reverse ++ savedValues.reverse ++ baseStack)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {nestedFunctionName : Name}
+        {args : List (Expr 1)},
+        CallReplayFor range program exprProgram callTarget callSource targets
+          nestedFunctionName args) :
+    ∃ afterCall callFuel,
+      Expressions.Stmt.run exprProgram callFuel
+          (Expressions.Stmt.call functionName)
+          (target.withEVM afterArgsEVM) =
+        .ok
+          (Expressions.Outcome.regular
+            ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+      SharedStateEqOutsideScratch range bodyAfter.shared
+        afterCall.toSharedState ∧
+      ScratchRegionReady afterCall.toMachineState range.base range.words ∧
+      afterCall.stack =
+        returnValues.reverse ++ savedValues.reverse ++ baseStack := by
+  rcases
+      compileExpressionsProgram?_lookup_of_find?_with_compile hProgram hFind
+    with
+    ⟨proc, hProcLookup, hCompileProc, _hProcName, hProcArgc, hProcRetc⟩
+  have hArgsLength :
+      argValues.length = fn.params.length :=
+    Source.Store.insertMany_length hInsert
+  let callerStack : EvmYul.Stack Word := savedValues.reverse ++ baseStack
+  have hSplit :
+      Structured.StackFrame.splitArgs? proc.argc afterArgsEVM.stack =
+        some (argValues.reverse, callerStack) := by
+    apply stackFrame_splitArgs?_append_exact
+    · simpa [callerStack, List.append_assoc] using hStack
+    · rw [hProcArgc, List.length_reverse, hArgsLength]
+  let callEVM : EVMState := { afterArgsEVM with stack := argValues.reverse }
+  let frame : Structured.ReturnDest :=
+    { callerStack := callerStack, retc := proc.retc }
+  let callState : Expressions.RunState :=
+    ((target.withEVM afterArgsEVM).withEVM callEVM).pushReturn
+      callerStack proc.retc
+  have hEntryRel :
+      SpillStateRel range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params)
+        { shared := sourceAfterArgs.shared, vars := paramStore }
+        callState.evm := by
+    simpa [callState, callEVM, Structured.RunState.pushReturn,
+      Structured.RunState.withEVM] using
+      layoutOfParamStack_spillStateRel_of_prefix
+        (range := range) (params := fn.params) (values := argValues)
+        (savedValues := savedValues) (paramStore := paramStore)
+        (sourceAfterArgs := sourceAfterArgs)
+        (afterArgsEVM := afterArgsEVM)
+        (spillScope := spillScope) (spillLayout := spillLayout)
+        hInsert hParamsNoDup hPrefix
+  have hEntryDefined :
+      SpillLayout.StoreDefined paramStore
+        (layoutOfParamStack fn.params) :=
+    layoutOfParamStack_storeDefined_of_insertMany hInsert hParamsNoDup
+  have hEntryLength :
+      callState.evm.stack.length = fn.params.reverse.length := by
+    simp [callState, callEVM, Structured.RunState.pushReturn,
+      Structured.RunState.withEVM, List.length_reverse, hArgsLength]
+  have hCallStateReturns :
+      callState.returns = frame :: target.returns := by
+    simp [callState, frame, Structured.RunState.pushReturn,
+      Structured.RunState.withEVM]
+  rcases
+      compileFunDef?_leave_body_returned_sound_exact_given_callReplay
+        hSpec hWordBytes (exprProgram := exprProgram)
+        hCompileProc hSupported hEntryRel hEntryDefined hEntryLength
+        hBodyRun hLookup hCallStateReturns hCallReplay with
+    ⟨bodyFinal, bodyExprFuel, hBodyTargetRun, hBodyFinalStack,
+      hBodyShared, hBodyReady⟩
+  have hReturnLength :
+      returnValues.reverse.length = frame.retc := by
+    simp [frame, hProcRetc, List.length_reverse,
+      Source.Store.lookupMany_length hLookup]
+  have hAttach :
+      Structured.StackFrame.attachReturns? frame bodyFinal.stack =
+        some (returnValues.reverse ++ callerStack) := by
+    rw [hBodyFinalStack]
+    exact stackFrame_attachReturns?_append_exact hReturnLength
+  have hBodyTargetRunExpanded :
+      Expressions.Block.run exprProgram bodyExprFuel proc.body
+          { evm := callEVM, returns := frame :: target.returns } =
+        .ok
+          (Expressions.Outcome.leave
+            { evm := bodyFinal, returns := frame :: target.returns }) := by
+    simpa [callState, frame, Structured.RunState.withEVM,
+      Structured.RunState.pushReturn] using hBodyTargetRun
+  let afterCall : EVMState :=
+    { bodyFinal with stack := returnValues.reverse ++ callerStack }
+  refine ⟨afterCall, bodyExprFuel + 1, ?_, ?_, ?_, ?_⟩
+  · simp [Expressions.Stmt.run, hProcLookup, hSplit, callEVM,
+      hBodyTargetRunExpanded, Structured.RunState.withEVM,
+      Structured.RunState.pushReturn, Structured.RunState.popReturn?,
+      frame, hAttach, afterCall]
+  · simpa [afterCall] using hBodyShared
+  · simpa [afterCall] using hBodyReady
+  · simp [afterCall, callerStack, List.append_assoc]
+
+theorem compileFunDef?_leave_body_call_stmt_sound_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    {functionName : Name} {fn : FunDef}
+    {sourceAfterArgs bodyAfter : Source.State}
+    {bodyCtxAfter : Source.Ctx}
+    {argValues returnValues savedValues : List Word}
+    {paramStore : Source.Store}
+    {afterArgsEVM : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout}
+    {bodyFuel : Nat} {target : Expressions.RunState}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hFind : FunList.find? functionName program.functions = some fn)
+    (hSupported : BlockOpenSupported fn.returns fn.body)
+    (hParamsNoDup : fn.params.Nodup)
+    (hInsert :
+      Source.Store.insertMany fn.params argValues
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hBodyRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+          (({ shared := sourceAfterArgs.shared, vars := paramStore } :
+              Source.State).withVars
+              (Source.Store.initReturns fn.returns paramStore)) =
+        .ok (Source.Outcome.leave bodyAfter, bodyCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany fn.returns bodyAfter.vars =
+        some returnValues)
+    (hPrefix :
+      SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+        (argValues.reverse ++ savedValues.reverse) afterArgsEVM)
+    (hStack :
+      afterArgsEVM.stack =
+        argValues.reverse ++ savedValues.reverse ++ baseStack)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {nestedFunctionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow bodyFuel range program exprProgram callTarget
+          callSource targets nestedFunctionName args) :
+    ∃ afterCall callFuel,
+      Expressions.Stmt.run exprProgram callFuel
+          (Expressions.Stmt.call functionName)
+          (target.withEVM afterArgsEVM) =
+        .ok
+          (Expressions.Outcome.regular
+            ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+      SharedStateEqOutsideScratch range bodyAfter.shared
+        afterCall.toSharedState ∧
+      ScratchRegionReady afterCall.toMachineState range.base range.words ∧
+      afterCall.stack =
+        returnValues.reverse ++ savedValues.reverse ++ baseStack := by
+  rcases
+      compileExpressionsProgram?_lookup_of_find?_with_compile hProgram hFind
+    with
+    ⟨proc, hProcLookup, hCompileProc, _hProcName, hProcArgc, hProcRetc⟩
+  have hArgsLength :
+      argValues.length = fn.params.length :=
+    Source.Store.insertMany_length hInsert
+  let callerStack : EvmYul.Stack Word := savedValues.reverse ++ baseStack
+  have hSplit :
+      Structured.StackFrame.splitArgs? proc.argc afterArgsEVM.stack =
+        some (argValues.reverse, callerStack) := by
+    apply stackFrame_splitArgs?_append_exact
+    · simpa [callerStack, List.append_assoc] using hStack
+    · rw [hProcArgc, List.length_reverse, hArgsLength]
+  let callEVM : EVMState := { afterArgsEVM with stack := argValues.reverse }
+  let frame : Structured.ReturnDest :=
+    { callerStack := callerStack, retc := proc.retc }
+  let callState : Expressions.RunState :=
+    ((target.withEVM afterArgsEVM).withEVM callEVM).pushReturn
+      callerStack proc.retc
+  have hEntryRel :
+      SpillStateRel range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params)
+        { shared := sourceAfterArgs.shared, vars := paramStore }
+        callState.evm := by
+    simpa [callState, callEVM, Structured.RunState.pushReturn,
+      Structured.RunState.withEVM] using
+      layoutOfParamStack_spillStateRel_of_prefix
+        (range := range) (params := fn.params) (values := argValues)
+        (savedValues := savedValues) (paramStore := paramStore)
+        (sourceAfterArgs := sourceAfterArgs)
+        (afterArgsEVM := afterArgsEVM)
+        (spillScope := spillScope) (spillLayout := spillLayout)
+        hInsert hParamsNoDup hPrefix
+  have hEntryDefined :
+      SpillLayout.StoreDefined paramStore
+        (layoutOfParamStack fn.params) :=
+    layoutOfParamStack_storeDefined_of_insertMany hInsert hParamsNoDup
+  have hEntryLength :
+      callState.evm.stack.length = fn.params.reverse.length := by
+    simp [callState, callEVM, Structured.RunState.pushReturn,
+      Structured.RunState.withEVM, List.length_reverse, hArgsLength]
+  have hCallStateReturns :
+      callState.returns = frame :: target.returns := by
+    simp [callState, frame, Structured.RunState.pushReturn,
+      Structured.RunState.withEVM]
+  rcases
+      compileFunDef?_leave_body_returned_sound_exact_given_callReplayBelow
+        hSpec hWordBytes (exprProgram := exprProgram)
+        hCompileProc hSupported hEntryRel hEntryDefined hEntryLength
+        hBodyRun hLookup hCallStateReturns hCallReplay with
+    ⟨bodyFinal, bodyExprFuel, hBodyTargetRun, hBodyFinalStack,
+      hBodyShared, hBodyReady⟩
+  have hReturnLength :
+      returnValues.reverse.length = frame.retc := by
+    simp [frame, hProcRetc, List.length_reverse,
+      Source.Store.lookupMany_length hLookup]
+  have hAttach :
+      Structured.StackFrame.attachReturns? frame bodyFinal.stack =
+        some (returnValues.reverse ++ callerStack) := by
+    rw [hBodyFinalStack]
+    exact stackFrame_attachReturns?_append_exact hReturnLength
+  have hBodyTargetRunExpanded :
+      Expressions.Block.run exprProgram bodyExprFuel proc.body
+          { evm := callEVM, returns := frame :: target.returns } =
+        .ok
+          (Expressions.Outcome.leave
+            { evm := bodyFinal, returns := frame :: target.returns }) := by
+    simpa [callState, frame, Structured.RunState.withEVM,
+      Structured.RunState.pushReturn] using hBodyTargetRun
+  let afterCall : EVMState :=
+    { bodyFinal with stack := returnValues.reverse ++ callerStack }
+  refine ⟨afterCall, bodyExprFuel + 1, ?_, ?_, ?_, ?_⟩
+  · simp [Expressions.Stmt.run, hProcLookup, hSplit, callEVM,
+      hBodyTargetRunExpanded, Structured.RunState.withEVM,
+      Structured.RunState.pushReturn, Structured.RunState.popReturn?,
+      frame, hAttach, afterCall]
+  · simpa [afterCall] using hBodyShared
+  · simpa [afterCall] using hBodyReady
+  · simp [afterCall, callerStack, List.append_assoc]
+
+theorem compileFunDef?_returned_body_call_stmt_sound_exact_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    {functionName : Name} {fn : FunDef}
+    {sourceAfterArgs : Source.State}
+    {argValues returnValues savedValues : List Word}
+    {sharedAfterCall : EvmYul.SharedState .EVM}
+    {afterArgsEVM : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout}
+    {bodyFuel : Nat} {target : Expressions.RunState}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hFind : FunList.find? functionName program.functions = some fn)
+    (hSupported : BlockOpenSupported fn.returns fn.body)
+    (hParamsNoDup : fn.params.Nodup)
+    (hBodyRun :
+      Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+          program fn argValues bodyFuel sourceAfterArgs.shared =
+        .ok (.returned sharedAfterCall returnValues))
+    (hPrefix :
+      SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+        (argValues.reverse ++ savedValues.reverse) afterArgsEVM)
+    (hStack :
+      afterArgsEVM.stack =
+        argValues.reverse ++ savedValues.reverse ++ baseStack)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {nestedFunctionName : Name}
+        {args : List (Expr 1)},
+        CallReplayFor range program exprProgram callTarget callSource targets
+          nestedFunctionName args) :
+    ∃ afterCall callFuel,
+      Expressions.Stmt.run exprProgram callFuel
+          (Expressions.Stmt.call functionName)
+          (target.withEVM afterArgsEVM) =
+        .ok
+          (Expressions.Outcome.regular
+            ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+      SharedStateEqOutsideScratch range sharedAfterCall
+        afterCall.toSharedState ∧
+      ScratchRegionReady afterCall.toMachineState range.base range.words ∧
+      afterCall.stack =
+        returnValues.reverse ++ savedValues.reverse ++ baseStack := by
+  cases bodyFuel with
+  | zero =>
+      simp [Source.FunDef.runBody, Source.invalid, Structured.invalid]
+        at hBodyRun
+  | succ bodyFuel =>
+      rcases
+          Source.FunDef.runBody_returned_parts
+            (prim := Locals.Source.PrimitiveSemantics.structured)
+            (program := program) (fn := fn) (args := argValues)
+            (fuel := bodyFuel) hBodyRun with
+        ⟨paramStore, bodyOutcome, bodyCtxAfter, hInsert, hBodyOpen,
+          hMode, hLookup, hShared⟩
+      cases bodyOutcome with
+      | mk bodyAfter mode =>
+          cases hMode with
+          | inl hRegular =>
+              cases hRegular
+              have hBodyOpenRegular :
+                  Source.Block.runOpen
+                      Locals.Source.PrimitiveSemantics.structured program
+                      (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+                      { shared := sourceAfterArgs.shared,
+                        vars :=
+                          Source.Store.initReturns fn.returns paramStore } =
+                    .ok (Source.Outcome.regular bodyAfter, bodyCtxAfter) := by
+                simpa [Source.Outcome.regular] using hBodyOpen
+              have hRegularSupported :
+                  BlockRegularOpenSupported fn.returns fn.body :=
+                blockRegularOpenSupported_of_openSupported_regular_run
+                  hSupported hBodyOpenRegular
+              rcases
+                  compileFunDef?_regular_body_call_stmt_sound_exact_given_callReplay
+                    hSpec hWordBytes hProgram hFind hRegularSupported
+                    hParamsNoDup hInsert
+                    (by
+                      simpa [Locals.Source.State.withVars]
+                        using hBodyOpenRegular)
+                    hLookup hPrefix hStack hCallReplay with
+                ⟨afterCall, callFuel, hRun, hSharedRel, hReady,
+                  hStackFinal⟩
+              have hSharedEq : bodyAfter.shared = sharedAfterCall := by
+                simpa [Source.Outcome.regular] using hShared
+              exact
+                ⟨afterCall, callFuel, hRun,
+                  by simpa [hSharedEq] using hSharedRel,
+                  hReady, hStackFinal⟩
+          | inr hLeave =>
+              cases hLeave
+              have hBodyOpenLeave :
+                  Source.Block.runOpen
+                      Locals.Source.PrimitiveSemantics.structured program
+                      (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+                      { shared := sourceAfterArgs.shared,
+                        vars :=
+                          Source.Store.initReturns fn.returns paramStore } =
+                    .ok (Source.Outcome.leave bodyAfter, bodyCtxAfter) := by
+                simpa [Source.Outcome.leave] using hBodyOpen
+              rcases
+                  compileFunDef?_leave_body_call_stmt_sound_exact_given_callReplay
+                    hSpec hWordBytes hProgram hFind hSupported hParamsNoDup
+                    hInsert
+                    (by
+                      simpa [Locals.Source.State.withVars]
+                        using hBodyOpenLeave)
+                    hLookup hPrefix hStack hCallReplay with
+                ⟨afterCall, callFuel, hRun, hSharedRel, hReady,
+                  hStackFinal⟩
+              have hSharedEq : bodyAfter.shared = sharedAfterCall := by
+                simpa [Source.Outcome.leave] using hShared
+              exact
+                ⟨afterCall, callFuel, hRun,
+                  by simpa [hSharedEq] using hSharedRel,
+                  hReady, hStackFinal⟩
+
+theorem compileFunDef?_returned_body_call_stmt_sound_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    {functionName : Name} {fn : FunDef}
+    {sourceAfterArgs : Source.State}
+    {argValues returnValues savedValues : List Word}
+    {sharedAfterCall : EvmYul.SharedState .EVM}
+    {afterArgsEVM : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout}
+    {bodyFuel : Nat} {target : Expressions.RunState}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hFind : FunList.find? functionName program.functions = some fn)
+    (hSupported : BlockOpenSupported fn.returns fn.body)
+    (hParamsNoDup : fn.params.Nodup)
+    (hBodyRun :
+      Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+          program fn argValues bodyFuel sourceAfterArgs.shared =
+        .ok (.returned sharedAfterCall returnValues))
+    (hPrefix :
+      SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+        (argValues.reverse ++ savedValues.reverse) afterArgsEVM)
+    (hStack :
+      afterArgsEVM.stack =
+        argValues.reverse ++ savedValues.reverse ++ baseStack)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {nestedFunctionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow bodyFuel range program exprProgram callTarget
+          callSource targets nestedFunctionName args) :
+    ∃ afterCall callFuel,
+      Expressions.Stmt.run exprProgram callFuel
+          (Expressions.Stmt.call functionName)
+          (target.withEVM afterArgsEVM) =
+        .ok
+          (Expressions.Outcome.regular
+            ((target.withEVM afterArgsEVM).withEVM afterCall)) ∧
+      SharedStateEqOutsideScratch range sharedAfterCall
+        afterCall.toSharedState ∧
+      ScratchRegionReady afterCall.toMachineState range.base range.words ∧
+      afterCall.stack =
+        returnValues.reverse ++ savedValues.reverse ++ baseStack := by
+  cases bodyFuel with
+  | zero =>
+      simp [Source.FunDef.runBody, Source.invalid, Structured.invalid]
+        at hBodyRun
+  | succ bodyFuel =>
+      have hCallReplayPred :
+          ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+            {targets : List Name} {nestedFunctionName : Name}
+            {args : List (Expr 1)},
+            CallReplayForBelow bodyFuel range program exprProgram callTarget
+              callSource targets nestedFunctionName args := by
+        intro callTarget callSource targets nestedFunctionName args
+        exact CallReplayForBelow.mono (Nat.le_succ bodyFuel) hCallReplay
+      rcases
+          Source.FunDef.runBody_returned_parts
+            (prim := Locals.Source.PrimitiveSemantics.structured)
+            (program := program) (fn := fn) (args := argValues)
+            (fuel := bodyFuel) hBodyRun with
+        ⟨paramStore, bodyOutcome, bodyCtxAfter, hInsert, hBodyOpen,
+          hMode, hLookup, hShared⟩
+      cases bodyOutcome with
+      | mk bodyAfter mode =>
+          cases hMode with
+          | inl hRegular =>
+              cases hRegular
+              have hBodyOpenRegular :
+                  Source.Block.runOpen
+                      Locals.Source.PrimitiveSemantics.structured program
+                      (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+                      { shared := sourceAfterArgs.shared,
+                        vars :=
+                          Source.Store.initReturns fn.returns paramStore } =
+                    .ok (Source.Outcome.regular bodyAfter, bodyCtxAfter) := by
+                simpa [Source.Outcome.regular] using hBodyOpen
+              have hRegularSupported :
+                  BlockRegularOpenSupported fn.returns fn.body :=
+                blockRegularOpenSupported_of_openSupported_regular_run
+                  hSupported hBodyOpenRegular
+              rcases
+                  compileFunDef?_regular_body_call_stmt_sound_exact_given_callReplayBelow
+                    hSpec hWordBytes hProgram hFind hRegularSupported
+                    hParamsNoDup hInsert
+                    (by
+                      simpa [Locals.Source.State.withVars]
+                        using hBodyOpenRegular)
+                    hLookup hPrefix hStack hCallReplayPred with
+                ⟨afterCall, callFuel, hRun, hSharedRel, hReady,
+                  hStackFinal⟩
+              have hSharedEq : bodyAfter.shared = sharedAfterCall := by
+                simpa [Source.Outcome.regular] using hShared
+              exact
+                ⟨afterCall, callFuel, hRun,
+                  by simpa [hSharedEq] using hSharedRel,
+                  hReady, hStackFinal⟩
+          | inr hLeave =>
+              cases hLeave
+              have hBodyOpenLeave :
+                  Source.Block.runOpen
+                      Locals.Source.PrimitiveSemantics.structured program
+                      (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+                      { shared := sourceAfterArgs.shared,
+                        vars :=
+                          Source.Store.initReturns fn.returns paramStore } =
+                    .ok (Source.Outcome.leave bodyAfter, bodyCtxAfter) := by
+                simpa [Source.Outcome.leave] using hBodyOpen
+              rcases
+                  compileFunDef?_leave_body_call_stmt_sound_exact_given_callReplayBelow
+                    hSpec hWordBytes hProgram hFind hSupported hParamsNoDup
+                    hInsert
+                    (by
+                      simpa [Locals.Source.State.withVars]
+                        using hBodyOpenLeave)
+                    hLookup hPrefix hStack hCallReplayPred with
+                ⟨afterCall, callFuel, hRun, hSharedRel, hReady,
+                  hStackFinal⟩
+              have hSharedEq : bodyAfter.shared = sharedAfterCall := by
+                simpa [Source.Outcome.leave] using hShared
+              exact
+                ⟨afterCall, callFuel, hRun,
+                  by simpa [hSharedEq] using hSharedRel,
+                  hReady, hStackFinal⟩
+
+theorem compileFunDef?_halt_body_call_stmt_sound_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    {functionName : Name} {fn : FunDef}
+    {sourceAfterArgs haltedState : Source.State}
+    {bodyCtxAfter : Source.Ctx}
+    {argValues savedValues : List Word}
+    {paramStore : Source.Store}
+    {afterArgsEVM : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout}
+    {bodyFuel : Nat} {target : Expressions.RunState}
+    {kind : Assembly.HaltKind}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hFind : FunList.find? functionName program.functions = some fn)
+    (hSupported : BlockOpenSupported fn.returns fn.body)
+    (hParamsNoDup : fn.params.Nodup)
+    (hInsert :
+      Source.Store.insertMany fn.params argValues
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hBodyRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          (Source.FunDef.bodyCtx fn) bodyFuel fn.body
+          (({ shared := sourceAfterArgs.shared, vars := paramStore } :
+              Source.State).withVars
+              (Source.Store.initReturns fn.returns paramStore)) =
+        .ok (Source.Outcome.halt kind haltedState, bodyCtxAfter))
+    (hPrefix :
+      SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+        (argValues.reverse ++ savedValues.reverse) afterArgsEVM)
+    (hStack :
+      afterArgsEVM.stack =
+        argValues.reverse ++ savedValues.reverse ++ baseStack)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {nestedFunctionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow bodyFuel range program exprProgram callTarget
+          callSource targets nestedFunctionName args)
+    (hHaltReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {nestedFunctionName : Name}
+        {args : List (Expr 1)},
+        CallHaltReplayForBelow bodyFuel range program exprProgram callTarget
+          callSource targets nestedFunctionName args) :
+    ∃ haltTarget callFuel,
+      Expressions.Stmt.run exprProgram callFuel
+          (Expressions.Stmt.call functionName)
+          (target.withEVM afterArgsEVM) =
+        .ok (Expressions.Outcome.halt kind haltTarget) ∧
+      SharedStateEqOutsideScratch range haltedState.shared
+        haltTarget.evm.toSharedState := by
+  rcases
+      compileExpressionsProgram?_lookup_of_find?_with_compile hProgram hFind
+    with
+    ⟨proc, hProcLookup, hCompileProc, _hProcName, hProcArgc, hProcRetc⟩
+  rcases compileFunDef?_eq_some_components hCompileProc with
+    ⟨init, body, fullBody, hInit, hBody, hFull, hProc⟩
+  have hArgsLength :
+      argValues.length = fn.params.length :=
+    Source.Store.insertMany_length hInsert
+  let callerStack : EvmYul.Stack Word := savedValues.reverse ++ baseStack
+  have hSplit :
+      Structured.StackFrame.splitArgs? proc.argc afterArgsEVM.stack =
+        some (argValues.reverse, callerStack) := by
+    apply stackFrame_splitArgs?_append_exact
+    · simpa [callerStack, List.append_assoc] using hStack
+    · rw [hProcArgc, List.length_reverse, hArgsLength]
+  let callEVM : EVMState := { afterArgsEVM with stack := argValues.reverse }
+  let frame : Structured.ReturnDest :=
+    { callerStack := callerStack, retc := proc.retc }
+  let callState : Expressions.RunState :=
+    ((target.withEVM afterArgsEVM).withEVM callEVM).pushReturn
+      callerStack proc.retc
+  have hEntryRel :
+      SpillStateRel range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params)
+        { shared := sourceAfterArgs.shared, vars := paramStore }
+        callState.evm := by
+    simpa [callState, callEVM, Structured.RunState.pushReturn,
+      Structured.RunState.withEVM] using
+      layoutOfParamStack_spillStateRel_of_prefix
+        (range := range) (params := fn.params) (values := argValues)
+        (savedValues := savedValues) (paramStore := paramStore)
+        (sourceAfterArgs := sourceAfterArgs)
+        (afterArgsEVM := afterArgsEVM)
+        (spillScope := spillScope) (spillLayout := spillLayout)
+        hInsert hParamsNoDup hPrefix
+  have hEntryDefined :
+      SpillLayout.StoreDefined paramStore
+        (layoutOfParamStack fn.params) :=
+    layoutOfParamStack_storeDefined_of_insertMany hInsert hParamsNoDup
+  have hEntryLength :
+      callState.evm.stack.length = fn.params.reverse.length := by
+    simp [callState, callEVM, Structured.RunState.pushReturn,
+      Structured.RunState.withEVM, List.length_reverse, hArgsLength]
+  rcases
+      compileFunDef?_init_regular_sound_exact hSpec hWordBytes
+        (exprProgram := exprProgram) hCompileProc hEntryRel hEntryDefined
+        hEntryLength with
+    ⟨init', initFinal, initFuel, hInit', hInitRun, hInitRel,
+      hInitDefined, hInitLength, hInitScope⟩
+  rw [hInit] at hInit'
+  cases hInit'
+  have hBodyScope :
+      (Source.FunDef.bodyCtx fn).scope = init.sourceScope := by
+    rw [hInitScope]
+    simp [Source.FunDef.bodyCtx]
+  rcases
+      compileBlockOpen?_halt_sound_meta_given_callReplayBelow
+        hSpec hWordBytes (exprProgram := exprProgram)
+        (target := callState.withEVM initFinal) hBody hSupported
+        hBodyScope
+        (by
+          simpa [Structured.RunState.withEVM] using hInitRel)
+        hInitDefined
+        (by
+          simpa [Structured.RunState.withEVM] using hInitLength)
+        hBodyRun hCallReplay hHaltReplay with
+    ⟨haltTarget, bodyFuelExpr, hBodyTargetRun, hBodyShared⟩
+  have hInitBodyRun :
+      ∃ exprFuel,
+        Expressions.Block.run exprProgram exprFuel
+          (ExpressionsBlock.append init.block body.block) callState =
+        .ok (Expressions.Outcome.halt kind haltTarget) := by
+    exact
+      expressionsBlock_append_regular_exists exprProgram
+        ⟨initFuel, hInitRun⟩
+        ⟨bodyFuelExpr, by
+          simpa [Expressions.RunState.withEVM_withEVM] using
+            hBodyTargetRun⟩
+  let combined : Plan :=
+    { sourceScope := body.sourceScope
+      stackLayout := body.stackLayout
+      layout := body.layout
+      block := ExpressionsBlock.append init.block body.block }
+  have hPlanRun :
+      ∃ exprFuel,
+        Expressions.Block.run exprProgram exprFuel combined.block callState =
+        .ok (Expressions.Outcome.halt kind haltTarget) := by
+    simpa [combined] using hInitBodyRun
+  have hFullCombined :
+      appendReturnFallthrough? range fn.returns combined = some fullBody := by
+    simpa [combined] using hFull
+  rcases
+      appendReturnFallthrough?_halt_passthrough
+        (exprProgram := exprProgram) hFullCombined hPlanRun with
+    ⟨fullFuel, hFullRun⟩
+  have hFullRunExpanded :
+      Expressions.Block.run exprProgram fullFuel proc.body
+          { evm := callEVM, returns := frame :: target.returns } =
+        .ok (Expressions.Outcome.halt kind haltTarget) := by
+    subst proc
+    simpa [callState, frame, Structured.RunState.withEVM,
+      Structured.RunState.pushReturn] using hFullRun
+  refine ⟨haltTarget, fullFuel + 1, ?_, hBodyShared⟩
+  simp [Expressions.Stmt.run, hProcLookup, hSplit, callEVM,
+    hFullRunExpanded, Structured.RunState.withEVM,
+    Structured.RunState.pushReturn, frame]
+
+theorem compileFunDef?_halted_body_call_stmt_sound_exact_given_callReplayBelow
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    {functionName : Name} {fn : FunDef}
+    {sourceAfterArgs haltedState : Source.State}
+    {argValues savedValues : List Word}
+    {afterArgsEVM : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    {spillScope : List Name} {spillLayout : SpillLayout.Layout}
+    {bodyFuel : Nat} {target : Expressions.RunState}
+    {kind : Assembly.HaltKind}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hFind : FunList.find? functionName program.functions = some fn)
+    (hSupported : BlockOpenSupported fn.returns fn.body)
+    (hParamsNoDup : fn.params.Nodup)
+    (hBodyRun :
+      Source.FunDef.runBody Locals.Source.PrimitiveSemantics.structured
+          program fn argValues bodyFuel sourceAfterArgs.shared =
+        .ok (.halted kind haltedState))
+    (hPrefix :
+      SpillStackPrefixRel range spillScope [] spillLayout sourceAfterArgs
+        (argValues.reverse ++ savedValues.reverse) afterArgsEVM)
+    (hStack :
+      afterArgsEVM.stack =
+        argValues.reverse ++ savedValues.reverse ++ baseStack)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {nestedFunctionName : Name}
+        {args : List (Expr 1)},
+        CallReplayForBelow bodyFuel range program exprProgram callTarget
+          callSource targets nestedFunctionName args)
+    (hHaltReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {nestedFunctionName : Name}
+        {args : List (Expr 1)},
+        CallHaltReplayForBelow bodyFuel range program exprProgram callTarget
+          callSource targets nestedFunctionName args) :
+    ∃ haltTarget callFuel,
+      Expressions.Stmt.run exprProgram callFuel
+          (Expressions.Stmt.call functionName)
+          (target.withEVM afterArgsEVM) =
+        .ok (Expressions.Outcome.halt kind haltTarget) ∧
+      SharedStateEqOutsideScratch range haltedState.shared
+        haltTarget.evm.toSharedState := by
+  cases bodyFuel with
+  | zero =>
+      simp [Source.FunDef.runBody, Source.invalid, Structured.invalid]
+        at hBodyRun
+  | succ bodyFuel =>
+      have hCallReplayPred :
+          ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+            {targets : List Name} {nestedFunctionName : Name}
+            {args : List (Expr 1)},
+            CallReplayForBelow bodyFuel range program exprProgram callTarget
+              callSource targets nestedFunctionName args := by
+        intro callTarget callSource targets nestedFunctionName args
+        exact CallReplayForBelow.mono (Nat.le_succ bodyFuel) hCallReplay
+      have hHaltReplayPred :
+          ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+            {targets : List Name} {nestedFunctionName : Name}
+            {args : List (Expr 1)},
+            CallHaltReplayForBelow bodyFuel range program exprProgram
+              callTarget callSource targets nestedFunctionName args := by
+        intro callTarget callSource targets nestedFunctionName args
+        exact CallHaltReplayForBelow.mono (Nat.le_succ bodyFuel) hHaltReplay
+      rcases
+          Source.FunDef.runBody_halted_parts
+            (prim := Locals.Source.PrimitiveSemantics.structured)
+            (program := program) (fn := fn) (args := argValues)
+            (fuel := bodyFuel) hBodyRun with
+        ⟨paramStore, bodyCtxAfter, hInsert, hBodyOpen⟩
+      exact
+        compileFunDef?_halt_body_call_stmt_sound_exact_given_callReplayBelow
+          hSpec hWordBytes hProgram hFind hSupported hParamsNoDup hInsert
+          (by
+            simpa [Locals.Source.State.withVars] using hBodyOpen)
+          hPrefix hStack hCallReplayPred hHaltReplayPred
+
+theorem callReplayForBelow_of_programCallAwareSupported
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hSupport : ProgramCallAwareSupported program)
+    {maxBodyFuel : Nat} :
+    ∀ {target : Expressions.RunState} {source : Source.State}
+      {targets : List Name} {functionName : Name} {args : List (Expr 1)},
+      CallReplayForBelow maxBodyFuel range program exprProgram target source
+        targets functionName args := by
+  induction maxBodyFuel with
+  | zero =>
+      intro target source targets functionName args
+      intro bodyFuel fn sourceAfterArgs argValues returnValues sharedAfterCall
+        returnStore saved savedValues afterArgsEVM baseStack spillScope
+        spillLayout
+      intro hLt _hFind _hArgs _hBody _hAssign _hSaved _hSavedRel _hPrefix
+        _hStack
+      exact False.elim (Nat.not_lt_zero bodyFuel hLt)
+  | succ maxBodyFuel ih =>
+      intro target source targets functionName args
+      intro bodyFuel fn sourceAfterArgs argValues returnValues sharedAfterCall
+        returnStore saved savedValues afterArgsEVM baseStack spillScope
+        spillLayout
+      intro hLt hFind _hArgs hBodyRun _hAssign _hSaved _hSavedRel hPrefix
+        hStack
+      have hBodyLe : bodyFuel ≤ maxBodyFuel :=
+        Nat.le_of_lt_succ hLt
+      have hCallReplayBelowBody :
+          ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+            {callTargets : List Name} {nestedFunctionName : Name}
+            {nestedArgs : List (Expr 1)},
+            CallReplayForBelow bodyFuel range program exprProgram callTarget
+              callSource callTargets nestedFunctionName nestedArgs := by
+        intro callTarget callSource callTargets nestedFunctionName nestedArgs
+        exact
+          CallReplayForBelow.mono hBodyLe
+            (ih (target := callTarget) (source := callSource)
+              (targets := callTargets) (functionName := nestedFunctionName)
+              (args := nestedArgs))
+      exact
+        compileFunDef?_returned_body_call_stmt_sound_exact_given_callReplayBelow
+          hSpec hWordBytes hProgram hFind
+          (ProgramCallAwareSupported.functionOpenSupported hSupport hFind)
+          (ProgramCallAwareSupported.functionParamsNodup hSupport hFind)
+          hBodyRun hPrefix hStack hCallReplayBelowBody
+
+theorem callReplayFor_of_programCallAwareSupported
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hSupport : ProgramCallAwareSupported program)
+    {target : Expressions.RunState} {source : Source.State}
+    {targets : List Name} {functionName : Name} {args : List (Expr 1)} :
+    CallReplayFor range program exprProgram target source targets
+      functionName args := by
+  intro bodyFuel fn sourceAfterArgs argValues returnValues sharedAfterCall
+    returnStore saved savedValues afterArgsEVM baseStack spillScope spillLayout
+  intro hFind hArgs hBodyRun hAssign hSaved hSavedRel hPrefix hStack
+  exact
+    callReplayForBelow_of_programCallAwareSupported
+      hSpec hWordBytes hProgram hSupport
+      (maxBodyFuel := bodyFuel + 1)
+      (target := target) (source := source) (targets := targets)
+      (functionName := functionName) (args := args)
+      (Nat.lt_succ_self bodyFuel) hFind hArgs hBodyRun hAssign hSaved
+      hSavedRel hPrefix hStack
+
+theorem callHaltReplayForBelow_of_programCallAwareSupported
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hSupport : ProgramCallAwareSupported program)
+    {maxBodyFuel : Nat} :
+    ∀ {target : Expressions.RunState} {source : Source.State}
+      {targets : List Name} {functionName : Name} {args : List (Expr 1)},
+      CallHaltReplayForBelow maxBodyFuel range program exprProgram target
+        source targets functionName args := by
+  induction maxBodyFuel with
+  | zero =>
+      intro target source targets functionName args
+      intro bodyFuel fn sourceAfterArgs haltedState argValues kind saved
+        savedValues afterArgsEVM baseStack spillScope spillLayout
+      intro hLt _hFind _hArgs _hBody _hSaved _hSavedRel _hPrefix
+        _hStack
+      exact False.elim (Nat.not_lt_zero bodyFuel hLt)
+  | succ maxBodyFuel ih =>
+      intro target source targets functionName args
+      intro bodyFuel fn sourceAfterArgs haltedState argValues kind saved
+        savedValues afterArgsEVM baseStack spillScope spillLayout
+      intro hLt hFind _hArgs hBodyRun _hSaved _hSavedRel hPrefix hStack
+      have hBodyLe : bodyFuel ≤ maxBodyFuel :=
+        Nat.le_of_lt_succ hLt
+      have hCallReplayBelowBody :
+          ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+            {callTargets : List Name} {nestedFunctionName : Name}
+            {nestedArgs : List (Expr 1)},
+            CallReplayForBelow bodyFuel range program exprProgram callTarget
+              callSource callTargets nestedFunctionName nestedArgs := by
+        intro callTarget callSource callTargets nestedFunctionName nestedArgs
+        exact
+          CallReplayForBelow.mono hBodyLe
+            (callReplayForBelow_of_programCallAwareSupported
+              hSpec hWordBytes hProgram hSupport
+              (maxBodyFuel := maxBodyFuel)
+              (target := callTarget) (source := callSource)
+              (targets := callTargets)
+              (functionName := nestedFunctionName)
+              (args := nestedArgs))
+      have hHaltReplayBelowBody :
+          ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+            {callTargets : List Name} {nestedFunctionName : Name}
+            {nestedArgs : List (Expr 1)},
+            CallHaltReplayForBelow bodyFuel range program exprProgram
+              callTarget callSource callTargets nestedFunctionName
+              nestedArgs := by
+        intro callTarget callSource callTargets nestedFunctionName nestedArgs
+        exact
+          CallHaltReplayForBelow.mono hBodyLe
+            (ih (target := callTarget) (source := callSource)
+              (targets := callTargets) (functionName := nestedFunctionName)
+              (args := nestedArgs))
+      exact
+        compileFunDef?_halted_body_call_stmt_sound_exact_given_callReplayBelow
+          hSpec hWordBytes hProgram hFind
+          (ProgramCallAwareSupported.functionOpenSupported hSupport hFind)
+          (ProgramCallAwareSupported.functionParamsNodup hSupport hFind)
+          hBodyRun hPrefix hStack hCallReplayBelowBody
+          hHaltReplayBelowBody
+
+theorem callHaltReplayFor_of_programCallAwareSupported
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hSupport : ProgramCallAwareSupported program)
+    {target : Expressions.RunState} {source : Source.State}
+    {targets : List Name} {functionName : Name} {args : List (Expr 1)} :
+    CallHaltReplayFor range program exprProgram target source targets
+      functionName args := by
+  intro bodyFuel fn sourceAfterArgs haltedState argValues kind saved
+    savedValues afterArgsEVM baseStack spillScope spillLayout
+  intro hFind hArgs hBodyRun hSaved hSavedRel hPrefix hStack
+  exact
+    callHaltReplayForBelow_of_programCallAwareSupported
+      hSpec hWordBytes hProgram hSupport
+      (maxBodyFuel := bodyFuel + 1)
+      (target := target) (source := source) (targets := targets)
+      (functionName := functionName) (args := args)
+      (Nat.lt_succ_self bodyFuel) hFind hArgs hBodyRun hSaved hSavedRel
+      hPrefix hStack
+
+theorem compileBlockOpen?_regular_sound_meta_of_programCallAwareSupported
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan wholePlan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hSupport : ProgramCallAwareSupported program)
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan)
+    (hSupported : BlockRegularOpenSupported returns block)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel block source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      sourceCtxAfter.scope = plan.sourceScope :=
+  compileBlockOpen?_regular_sound_meta_given_callReplay
+    hSpec hWordBytes hCompile hSupported hScope hRel hDefined hSourceRun
+    (by
+      intro callTarget callSource targets functionName args
+      exact
+        callReplayFor_of_programCallAwareSupported
+          hSpec hWordBytes hProgram hSupport)
+
+theorem compileBlockOpen?_regular_sound_meta_exact_of_programCallAwareSupported
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan wholePlan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hSupport : ProgramCallAwareSupported program)
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan)
+    (hSupported : BlockRegularOpenSupported returns block)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel block source =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.regular (target.withEVM final)) ∧
+      SpillStateRel range plan.sourceScope plan.stackLayout plan.layout
+        sourceAfter final ∧
+      SpillLayout.StoreDefined sourceAfter.vars plan.layout ∧
+      final.stack.length = plan.stackLayout.length ∧
+      sourceCtxAfter.scope = plan.sourceScope :=
+  compileBlockOpen?_regular_sound_meta_exact_given_callReplay
+    hSpec hWordBytes hCompile hSupported hScope hRel hDefined hLength
+    hSourceRun
+    (by
+      intro callTarget callSource targets functionName args
+      exact
+        callReplayFor_of_programCallAwareSupported
+          hSpec hWordBytes hProgram hSupport)
+
+theorem compileBlockOpen?_halt_sound_meta_of_programCallAwareSupported
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan wholePlan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState} {kind : Assembly.HaltKind}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hSupport : ProgramCallAwareSupported program)
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan)
+    (hSupported : BlockOpenSupported returns block)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel block source =
+        .ok (Source.Outcome.halt kind sourceAfter, sourceCtxAfter)) :
+    ∃ haltTarget exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.halt kind haltTarget) ∧
+      SharedStateEqOutsideScratch range sourceAfter.shared
+        haltTarget.evm.toSharedState :=
+  compileBlockOpen?_halt_sound_meta_given_callReplayBelow
+    hSpec hWordBytes hCompile hSupported hScope hRel hDefined hLength
+    hSourceRun
+    (by
+      intro callTarget callSource targets functionName args
+      exact
+        callReplayForBelow_of_programCallAwareSupported
+          hSpec hWordBytes hProgram hSupport
+          (maxBodyFuel := fuel)
+          (target := callTarget) (source := callSource)
+          (targets := targets) (functionName := functionName)
+          (args := args))
+    (by
+      intro callTarget callSource targets functionName args
+      exact
+        callHaltReplayForBelow_of_programCallAwareSupported
+          hSpec hWordBytes hProgram hSupport
+          (maxBodyFuel := fuel)
+          (target := callTarget) (source := callSource)
+          (targets := targets) (functionName := functionName)
+          (args := args))
+
+theorem compileBlockOpen?_leave_sound_exact_of_programCallAwareSupported
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Block} {plan wholePlan : Plan}
+    {exprProgram : Expressions.Program}
+    {sourceCtx sourceCtxAfter : Source.Ctx}
+    {fuel : Nat} {source sourceAfter : Source.State}
+    {target : Expressions.RunState}
+    {values : List Word} {frame : Structured.ReturnDest}
+    {returnStack : List Structured.ReturnDest}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hSupport : ProgramCallAwareSupported program)
+    (hCompile :
+      compileBlockOpen? range program returns sourceScope stackLayout layout
+          block =
+        some plan)
+    (hSupported : BlockOpenSupported returns block)
+    (hScope : sourceCtx.scope = sourceScope)
+    (hRel :
+      SpillStateRel range sourceScope stackLayout layout source target.evm)
+    (hDefined : SpillLayout.StoreDefined source.vars layout)
+    (hLength : target.evm.stack.length = stackLayout.length)
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          sourceCtx fuel block source =
+        .ok (Source.Outcome.leave sourceAfter, sourceCtxAfter))
+    (hLookup :
+      Source.Store.lookupMany returns sourceAfter.vars = some values)
+    (hReturnsInLeaveScope :
+      ∀ leaveScope name,
+        sourceCtx.leaveScope? = some leaveScope →
+        name ∈ returns →
+        name ∈ leaveScope)
+    (hReturns : target.returns = frame :: returnStack) :
+    ∃ final exprFuel,
+      Expressions.Block.run exprProgram exprFuel plan.block target =
+        .ok (Expressions.Outcome.leave (target.withEVM final)) ∧
+      final.stack = values.reverse ∧
+      SharedStateEqOutsideScratch range sourceAfter.shared
+        final.toSharedState ∧
+      ScratchRegionReady final.toMachineState range.base range.words :=
+  compileBlockOpen?_leave_sound_exact_given_callReplay
+    hSpec hWordBytes hCompile hSupported hScope hRel hDefined hLength
+    hSourceRun hLookup hReturnsInLeaveScope hReturns
+    (by
+      intro callTarget callSource targets functionName args
+      exact
+        callReplayFor_of_programCallAwareSupported
+          hSpec hWordBytes hProgram hSupport)
+
+theorem callReplayFor_of_programCallAwareSupported_given_callReplay
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {program : Program}
+    {wholePlan : Plan} {exprProgram : Expressions.Program}
+    (hProgram :
+      compileExpressionsProgram? range program = some (wholePlan, exprProgram))
+    (hSupport : ProgramCallAwareSupported program)
+    (hCallReplay :
+      ∀ {callTarget : Expressions.RunState} {callSource : Source.State}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)},
+        CallReplayFor range program exprProgram callTarget callSource targets
+          functionName args)
+    {target : Expressions.RunState} {source : Source.State}
+    {targets : List Name} {functionName : Name} {args : List (Expr 1)} :
+    CallReplayFor range program exprProgram target source targets
+      functionName args := by
+  intro bodyFuel fn sourceAfterArgs argValues returnValues sharedAfterCall
+    returnStore saved savedValues afterArgsEVM baseStack spillScope spillLayout
+  intro hFind _hArgs hBodyRun _hAssign _hSaved _hSavedRel hPrefix hStack
+  exact
+    compileFunDef?_returned_body_call_stmt_sound_exact_given_callReplay
+      hSpec hWordBytes hProgram hFind
+      (ProgramCallAwareSupported.functionOpenSupported hSupport hFind)
+      (ProgramCallAwareSupported.functionParamsNodup hSupport hFind)
+      hBodyRun hPrefix hStack hCallReplay
+
+noncomputable def compileChecked? (range : ScratchRange)
+    (program : Program) :
+    Option (Plan × Expressions.Program × Assembly.Program) := do
+  let (plan, exprProgram) ← compileExpressionsProgram? range program
+  let asm ← Expressions.Program.compileChecked? exprProgram
+  some (plan, exprProgram, asm)
+
+theorem compileChecked?_eq_some
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    (hCompile :
+      compileChecked? range program = some (plan, exprProgram, asm)) :
+    compileExpressionsProgram? range program = some (plan, exprProgram) ∧
+      Expressions.Program.compileChecked? exprProgram = some asm := by
+  unfold compileChecked? at hCompile
+  cases hExpr : compileExpressionsProgram? range program with
+  | none =>
+      simp [hExpr] at hCompile
+  | some result =>
+      rcases result with ⟨plan', exprProgram'⟩
+      simp [hExpr] at hCompile
+      cases hAsm : Expressions.Program.compileChecked? exprProgram' with
+      | none =>
+          simp [hAsm] at hCompile
+      | some asm' =>
+          simp [hAsm] at hCompile
+          have hExpr' :
+              compileExpressionsProgram? range program =
+                some (plan', exprProgram') := by
+            simpa [hExpr]
+          have hAsm' :
+              Expressions.Program.compileChecked? exprProgram' =
+                some asm' := by
+            simpa [hAsm]
+          rcases hCompile with ⟨rfl, rfl, rfl⟩
+          exact ⟨rfl, hAsm'⟩
+
+theorem compileChecked?_expressions_preserves_endPc
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
+    {outcome : Expressions.Outcome}
+    (hCompile :
+      compileChecked? range program = some (plan, exprProgram, asm))
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun : exprProgram.run fuel initial = .ok outcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases compileChecked?_eq_some hCompile with ⟨_hExpr, hAsm⟩
+  exact
+    Expressions.Program.compile_preserves_of_compileChecked_endPc
+      hAsm hInitialPc hRun
+
+theorem compileChecked?_lookup_of_find?
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program} {name : Name} {fn : FunDef}
+    (hCompile :
+      compileChecked? range program = some (plan, exprProgram, asm))
+    (hFind : FunList.find? name program.functions = some fn) :
+    ∃ proc,
+      Expressions.ProcList.lookup? name exprProgram.procs = some proc ∧
+        proc.name = fn.name ∧
+        proc.argc = fn.params.length ∧
+        proc.retc = fn.returns.length := by
+  rcases compileChecked?_eq_some hCompile with ⟨hExpr, _hAsm⟩
+  exact compileExpressionsProgram?_lookup_of_find? hExpr hFind
+
+theorem compileChecked?_programSafe
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    (hCompile :
+      compileChecked? range program = some (plan, exprProgram, asm)) :
+    FunctionSourceNoMemoryTouch.ProgramSafe program := by
+  rcases compileChecked?_eq_some hCompile with ⟨hExpr, _hAsm⟩
+  exact compileExpressionsProgram?_programSafe hExpr
+
+theorem compileChecked?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    (hCompile :
+      compileChecked? range program = some (plan, exprProgram, asm)) :
+    Assembly.Program.usesCallCreate asm = false := by
+  rcases compileChecked?_eq_some hCompile with ⟨hExpr, hAsm⟩
+  exact
+    Expressions.Program.compileChecked?_noCallCreate
+      (compileExpressionsProgram?_noCallCreate hExpr) hAsm
+
+noncomputable def compileCheckedAssembly?
+    (range : ScratchRange) (program : Program) :
+    Option Assembly.Program := do
+  let (_plan, _exprProgram, asm) ← compileChecked? range program
+  some asm
+
+def plannedScratchRange (words : Nat) : ScratchRange :=
+  { base := 0, words := words }
+
+def plannedScratchRangeChecked? (words : Nat) : Option ScratchRange :=
+  let range := plannedScratchRange words
+  if range.preallocFits? then some range else none
+
+theorem plannedScratchRangeChecked?_eq_some
+    {words : Nat} {range : ScratchRange}
+    (hChecked : plannedScratchRangeChecked? words = some range) :
+    range = plannedScratchRange words ∧ range.preallocFits? = true := by
+  unfold plannedScratchRangeChecked? at hChecked
+  by_cases hFits : (plannedScratchRange words).preallocFits? = true
+  · simp [hFits] at hChecked
+    subst range
+    exact ⟨rfl, hFits⟩
+  · simp [hFits] at hChecked
+
+noncomputable def compileCheckedPlannedPreallocFrom?
+    (program : Program) : Nat → Nat →
+      Option (ScratchRange × Plan × Expressions.Program × Assembly.Program)
+  | remaining, words =>
+      match plannedScratchRangeChecked? words with
+      | some range =>
+          match compileChecked? range program with
+          | some (plan, exprProgram, asm) =>
+              some (range, plan, exprProgram, asm)
+          | none =>
+              match remaining with
+              | 0 => none
+              | remaining' + 1 =>
+                  compileCheckedPlannedPreallocFrom? program remaining'
+                    (words + 1)
+      | none =>
+          match remaining with
+          | 0 => none
+          | remaining' + 1 =>
+              compileCheckedPlannedPreallocFrom? program remaining' (words + 1)
+
+noncomputable def compileCheckedPlannedPrealloc?
+    (maxWords : Nat) (program : Program) :
+    Option (ScratchRange × Plan × Expressions.Program × Assembly.Program) :=
+  compileCheckedPlannedPreallocFrom? program maxWords 0
+
+theorem compileCheckedAssembly?_eq_some
+    {range : ScratchRange} {program : Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedAssembly? range program = some asm) :
+    ∃ plan exprProgram,
+      compileChecked? range program = some (plan, exprProgram, asm) := by
+  unfold compileCheckedAssembly? at hCompile
+  cases hFull : compileChecked? range program with
+  | none =>
+      simp [hFull] at hCompile
+  | some result =>
+      rcases result with ⟨plan, exprProgram, asm'⟩
+      simp [hFull] at hCompile
+      cases hCompile
+      exact ⟨plan, exprProgram, rfl⟩
+
+theorem compileCheckedPlannedPreallocFrom?_eq_some
+    {program : Program} {remaining start : Nat}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedPlannedPreallocFrom? program remaining start =
+        some (range, plan, exprProgram, asm)) :
+    compileChecked? range program = some (plan, exprProgram, asm) ∧
+      range.preallocFits? = true ∧
+      range.base = 0 ∧
+      start ≤ range.words ∧ range.words ≤ start + remaining := by
+  revert hCompile
+  revert start range plan exprProgram asm
+  induction remaining with
+  | zero =>
+      intro start range plan exprProgram asm hCompile
+      unfold compileCheckedPlannedPreallocFrom? at hCompile
+      cases hRange : plannedScratchRangeChecked? start with
+      | none =>
+          simp [hRange] at hCompile
+      | some plannedRange =>
+          cases hFull : compileChecked? plannedRange program with
+          | none =>
+              simp [hRange, hFull] at hCompile
+          | some result =>
+              rcases result with ⟨plan', exprProgram', asm'⟩
+              simp [hRange, hFull] at hCompile
+              rcases hCompile with ⟨rfl, rfl, rfl, rfl⟩
+              rcases plannedScratchRangeChecked?_eq_some hRange with
+                ⟨hPlanned, hFits⟩
+              subst plannedRange
+              exact ⟨hFull, hFits, rfl, by simp [plannedScratchRange],
+                by simp [plannedScratchRange]⟩
+  | succ remaining ih =>
+      intro start range plan exprProgram asm hCompile
+      unfold compileCheckedPlannedPreallocFrom? at hCompile
+      cases hRange : plannedScratchRangeChecked? start with
+      | some plannedRange =>
+          cases hFull : compileChecked? plannedRange program with
+          | some result =>
+              rcases result with ⟨plan', exprProgram', asm'⟩
+              simp [hRange, hFull] at hCompile
+              rcases hCompile with ⟨rfl, rfl, rfl, rfl⟩
+              rcases plannedScratchRangeChecked?_eq_some hRange with
+                ⟨hPlanned, hFits⟩
+              subst plannedRange
+              exact ⟨hFull, hFits, rfl, by simp [plannedScratchRange],
+                by simp [plannedScratchRange]⟩
+          | none =>
+              simp [hRange, hFull] at hCompile
+              have hTail := ih hCompile
+              rcases hTail with
+                ⟨hChecked, hFits, hBase, hStart, hBound⟩
+              exact ⟨hChecked, hFits, hBase, by omega, by omega⟩
+      | none =>
+          simp [hRange] at hCompile
+          have hTail := ih hCompile
+          rcases hTail with
+            ⟨hChecked, hFits, hBase, hStart, hBound⟩
+          exact ⟨hChecked, hFits, hBase, by omega, by omega⟩
+
+theorem compileCheckedPlannedPrealloc?_eq_some
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    compileChecked? range program = some (plan, exprProgram, asm) ∧
+      range.base = 0 ∧ range.words ≤ maxWords := by
+  have h :=
+    compileCheckedPlannedPreallocFrom?_eq_some
+      (program := program) (remaining := maxWords) (start := 0)
+      (range := range) (plan := plan) (exprProgram := exprProgram)
+      (asm := asm)
+      hCompile
+  rcases h with ⟨hChecked, _hFits, hBase, _hStart, hBound⟩
+  exact ⟨hChecked, hBase, by simpa using hBound⟩
+
+theorem compileCheckedPlannedPrealloc?_noCallCreate
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    Assembly.Program.usesCallCreate asm = false :=
+  compileChecked?_noCallCreate (compileCheckedPlannedPrealloc?_eq_some hCompile).1
+
+theorem compileCheckedPlannedPrealloc?_preallocFits
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    range.preallocFits? = true := by
+  have h :=
+    compileCheckedPlannedPreallocFrom?_eq_some
+      (program := program) (remaining := maxWords) (start := 0)
+      hCompile
+  exact h.2.1
+
+theorem compileCheckedPlannedPrealloc?_programSafe
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    FunctionSourceNoMemoryTouch.ProgramSafe program := by
+  rcases compileCheckedPlannedPrealloc?_eq_some hCompile with
+    ⟨hChecked, _hBase, _hBound⟩
+  exact compileChecked?_programSafe hChecked
+
+theorem compileCheckedPlannedPrealloc?_expressions_compile
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    compileExpressionsProgram? range program = some (plan, exprProgram) ∧
+      Expressions.Program.compileChecked? exprProgram = some asm ∧
+      range.base = 0 ∧ range.words ≤ maxWords := by
+  rcases compileCheckedPlannedPrealloc?_eq_some hCompile with
+    ⟨hChecked, hBase, hBound⟩
+  rcases compileChecked?_eq_some hChecked with ⟨hExpr, hAsm⟩
+  exact ⟨hExpr, hAsm, hBase, hBound⟩
+
+theorem compileCheckedPlannedPrealloc?_expressions_preserves_endPc
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState} {outcome : Expressions.Outcome}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm))
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun : exprProgram.run fuel initial = .ok outcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases compileCheckedPlannedPrealloc?_eq_some hCompile with
+    ⟨hChecked, _hBase, _hBound⟩
+  exact
+    compileChecked?_expressions_preserves_endPc hChecked hInitialPc hRun
+
+theorem sharedPrivateObservable_of_invariant_left
+    {source ghost target : EvmYul.SharedState .EVM}
+    (hInv : SharedStatePrivateScratchInvariant source ghost)
+    (hObs : SharedStatePrivateScratchObservable ghost target) :
+    SharedStatePrivateScratchObservable source target where
+  accountMap_eq := hObs.accountMap_eq.trans hInv.accountMap_eq
+  sigma0_eq := hObs.sigma0_eq.trans hInv.sigma0_eq
+  totalGasUsedInBlock_eq :=
+    hObs.totalGasUsedInBlock_eq.trans hInv.totalGasUsedInBlock_eq
+  transactionReceipts_eq :=
+    hObs.transactionReceipts_eq.trans hInv.transactionReceipts_eq
+  substate_eq := hObs.substate_eq.trans hInv.substate_eq
+  executionEnv_eq := hObs.executionEnv_eq.trans hInv.executionEnv_eq
+  blocks_eq := hObs.blocks_eq.trans hInv.blocks_eq
+  genesisBlockHeader_eq :=
+    hObs.genesisBlockHeader_eq.trans hInv.genesisBlockHeader_eq
+  createdAccounts_eq :=
+    hObs.createdAccounts_eq.trans hInv.createdAccounts_eq
+  returnData_eq := hObs.returnData_eq.trans hInv.returnData_eq
+  hReturn_eq := hObs.hReturn_eq.trans hInv.hReturn_eq
+
+theorem adaptiveSpillPrivateObservable_halt_of_callAware_halt_replay
+    {range : ScratchRange}
+    {kind : Assembly.HaltKind}
+    {source ghost : Source.State}
+    {haltTarget : Expressions.RunState}
+    {targetOutcome : Assembly.StepResult}
+    (hSourceGhost : SourceStatePrivateScratchInvariant source ghost)
+    (hShared :
+      SharedStateEqOutsideScratch range ghost.shared
+        haltTarget.evm.toSharedState)
+    (hWhole :
+      Structured.Preservation.WholeProgramOutcomeRel
+        (Expressions.Outcome.halt kind haltTarget) targetOutcome) :
+    Locals.Source.Program.AdaptiveSpillPrivateObservableOutcomeRel range
+      (Source.Outcome.halt kind source) targetOutcome := by
+  cases targetOutcome with
+  | running asmTarget =>
+      simp [Structured.Preservation.WholeProgramOutcomeRel,
+        Expressions.Outcome.halt] at hWhole
+  | halted halt =>
+      rcases hWhole with ⟨hKind, hFrame⟩
+      rcases hFrame with ⟨_tokens, hFrameRel⟩
+      have hStackShared :
+          SharedStateEqOutsideScratch range ghost.shared
+            ({ haltTarget.evm with stack := halt.state.stack } :
+              EVMState).toSharedState := by
+        simpa using hShared
+      have hErase :
+          Structured.Preservation.eraseControl
+              ({ haltTarget.evm with stack := halt.state.stack } :
+                EVMState) =
+            Structured.Preservation.eraseControl halt.state := by
+        simpa using hFrameRel.dataRel.symm
+      have hExcept :
+          SharedStateEqOutsideScratchExceptGas range ghost.shared
+            halt.state.toSharedState :=
+        SharedStateEqOutsideScratch.exceptGas_of_eraseControl
+          hStackShared hErase
+      have hGhostObs :
+          SharedStatePrivateScratchObservable ghost.shared
+            halt.state.toSharedState :=
+        SharedStatePrivateScratchObservable.of_exceptGas hExcept
+      have hSourceObs :
+          SharedStatePrivateScratchObservable source.shared
+            halt.state.toSharedState :=
+        sharedPrivateObservable_of_invariant_left hSourceGhost.shared
+          hGhostObs
+      simpa [Locals.Source.Program.AdaptiveSpillPrivateObservableOutcomeRel,
+        Locals.Source.Program.ConservativeSpillPrivateObservableOutcomeRel,
+        Source.Outcome.halt] using And.intro hKind.symm hSourceObs
+
+theorem compileCheckedPlannedPrealloc?_regular_observations_of_ghostRun
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {maxWords : Nat} {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState}
+    {sourceAfter ghostAfter : Source.State}
+    {sourceCtxAfter : Source.Ctx}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm))
+    (hSupport : ProgramCallAwareSupported program)
+    (hInitialMemory : ScratchInitialMemoryEmpty initial.toMachineState)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hGhostRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          Source.Ctx.initial fuel program.body
+          (Source.Program.initialState
+            (range.preallocState initial).toSharedState) =
+        .ok (Source.Outcome.regular ghostAfter, sourceCtxAfter))
+    (hSourceGhost :
+      SourceStatePrivateScratchInvariant sourceAfter ghostAfter) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.AdaptiveSpillPrivateObservableOutcomeRel range
+        (Source.Outcome.regular sourceAfter) targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases compileCheckedPlannedPrealloc?_eq_some hCompile with
+    ⟨hChecked, _hBase, _hBound⟩
+  rcases compileChecked?_eq_some hChecked with ⟨hExpr, hAsm⟩
+  rcases compileExpressionsProgram?_eq_some_components hExpr with
+    ⟨procs, bodyPlan, _hProcs, hBody, hPlanEq, hExprProgram⟩
+  subst plan
+  subst exprProgram
+  have hFits : range.preallocFits? = true :=
+    compileCheckedPlannedPrealloc?_preallocFits hCompile
+  have hReady : range.preallocReady? initial.toMachineState = true :=
+    ScratchRange.preallocReady?_of_fits hSpec hWordBytes hFits
+      (ScratchInitialMemoryEmpty.activeNoOverflow hInitialMemory)
+  rcases run_scratchPreallocCode_preallocState range initial with
+    ⟨preallocTarget, hPreRun, _hPreStack, hPreMachine, hPreShared⟩
+  let initialRunState : Expressions.RunState :=
+    Structured.Program.initialState initial
+  let preallocRunState : Expressions.RunState :=
+    initialRunState.withEVM preallocTarget
+  have hBoundary :
+      PrivateScratchBoundary.scratchCheck?
+          preallocTarget.toMachineState range [] [] [] =
+        true := by
+    rw [hPreMachine]
+    exact scratchCheck?_preallocMachine_empty hReady
+  have hGhostRunPreallocTarget :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          Source.Ctx.initial fuel program.body
+          (Source.Program.initialState preallocTarget.toSharedState) =
+        .ok (Source.Outcome.regular ghostAfter, sourceCtxAfter) := by
+    simpa [hPreShared] using hGhostRun
+  have hInitialRel :
+      SpillStateRel range [] [] []
+        (Source.Program.initialState preallocTarget.toSharedState)
+        preallocTarget :=
+    SpillStateRel.of_scratchBoundary_empty hBoundary
+      (SharedStateEqOutsideScratch.refl range preallocTarget.toSharedState)
+  have hBodySupported : BlockRegularOpenSupported [] program.body :=
+    blockRegularOpenSupported_of_openSupported_regular_run
+      hSupport.openSupported.body hGhostRunPreallocTarget
+  rcases
+      compileBlockOpen?_regular_sound_meta_of_programCallAwareSupported
+        hSpec hWordBytes hExpr hSupport hBody hBodySupported (by rfl)
+        (target := preallocRunState)
+        (by simpa [preallocRunState] using hInitialRel)
+        SpillLayout.StoreDefined.nil hGhostRunPreallocTarget with
+    ⟨bodyFinal, bodyFuel, hBodyRun, hBodyRel, _hBodyDefined,
+      _hSourceScope⟩
+  have hPreBlockRun :
+      ∃ preFuel,
+        Expressions.Block.run
+            { procs := procs,
+              body := (withScratchPrealloc range bodyPlan).block }
+            preFuel (ExpressionsBlock.ofCode (scratchPreallocCode range))
+            initialRunState =
+          .ok (Expressions.Outcome.regular preallocRunState) := by
+    rcases
+        expressionsBlock_ofCode_run_exists
+          ({ procs := procs,
+             body := (withScratchPrealloc range bodyPlan).block } :
+            Expressions.Program)
+          (state := initialRunState) hPreRun with
+      ⟨preFuel, hRun⟩
+    exact ⟨preFuel, by simpa [initialRunState, preallocRunState] using hRun⟩
+  have hBodyRun' :
+      ∃ bodyFuel',
+        Expressions.Block.run
+            { procs := procs,
+              body := (withScratchPrealloc range bodyPlan).block }
+            bodyFuel' bodyPlan.block preallocRunState =
+          .ok
+            (Expressions.Outcome.regular
+              (initialRunState.withEVM bodyFinal)) := by
+    refine ⟨bodyFuel, ?_⟩
+    simpa [preallocRunState, initialRunState,
+      Expressions.RunState.withEVM_withEVM] using hBodyRun
+  rcases
+      expressionsBlock_append_regular_exists
+        ({ procs := procs,
+           body := (withScratchPrealloc range bodyPlan).block } :
+          Expressions.Program)
+        hPreBlockRun hBodyRun' with
+    ⟨exprFuel, hExprBlockRun⟩
+  have hExprRun :
+      ({ procs := procs,
+         body := (withScratchPrealloc range bodyPlan).block } :
+        Expressions.Program).run exprFuel initial =
+        .ok
+          (Expressions.Outcome.regular
+            (initialRunState.withEVM bodyFinal)) := by
+    simpa [Expressions.Program.run, initialRunState, withScratchPrealloc]
+      using hExprBlockRun
+  rcases
+      Expressions.Program.compile_preserves_of_compileChecked_endPc
+        hAsm hInitialPc hExprRun with
+    ⟨targetFuel, targetOutcome, hAsmRun, hAsmRel, hEndPc⟩
+  let openPlan : SpillPlan :=
+    { sourceScope := bodyPlan.sourceScope
+      stackLayout := bodyPlan.stackLayout
+      layout := bodyPlan.layout
+      code := .Code [] }
+  have hOpenRel :
+      Locals.Source.Program.AdaptiveSpillOpenOutcomeRel range initial
+        (Source.Outcome.regular ghostAfter) targetOutcome := by
+    refine ⟨openPlan, .regular bodyFinal, ?_, ?_⟩
+    · simpa [openPlan] using SpillOutcomeRel.regular hBodyRel
+    · simpa [SpillStmtCode.toExpressionsOutcome, initialRunState] using hAsmRel
+  have hOutcomeInv :
+      SourceOutcomePrivateScratchInvariant
+        (Source.Outcome.regular sourceAfter)
+        (Source.Outcome.regular ghostAfter) := by
+    simpa [Source.Outcome.regular, Locals.Source.Outcome.regular] using
+      SourceOutcomePrivateScratchInvariant.regular hSourceGhost
+  have hPrivate :
+      Locals.Source.Program.AdaptiveSpillPrivateObservableOutcomeRel range
+        (Source.Outcome.regular sourceAfter) targetOutcome := by
+    simpa [Locals.Source.Program.AdaptiveSpillPrivateObservableOutcomeRel] using
+      Locals.Source.Program.ConservativeSpillOpenOutcomeRel.privateObservable_of_source_privateScratchInvariant
+        hOutcomeInv
+        (by simpa [Locals.Source.Program.AdaptiveSpillOpenOutcomeRel] using
+          hOpenRel)
+  exact ⟨targetFuel, targetOutcome, hAsmRun, hPrivate, hEndPc⟩
+
+theorem compileCheckedPlannedPrealloc?_halt_observations_of_ghostRun
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {maxWords : Nat} {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState}
+    {sourceAfter ghostAfter : Source.State}
+    {sourceCtxAfter : Source.Ctx}
+    {kind : Assembly.HaltKind}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm))
+    (hSupport : ProgramCallAwareSupported program)
+    (hInitialMemory : ScratchInitialMemoryEmpty initial.toMachineState)
+    (hInitialStack : initial.stack = [])
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hGhostRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          Source.Ctx.initial fuel program.body
+          (Source.Program.initialState
+            (range.preallocState initial).toSharedState) =
+        .ok (Source.Outcome.halt kind ghostAfter, sourceCtxAfter))
+    (hSourceGhost :
+      SourceStatePrivateScratchInvariant sourceAfter ghostAfter) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.AdaptiveSpillPrivateObservableOutcomeRel range
+        (Source.Outcome.halt kind sourceAfter) targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases compileCheckedPlannedPrealloc?_eq_some hCompile with
+    ⟨hChecked, _hBase, _hBound⟩
+  rcases compileChecked?_eq_some hChecked with ⟨hExpr, hAsm⟩
+  rcases compileExpressionsProgram?_eq_some_components hExpr with
+    ⟨procs, bodyPlan, _hProcs, hBody, hPlanEq, hExprProgram⟩
+  subst plan
+  subst exprProgram
+  have hFits : range.preallocFits? = true :=
+    compileCheckedPlannedPrealloc?_preallocFits hCompile
+  have hReady : range.preallocReady? initial.toMachineState = true :=
+    ScratchRange.preallocReady?_of_fits hSpec hWordBytes hFits
+      (ScratchInitialMemoryEmpty.activeNoOverflow hInitialMemory)
+  rcases run_scratchPreallocCode_preallocState range initial with
+    ⟨preallocTarget, hPreRun, hPreStack, hPreMachine, hPreShared⟩
+  let initialRunState : Expressions.RunState :=
+    Structured.Program.initialState initial
+  let preallocRunState : Expressions.RunState :=
+    initialRunState.withEVM preallocTarget
+  have hBoundary :
+      PrivateScratchBoundary.scratchCheck?
+          preallocTarget.toMachineState range [] [] [] =
+        true := by
+    rw [hPreMachine]
+    exact scratchCheck?_preallocMachine_empty hReady
+  have hGhostRunPreallocTarget :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          Source.Ctx.initial fuel program.body
+          (Source.Program.initialState preallocTarget.toSharedState) =
+        .ok (Source.Outcome.halt kind ghostAfter, sourceCtxAfter) := by
+    simpa [hPreShared] using hGhostRun
+  have hInitialRel :
+      SpillStateRel range [] [] []
+        (Source.Program.initialState preallocTarget.toSharedState)
+        preallocTarget :=
+    SpillStateRel.of_scratchBoundary_empty hBoundary
+      (SharedStateEqOutsideScratch.refl range preallocTarget.toSharedState)
+  rcases
+      compileBlockOpen?_halt_sound_meta_of_programCallAwareSupported
+        hSpec hWordBytes hExpr hSupport hBody hSupport.openSupported.body
+        (by rfl)
+        (target := preallocRunState)
+        (by simpa [preallocRunState] using hInitialRel)
+        SpillLayout.StoreDefined.nil
+        (by
+          simpa [preallocRunState, Structured.RunState.withEVM, hPreStack,
+            hInitialStack])
+        hGhostRunPreallocTarget with
+    ⟨haltTarget, bodyFuel, hBodyRun, hBodyShared⟩
+  have hPreBlockRun :
+      ∃ preFuel,
+        Expressions.Block.run
+            { procs := procs,
+              body := (withScratchPrealloc range bodyPlan).block }
+            preFuel (ExpressionsBlock.ofCode (scratchPreallocCode range))
+            initialRunState =
+          .ok (Expressions.Outcome.regular preallocRunState) := by
+    rcases
+        expressionsBlock_ofCode_run_exists
+          ({ procs := procs,
+             body := (withScratchPrealloc range bodyPlan).block } :
+            Expressions.Program)
+          (state := initialRunState) hPreRun with
+      ⟨preFuel, hRun⟩
+    exact ⟨preFuel, by simpa [initialRunState, preallocRunState] using hRun⟩
+  have hBodyRun' :
+      ∃ bodyFuel',
+        Expressions.Block.run
+            { procs := procs,
+              body := (withScratchPrealloc range bodyPlan).block }
+            bodyFuel' bodyPlan.block preallocRunState =
+          .ok (Expressions.Outcome.halt kind haltTarget) := by
+    refine ⟨bodyFuel, ?_⟩
+    simpa [preallocRunState, initialRunState] using hBodyRun
+  rcases
+      expressionsBlock_append_regular_exists
+        ({ procs := procs,
+           body := (withScratchPrealloc range bodyPlan).block } :
+          Expressions.Program)
+        hPreBlockRun hBodyRun' with
+    ⟨exprFuel, hExprBlockRun⟩
+  have hExprRun :
+      ({ procs := procs,
+         body := (withScratchPrealloc range bodyPlan).block } :
+        Expressions.Program).run exprFuel initial =
+        .ok (Expressions.Outcome.halt kind haltTarget) := by
+    simpa [Expressions.Program.run, initialRunState, withScratchPrealloc]
+      using hExprBlockRun
+  rcases
+      Expressions.Program.compile_preserves_of_compileChecked_endPc
+        hAsm hInitialPc hExprRun with
+    ⟨targetFuel, targetOutcome, hAsmRun, hAsmRel, hEndPc⟩
+  have hPrivate :
+      Locals.Source.Program.AdaptiveSpillPrivateObservableOutcomeRel range
+        (Source.Outcome.halt kind sourceAfter) targetOutcome :=
+    adaptiveSpillPrivateObservable_halt_of_callAware_halt_replay
+      hSourceGhost hBodyShared hAsmRel
+  exact ⟨targetFuel, targetOutcome, hAsmRun, hPrivate, hEndPc⟩
+
+theorem compileCheckedPlannedPrealloc?_regular_observations_initialState_emptyMemory_privateObservable_endPc
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {maxWords : Nat} {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState}
+    {sourceAfter : Source.State} {sourceCtxAfter : Source.Ctx}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm))
+    (hSupport : ProgramCallAwareSupported program)
+    (hInitialMemory : ScratchInitialMemoryEmpty initial.toMachineState)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          Source.Ctx.initial fuel program.body
+          (Source.Program.initialState initial.toSharedState) =
+        .ok (Source.Outcome.regular sourceAfter, sourceCtxAfter)) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.AdaptiveSpillPrivateObservableOutcomeRel range
+        (Source.Outcome.regular sourceAfter) targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  have hProgramSafe :
+      FunctionSourceNoMemoryTouch.ProgramSafe program :=
+    compileCheckedPlannedPrealloc?_programSafe hCompile
+  have hInitialRel :
+      SourceStatePrivateScratchInvariant
+        (Source.Program.initialState initial.toSharedState)
+        (Source.Program.initialState
+          (range.preallocState initial).toSharedState) := by
+    refine
+      { shared := ?_
+        vars_eq := ?_ }
+    · exact SharedStatePrivateScratchInvariant.preallocState range initial
+    · simp [Source.Program.initialState]
+  rcases
+      FunctionSourceNoMemoryTouch.sourceBlockRunOpen_privateScratchInvariant
+        hProgramSafe hProgramSafe.body hInitialRel hSourceRun with
+    ⟨ghostOutcome, hGhostRun, hOutcomeInv⟩
+  rcases ghostOutcome with ⟨ghostAfter, ghostMode⟩
+  have hGhostMode : ghostMode = Locals.Source.Mode.regular := by
+    simpa [Source.Outcome.regular, Locals.Source.Outcome.regular]
+      using hOutcomeInv.mode_eq
+  subst ghostMode
+  exact
+    compileCheckedPlannedPrealloc?_regular_observations_of_ghostRun
+      hSpec hWordBytes hCompile hSupport hInitialMemory hInitialPc
+      (by
+        simpa [Source.Outcome.regular, Locals.Source.Outcome.regular]
+          using hGhostRun)
+      hOutcomeInv.state
+
+theorem compileCheckedPlannedPrealloc?_halt_observations_initialState_emptyMemory_privateObservable_endPc
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {maxWords : Nat} {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState}
+    {sourceAfter : Source.State} {sourceCtxAfter : Source.Ctx}
+    {kind : Assembly.HaltKind}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm))
+    (hSupport : ProgramCallAwareSupported program)
+    (hInitialMemory : ScratchInitialMemoryEmpty initial.toMachineState)
+    (hInitialStack : initial.stack = [])
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hSourceRun :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+          Source.Ctx.initial fuel program.body
+          (Source.Program.initialState initial.toSharedState) =
+        .ok (Source.Outcome.halt kind sourceAfter, sourceCtxAfter)) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.AdaptiveSpillPrivateObservableOutcomeRel range
+        (Source.Outcome.halt kind sourceAfter) targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  have hProgramSafe :
+      FunctionSourceNoMemoryTouch.ProgramSafe program :=
+    compileCheckedPlannedPrealloc?_programSafe hCompile
+  have hInitialRel :
+      SourceStatePrivateScratchInvariant
+        (Source.Program.initialState initial.toSharedState)
+        (Source.Program.initialState
+          (range.preallocState initial).toSharedState) := by
+    refine
+      { shared := ?_
+        vars_eq := ?_ }
+    · exact SharedStatePrivateScratchInvariant.preallocState range initial
+    · simp [Source.Program.initialState]
+  rcases
+      FunctionSourceNoMemoryTouch.sourceBlockRunOpen_privateScratchInvariant
+        hProgramSafe hProgramSafe.body hInitialRel hSourceRun with
+    ⟨ghostOutcome, hGhostRun, hOutcomeInv⟩
+  rcases ghostOutcome with ⟨ghostAfter, ghostMode⟩
+  have hGhostMode : ghostMode = Locals.Source.Mode.halt kind := by
+    simpa [Source.Outcome.halt, Locals.Source.Outcome.halt]
+      using hOutcomeInv.mode_eq
+  subst ghostMode
+  exact
+    compileCheckedPlannedPrealloc?_halt_observations_of_ghostRun
+      hSpec hWordBytes hCompile hSupport hInitialMemory hInitialStack
+      hInitialPc
+      (by
+        simpa [Source.Outcome.halt, Locals.Source.Outcome.halt]
+          using hGhostRun)
+      hOutcomeInv.state
+
+theorem compileCheckedPlannedPrealloc?_regular_preserves_initialState_emptyMemory_privateObservable_endPc
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {maxWords : Nat} {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState} {sourceAfter : Source.State}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm))
+    (hSupport : ProgramCallAwareSupported program)
+    (hInitialMemory : ScratchInitialMemoryEmpty initial.toMachineState)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hSourceRun :
+      Source.Program.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok (Source.Outcome.regular sourceAfter)) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.AdaptiveSpillPrivateObservableProgramOutcomeRel
+        range (Source.Outcome.regular sourceAfter) targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  unfold Source.Program.run Source.Program.runState at hSourceRun
+  unfold Source.Block.runScoped at hSourceRun
+  cases hOpen :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+        Source.Ctx.initial fuel program.body
+        (Source.Program.initialState initial.toSharedState) with
+  | error err =>
+      simp [hOpen] at hSourceRun
+  | ok openResult =>
+      rcases openResult with ⟨openOutcome, sourceCtxAfter⟩
+      rcases openOutcome with ⟨openState, openMode⟩
+      cases openMode with
+      | regular =>
+          simp [hOpen, Source.Outcome.regular,
+            Locals.Source.Outcome.regular] at hSourceRun
+          rcases
+              compileCheckedPlannedPrealloc?_regular_observations_initialState_emptyMemory_privateObservable_endPc
+                hSpec hWordBytes hCompile hSupport hInitialMemory hInitialPc
+                (sourceAfter := openState) (sourceCtxAfter := sourceCtxAfter)
+                (by
+                  simpa [Source.Outcome.regular,
+                    Locals.Source.Outcome.regular] using hOpen) with
+            ⟨targetFuel, targetOutcome, hAsmRun, hOpenRel, hEndPc⟩
+          refine
+            ⟨targetFuel, targetOutcome, hAsmRun,
+              ⟨Source.Outcome.regular openState, hOpenRel, ?_⟩, hEndPc⟩
+          simpa [Locals.Source.Program.scopedProgramOutcome,
+            Source.Outcome.regular, Locals.Source.Outcome.regular]
+            using hSourceRun.symm
+      | brk =>
+          simp [hOpen, Source.Outcome.brk, Locals.Source.Outcome.brk,
+            Source.Outcome.regular, Locals.Source.Outcome.regular]
+            at hSourceRun
+      | cont =>
+          simp [hOpen, Source.Outcome.cont, Locals.Source.Outcome.cont,
+            Source.Outcome.regular, Locals.Source.Outcome.regular]
+            at hSourceRun
+      | leave =>
+          simp [hOpen, Source.Outcome.leave, Locals.Source.Outcome.leave,
+            Source.Outcome.regular, Locals.Source.Outcome.regular]
+            at hSourceRun
+      | halt kind =>
+          simp [hOpen, Source.Outcome.halt, Locals.Source.Outcome.halt,
+            Source.Outcome.regular, Locals.Source.Outcome.regular]
+            at hSourceRun
+
+theorem compileCheckedPlannedPrealloc?_halt_preserves_initialState_emptyMemory_privateObservable_endPc
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {maxWords : Nat} {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState} {sourceAfter : Source.State}
+    {kind : Assembly.HaltKind}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm))
+    (hSupport : ProgramCallAwareSupported program)
+    (hInitialMemory : ScratchInitialMemoryEmpty initial.toMachineState)
+    (hInitialStack : initial.stack = [])
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hSourceRun :
+      Source.Program.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok (Source.Outcome.halt kind sourceAfter)) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.AdaptiveSpillPrivateObservableProgramOutcomeRel
+        range (Source.Outcome.halt kind sourceAfter) targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  unfold Source.Program.run Source.Program.runState at hSourceRun
+  unfold Source.Block.runScoped at hSourceRun
+  cases hOpen :
+      Source.Block.runOpen Locals.Source.PrimitiveSemantics.structured program
+        Source.Ctx.initial fuel program.body
+        (Source.Program.initialState initial.toSharedState) with
+  | error err =>
+      simp [hOpen] at hSourceRun
+  | ok openResult =>
+      rcases openResult with ⟨openOutcome, sourceCtxAfter⟩
+      rcases openOutcome with ⟨openState, openMode⟩
+      cases openMode with
+      | regular =>
+          simp [hOpen, Source.Outcome.regular,
+            Locals.Source.Outcome.regular, Source.Outcome.halt,
+            Locals.Source.Outcome.halt] at hSourceRun
+      | brk =>
+          simp [hOpen, Source.Outcome.brk, Locals.Source.Outcome.brk,
+            Source.Outcome.halt, Locals.Source.Outcome.halt]
+            at hSourceRun
+      | cont =>
+          simp [hOpen, Source.Outcome.cont, Locals.Source.Outcome.cont,
+            Source.Outcome.halt, Locals.Source.Outcome.halt]
+            at hSourceRun
+      | leave =>
+          simp [hOpen, Source.Outcome.leave, Locals.Source.Outcome.leave,
+            Source.Outcome.halt, Locals.Source.Outcome.halt]
+            at hSourceRun
+      | halt openKind =>
+          rcases
+              compileCheckedPlannedPrealloc?_halt_observations_initialState_emptyMemory_privateObservable_endPc
+                hSpec hWordBytes hCompile hSupport hInitialMemory
+                hInitialStack hInitialPc
+                (sourceAfter := openState)
+                (sourceCtxAfter := sourceCtxAfter)
+                (kind := openKind)
+                (by
+                  simpa [Source.Outcome.halt,
+                    Locals.Source.Outcome.halt] using hOpen) with
+            ⟨targetFuel, targetOutcome, hAsmRun, hOpenRel, hEndPc⟩
+          refine
+            ⟨targetFuel, targetOutcome, hAsmRun,
+              ⟨Source.Outcome.halt openKind openState, hOpenRel, ?_⟩,
+              hEndPc⟩
+          simpa [Locals.Source.Program.scopedProgramOutcome,
+            Source.Outcome.halt, Locals.Source.Outcome.halt, hOpen]
+            using hSourceRun.symm
+
+theorem compileCheckedPlannedPrealloc?_lookup_of_find?
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    {name : Name} {fn : FunDef}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm))
+    (hFind : FunList.find? name program.functions = some fn) :
+    ∃ proc,
+      Expressions.ProcList.lookup? name exprProgram.procs = some proc ∧
+        proc.name = fn.name ∧
+        proc.argc = fn.params.length ∧
+        proc.retc = fn.returns.length := by
+  rcases compileCheckedPlannedPrealloc?_eq_some hCompile with
+    ⟨hChecked, _hBase, _hBound⟩
+  exact compileChecked?_lookup_of_find? hChecked hFind
+
+end CallAwareSpill
+end Functions
+end EvmCompiler

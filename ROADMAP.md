@@ -1,14 +1,293 @@
 # Roadmap
 
+## Yul Object / Deployment Code-Image Interface
+
+2026-06-06 12:59 CEST: the object runtime now has suffix-aware public wrappers.
+`Source.Program.sourceRunWithCodeImage?` runs the independent object semantics
+with an explicit `ExecutionEnv.codeBytes`; `sourceRunWithCodeSuffix?` runs with
+`bytecodeImage? program ++ suffix`. The proved bridge wrappers
+`RecursiveBridgeObjectCodeImageTopAssumptions` and
+`RecursiveBridgeObjectSuffixTopAssumptions` reduce those source runs to the
+existing core Yul recursive bridge when `shared.executionEnv.codeBytes` is the
+same image. This models deployment constructor-argument suffixes inside the
+local Yul/EVM code-bytes interface, not as part of the external world. The
+generic top theorem remains parametric in `terminalRel` for custom observation
+relations, but the default object path now has canonical wrappers using
+`canonicalTerminalRel`/`canonicalRevertRel`; the canonical terminal relation has
+the checked `canonicalTerminalRel_H_return` projection, so the default object
+route is not vacuous with respect to terminal `H_return`.
+
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-05 08:40 CEST.
+Last updated: 2026-06-06 14:59 CEST.
 
 ### Current Assessment
 
 This is the authoritative current CALL status. Older detailed chronology is
 kept below for theorem-history context; where wording below sounds broader or
 staler, this section wins.
+
+2026-06-06 14:59 CEST addendum: added a stronger public CALL-family top package
+`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions`.
+It packages the exact final checked compiler result together with the source
+run, initial code-image relation, and target runtime, derives the older
+canonical CALL-family top assumptions from checked compilation, and exposes
+named final-observation / at-gas / outcome-safety / result-or-failure
+conclusion wrappers over the no-artificial-cap external-world carrier.
+`LayerAudit` pins this stronger top package and wrappers, so the preferred
+audit surface no longer asks callers to traffic in route-local replay/layout
+proof artifacts.
+
+2026-06-06 13:08 CEST addendum: the no-artificial-cap CALL gas liveness/safety
+goal is completion-audited. The public carrier
+`OpenXCallFamilyNoArtificialCapExternalWorldReadyFor` bundles response-gas
+admissibility with strict-or-all-forwarded-OOG result tracking. Ordinary
+continuing CALL responses must agree on success, return data, and opaque
+reentrant mutation; a non-equivalent response pair is allowed only through the
+all-forwarded child-OOG branch plus whole-run final-observation tracking. The
+contract endpoint exposes high-gas replay for every `gasBound <= gas <
+UInt256.size`, feasible replay when `gasBound < UInt256.size`, and arbitrary
+UInt256-gas safety as matching committed observation or revert/OOG failure.
+There is no fixed per-CALL cap in the current proof spine. Verification:
+`lake build EvmCompiler.Yul.OpenGasAware EvmCompiler.Yul.OpenRuntime
+EvmCompiler.LayerAudit`, both gas audit Lean files, scoped proof-hole scan, and
+scoped `git diff --check` passed; the endpoint axiom audit reports only
+`[propext, Classical.choice, Quot.sound]`.
+
+2026-06-06 13:06 CEST addendum: CALL-family proof core is now at the wrap-up
+boundary. The canonical no-artificial-cap endpoints for final observation,
+gas-indexed replay/committed safety, outcome safety, and result-or-failure all
+typecheck after the CREATE/CREATE2 live-corridor changes and report only
+`[propext, Classical.choice, Quot.sound]`. The remaining visible premises are
+classified as source/resource/open-world or target-entry inputs:
+`RecursiveBridgeCALLSemanticContracts`, `RecursiveBridgeInitialCodeImageRel`,
+`RecursiveBridgeSourceRun`, checked compile success, `RecursiveBridgeTargetRuntime`,
+`SourceOpenInternalUserCallBodyFuelAdequateUpTo`,
+`SourceOpenDispatcherTraceAccepted`, initial permission,
+`OpenXCallFamilyNoArtificialCapExternalWorldReadyFor`, and compiler/gas fuel
+bounds. `LayerAudit` no longer pins the CALL-family route-assumption records or
+their projection lemmas as public audit targets; the public surface starts at
+the no-artificial-cap endpoint family.
+
+2026-06-06 13:02 CEST addendum: the no-artificial-cap gas checkpoint now
+builds through the CREATE/CREATE2 recursive-bridge fallout. The repaired
+`RecursiveBridgeSupport` keeps CALL admissibility facts behind no-create event
+premises and threads explicit create branches through the open-result bind,
+path, prelude, and continuation helper families. Verification:
+`lake env lean -DautoImplicit=false -DmaxErrors=14 -Dlinter.all=false
+-Dlinter.unusedSimpArgs=false -Dlinter.constructorNameAsVariable=false
+EvmCompiler/Yul/RecursiveBridgeSupport.lean` and `lake build
+EvmCompiler.Yul.OpenGasAware EvmCompiler.Yul.OpenRuntime
+EvmCompiler.LayerAudit` both passed, the gas axiom audit reports only
+`[propext, Classical.choice, Quot.sound]`, and scoped proof-hole plus
+`git diff --check` scans pass. The stale 12:17 note below describing
+`RecursiveBridgeSupport` CREATE/CREATE2 as the active blocker is superseded.
+
+2026-06-06 12:17 CEST addendum: after the concurrent CREATE/CREATE2
+`OpenEvent` changes, the no-artificial-cap gas surface is coherent again.
+Focused source checks pass for `EvmCompiler/Yul/OpenGasAware.lean`,
+`EvmCompiler/Yul/OpenRuntime.lean`, and `EvmCompiler/LayerAudit.lean`; the
+`OpenRuntime` olean was refreshed to remove stale `OpenEvent.mk` theorem-type
+shapes from `LayerAudit`. A standalone import-based axiom audit for
+`OpenXCommittedSafeAt.to_outcome_safety`, the arbitrary-gas outcome-safety
+endpoint, and the arbitrary-gas result-or-failure endpoint reports only
+`[propext, Classical.choice, Quot.sound]`. A focused `lake build
+EvmCompiler.Yul.OpenGasAware EvmCompiler.Yul.OpenRuntime
+EvmCompiler.LayerAudit` now rebuilds through `OpenLowering` and fails only in
+`EvmCompiler/Yul/RecursiveBridgeSupport.lean` on the separate CREATE/CREATE2
+support path. Aristotle jobs `2dd9472e-fc60-4d76-a1ba-c4387c996b42`,
+`58fa3d4f-d551-4740-ba69-1f5cf042168a`, and
+`e67a43c2-8e31-4fab-88d1-c31dd03af630` were downloaded/inspected; disposition:
+no merge, because local gas proofs are already stronger and CREATE-aware. New
+Aristotle job `fcdc89f9-fded-426b-99fe-9dc4dd4c0312` is running on the
+independent `RecursiveBridgeSupport` CREATE blocker from a 46 MB slim project
+snapshot.
+
+2026-06-06 10:03 CEST addendum: added and pinned the direct arbitrary-gas
+outcome-safety endpoint
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyOutcomeSafetyAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy`.
+It consumes the no-artificial-cap external-world carrier and exposes, for any
+UInt256 gas budget, an `OpenXOutcomeResult` whose outcome satisfies
+`XRunOutcomeSafelyMatches` the target final observation; this is the most direct
+formal statement of the low-gas safety side. Also added and pinned
+`OpenXCommittedSafeAt.to_outcome_safety` and
+`OpenXContractLivenessAndSafetyFinalObservation.outcomeSafetyAt_of_gas_lt`.
+Verification: focused `OpenGasAware` source check, focused `OpenRuntime` source
+check, focused source-to-olean checks for `OpenGasAware`/`OpenRuntime`,
+focused `LayerAudit` check, scoped proof-hole/whitespace scans, scoped
+`git diff --check`, and direct axiom audit for the compiled endpoint passed;
+the compiled endpoint reports only `[propext, Classical.choice, Quot.sound]`.
+A fresh full `lake build` is currently blocked by unrelated in-flight
+`EvmCompiler/Yul/OpenExternal.lean` CREATE/open-result edits that fail before
+the touched gas modules rebuild. Aristotle job
+`2dd9472e-fc60-4d76-a1ba-c4387c996b42` is running on this endpoint.
+
+2026-06-06 09:45 CEST addendum: added and pinned the direct compiled
+result-or-failure endpoint
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyResultOrFailureAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy`.
+For every UInt256 gas budget, it returns either a successful gas-aware EVM
+result with the same committed final observation as the target result, or a
+revert/out-of-gas failure outcome. Verification: `lake build
+EvmCompiler.Yul.OpenGasAware EvmCompiler.Yul.OpenRuntime
+EvmCompiler.LayerAudit`, scoped proof-hole/whitespace scans, scoped
+`git diff --check`, and direct axiom audit passed; the theorem reports only
+`[propext, Classical.choice, Quot.sound]`.
+
+2026-06-06 09:30 CEST addendum: added and pinned the direct gas-indexed
+compiled endpoint
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy`.
+It consumes the single no-artificial-cap external-world carrier and returns the
+same full-contract witnesses as the canonical endpoint, plus immediate
+gas-indexed consequences: `gasBound <= gas` and `gas < UInt256.size` imply
+`OpenXReplayAt`, while `gas < UInt256.size` implies
+`OpenXCommittedSafeAt`. Verification: focused `OpenRuntime`, `lake build
+EvmCompiler.Yul.OpenRuntime EvmCompiler.LayerAudit`, touched-file proof-hole
+scan, scoped `git diff --check`, and direct axiom audits passed; the new theorem
+reports only `[propext, Classical.choice, Quot.sound]`. Aristotle job
+`27cae229-b44b-431b-9c8d-999e2d329543` completed; disposition: no merge because
+the artifact duplicated the local theorem and included an unrelated dependency
+edit.
+
+2026-06-06 09:36 CEST addendum: added and pinned
+`OpenXCommittedSafeAt.to_result_or_failure` and
+`OpenXContractLivenessAndSafetyFinalObservation.resultOrFailureAt_of_gas_lt`.
+These expose the low-gas side of the theorem without unfolding definitions:
+for every UInt256 gas budget, the candidate gas-aware EVM run either returns a
+successful result whose committed observation matches the target observation,
+or it reverts/runs out of gas. Verification: focused `OpenGasAware`, focused
+`OpenRuntime`, `lake build EvmCompiler.Yul.OpenGasAware
+EvmCompiler.Yul.OpenRuntime EvmCompiler.LayerAudit`, touched-file proof-hole
+scan, scoped `git diff --check`, and direct axiom audits passed; both
+projection lemmas report only `[propext, Classical.choice, Quot.sound]`.
+
+2026-06-06 09:15 CEST update: added and pinned
+`OpenXCallFamilyNoArtificialCapExternalWorldReadyFor`, a single external-world
+carrier bundling global response-gas admissibility with
+strict-or-all-forwarded-child-OOG response result tracking. Added the compiled
+endpoint
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy`,
+which consumes that carrier and returns the full-contract
+`OpenXContractLivenessAndSafetyFinalObservation` conclusion. This keeps the
+public theorem shape aligned with the no-artificial-cap strategy while still
+making the open-world CALL assumption explicit. Aristotle job
+`9b27f621-5ae0-4b3b-977c-f79b7596bd5a` completed; disposition: no merge because
+the artifact is stale relative to the local carrier eliminators and compiled
+gas-indexed/safety endpoints.
+
+2026-06-06 09:08 CEST addendum: added and pinned direct eliminators from
+`OpenXContractLivenessAndSafetyFinalObservation`:
+`replayAt_of_bound_le` turns the high-gas field into an exact replay at any
+UInt256 gas above the generated bound, and `committedSafeAt_of_gas_lt` turns
+the safety field into committed final-observation safety at any UInt256 gas.
+
+2026-06-06 09:10 CEST addendum: promoted the three contract-level
+result-tracking, outcome-tracking, and committed-response-safety wrappers from
+inferred `abbrev`s to explicit `theorem`s with the same
+`OpenXContractLivenessAndSafetyFinalObservation` conclusion as the strict
+endpoint. `lake env lean ... EvmCompiler/Yul/OpenRuntime.lean`, `lake build
+EvmCompiler.Yul.OpenRuntime EvmCompiler.LayerAudit`, scoped proof-hole scan,
+`git diff --check`, and direct axiom audits all passed; the axiom audits report
+only `[propext, Classical.choice, Quot.sound]`. Aristotle job
+`e67a43c2-8e31-4fab-88d1-c31dd03af630` is running on this theorem-form cleanup
+from a slim project copy.
+2026-06-06 09:13 CEST addendum: removed the stale `LayerAudit` pins for the
+trace-local `OpenXCallFamilyResponseGasTraceAdmissibleReadyFor` adapter and its
+two projections. The internal adapter remains available inside `OpenRuntime`,
+but the audit-visible CALL-family response-gas surface now advertises the
+global `OpenXCallFamilyResponseGasAdmissibleReadyFor` contract plus the
+checked compiled endpoints that derive trace-local readiness internally.
+Verification: focused `LayerAudit` Lean check, `lake build
+EvmCompiler.LayerAudit`, removed-alias grep, and `git diff --check` passed.
+2026-06-06 09:15 CEST addendum: removed the four stale trace-local
+CALL-family route-2 final-observation aliases from `LayerAudit`. The exact
+route-local open-block-trace pin remains, and the global-response-gas route-2
+final-observation aliases remain as the advertised bundled route surface.
+Verification: focused `LayerAudit` Lean check, `lake build
+EvmCompiler.LayerAudit`, route-local removed-alias grep, global-route presence
+grep, and `git diff --check` passed.
+2026-06-06 09:16 CEST addendum: removed the old unbundled compiled
+`openXLivenessAndSafetyFinalObservation...GlobalResponseGas...` aliases from
+`LayerAudit`. The checked theorems remain internal proof bricks, but the
+advertised compiled CALL-family final-observation surface is now the packaged
+`OpenXContractLivenessAndSafetyFinalObservation` endpoint family plus direct
+`replayAt`/`committedSafeAt` eliminators. Verification: focused `LayerAudit`
+Lean check, `lake build EvmCompiler.LayerAudit`, removed-alias grep,
+contract-alias presence grep, and `git diff --check` passed.
+2026-06-06 09:22 CEST addendum: added and pinned constructors
+`OpenXCallFamilyNoArtificialCapExternalWorldReadyFor.of_strict`,
+`.of_resultTracking`, `.of_outcome_tracking`, and
+`.of_committed_response_safety`, plus the bundled-carrier CALL response
+dichotomy projections. Then removed the older multi-premise compiled contract
+pins (`GlobalResponseGasStrictReady`, `ResultTrackingReady`,
+`OutcomeTrackingReady`, and `CommittedResponseSafetyReady`) from `LayerAudit`.
+The audit-visible final CALL-family endpoint is now the single
+`sourceBridgeNoArtificialCapExternalWorldReady` compiled theorem, with
+constructors for common external-world response models and eliminators from the
+returned `OpenXContractLivenessAndSafetyFinalObservation`. Verification:
+`lake build EvmCompiler.Yul.OpenRuntime EvmCompiler.LayerAudit`, scoped
+proof-hole scan, `git diff --check`, and direct axiom audits all passed; axiom
+audits report only `[propext, Classical.choice, Quot.sound]`.
+2026-06-06 09:23 CEST audit: the canonical compiled CALL-family endpoint is
+now
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy`.
+Its remaining inputs are source/open-world/resource boundary premises:
+semantic contracts, initial code-image relation, the source run, checked
+compile equality, target runtime entry facts, internal body-fuel adequacy,
+source trace acceptance, initial non-static permission, the single
+`OpenXCallFamilyNoArtificialCapExternalWorldReadyFor` external-world carrier,
+and `minimumCompilerFuel`. The canonical endpoint no longer exposes replay,
+current-instruction, layout, callback, per-trace response-gas, or
+multi-premise response-tracking proof artifacts.
+
+2026-06-06 09:04 CEST update: added and pinned
+`OpenXContractLivenessAndSafetyFinalObservation` plus the public compiled
+strict/global endpoint
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeGlobalResponseGasStrictReady_noReturnDataCopy`.
+This packages the full-contract final-observation result as one named
+conclusion: replay for all gas above the generated bound, existence of a
+feasible replay when the bound fits in UInt256 gas, and committed-observation
+safety for every UInt256 gas budget. The endpoint still exposes the intended
+source/runtime/open-world premises, including the global response-gas
+admissibility contract and strict-or-all-forwarded-gas-OOG response tracking;
+it does not impose any fixed per-CALL gas cap. The same named conclusion is
+also exposed through result-tracking, outcome-tracking, and
+committed-response-safety aliases. Aristotle job
+`58fa3d4f-d551-4740-ba69-1f5cf042168a` is running on the same wrapper as an
+external check/backup; local proof and `LayerAudit` pin are already verified.
+
+2026-06-06 08:54 CEST update: added and pinned the exact shared-trace
+CALL-family wrapper
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openBlockTrace_of_checked_traceAccepted_noReturnDataCopy`.
+It starts from the strongest checked CALL-family no-RETURNDATACOPY /
+assembly-bound stack-safe compile gate and proves that the selected
+source-open dispatcher trace is also an `OpenAssembly.OpenBlockTraceResult`
+for the compiled target on the same trace, with the whole-program outcome
+relation, without any alternate-response tracking carrier. This cleanly
+separates the selected shared-response theorem from the stronger all-gas /
+alternate-response final-observation theorems below. Aristotle job
+`b2a5df5c-d3e4-4da3-bfa1-9f6b59cfb9cb` is running on the same wrapper as an
+external check/backup; local proof and `LayerAudit` pin are already verified.
+2026-06-06 09:00 CEST addendum: the same exact shared-trace endpoint is now
+also exposed through the trace-local and global-response-gas route packages as
+`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openBlockTrace`
+and
+`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions.openBlockTrace`,
+with `LayerAudit` pins. Route-package callers no longer need to detour through
+gas/replay/final-observation wrappers when they only need the selected
+shared-response trace theorem.
+
+2026-06-06 08:45 CEST update: the CALL-family final-observation surface is now
+checked both as expanded public wrappers and as bundled route-package theorems
+for strict/all-forwarded-gas-OOG, result-tracking, outcome-tracking, and
+committed-response-safety response carriers. The new bundled result/outcome
+wrappers are pinned in `LayerAudit`; `lake build EvmCompiler.Yul.OpenRuntime`
+and `lake build EvmCompiler.LayerAudit` pass, and representative axiom audits
+show only `propext`, `Classical.choice`, and `Quot.sound`. This means the
+compiler/proof spine is no longer missing syntax propagation or route packaging
+for `CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL`; the remaining boundary is
+the intentionally source/open-world side: source semantic contracts, code-image
+and runtime entry facts, body-fuel/trace-acceptance resource premises, and the
+chosen external response relation.
 
 We did **not** restart the CALL proof. The old recursive/open finite-path CALL
 corridor is still checked and remains useful: argument evaluation, internal
@@ -17,6 +296,548 @@ productive loop frontier work, typed continuations, and the imported-Yul
 source-open dispatcher are not being redone. The refactor since the nested-CALL
 audit changed the **current CALL evidence invariant**, not the whole proof
 spine.
+
+Latest CALL-family checkpoint: the expression-level widening is now checked
+through the generated-argument reserve frontier. `RecursiveBridgeSupport` has
+generic `CallKind` no-open/checkpoint-store invariants, family source-eval
+checkpoint-store invariants, family singleton source-eval invariants, a
+generated-argument exact-target recursion over `Safe.CallFamilySafe.exprs`, and
+the reserve-aware raw expression dispatcher
+`lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callFamilySafe_expr_of_lower1?_reserve_cases`.
+Those surfaces are pinned in `LayerAudit`. This means nested
+`CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL` inside primitive arguments are
+now preserved before the outer expression head, at the checked family-safe
+expression frontier.
+
+2026-06-06 00:14 CEST update: the family expression frontier is now packaged
+under recursive raw-expression exact-target preservation. The checked theorems
+`lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generated_arg_terminal_reserve_callFamilySafe`
+and
+`lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callFamilySafe_expr_of_lower1?_recursive`
+lift the family reserve dispatcher through syntax-size expression recursion,
+including internal user calls whose generated argument prefixes may themselves
+contain `CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL`. These surfaces are pinned
+in `LayerAudit`.
+
+2026-06-06 00:27 CEST update: the family-safe expression recursion now feeds
+the first sequence-head wrappers. Added the family domain-exact evaluator route
+and combined domain/singleton invariant, then checked and pinned
+`SourceExprSeqPreludeOpen.letSoundAtExactHiddenCtx_of_lower1?_recursive_callFamilySafe`
+and
+`SourceExprSeqPreludeOpen.assignSoundAtExactHiddenCtx_of_lower1?_recursive_callFamilySafe`.
+This moves the CALL-family widening from pure expression recursion into
+declaration and assignment heads whose expressions may contain nested
+`CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL`.
+
+2026-06-06 00:34 CEST update: the declaration and assignment family wrappers
+now pass through checked compiler-output sequence lowering. The checked and
+pinned theorems
+`checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_recursive_callFamilySafe`
+and
+`checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_recursive_callFamilySafe`
+split the generated lowering output and invoke the family-safe sequence-head
+facts above. The next layer, finite path/kont sequence propagation, needs the
+actual-fuel sibling of the family raw-expression recursion before it can be
+lifted cleanly.
+
+2026-06-06 01:00 CEST update: the actual-fuel family expression frontier is
+checked and pinned. Added the family actual-fuel source singleton/domain
+wrappers, generalized the actual-fuel generated-argument path dispatcher to
+`Safe.CallFamilySafe.exprs`, and proved
+`lower1?_sourceExprRawPreludeOpenPathSoundWhen_callFamilySafe_expr_of_lower1?_actual_fuel_recursive`.
+That theorem now feeds the finite path and typed-continuation sequence-head
+wrappers
+`sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive_callFamilySafe`,
+`sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive_callFamilySafe`,
+`sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recursive_callFamilySafe`,
+and
+`sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recursive_callFamilySafe`.
+This moves `CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL` from exact-target
+expression lowering into real-fuel sequence path/kont propagation for
+declaration and assignment heads.
+
+2026-06-06 01:22 CEST update: the CALL-family widening now reaches conditional
+heads. The statement cleanup/scoped recursion was lifted from `Safe.CallSafe`
+to `Safe.CallFamilySafe` through checkpoint-store, sticky out-of-fuel, scoped
+`exec`/`execSeq`, and exact block-domain invariants. The block and conditional
+head helpers now accept family-safe bodies, while ordinary CALL-only callers
+use the checked `CallFamilySafe.of_callSafe` monotonicity bridge. The checked
+and pinned sequence wrappers
+`sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_if_expr_recursive_callFamilySafe`
+and
+`sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_cons_if_expr_recursive_callFamilySafe`
+move `CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL` through condition
+expressions, selected true bodies, and later syntactic tails.
+
+2026-06-06 01:28 CEST update: the CALL-family widening now covers switch heads
+at the same finite path/kont layer. The checked and pinned wrappers
+`sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_switch_expr_recursive_callFamilySafe`
+and
+`sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_cons_switch_expr_recursive_callFamilySafe`
+reuse the family-safe actual-fuel scrutinee dispatcher, derive
+`CallFamilySafe` evidence for the selected case/default body from the
+family-safe cases/default predicates, and then pass the selected body through
+the family-safe scoped block helper. This moves
+`CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL` through switch scrutinees,
+selected switch bodies, and later syntactic tails.
+
+2026-06-06 01:45 CEST update: the CALL-family widening now covers
+zero-result primitive expression-statement heads at the finite path/kont
+layer. The checked and pinned zero-output bricks
+`lower0?_callFamilySafe_primitive_safe_of_lower0?`,
+`lower0?_yulOpenEvalValues_callFamilySafe_prim_doneInvariant_domain_of_lower0?_actual_fuel`,
+and
+`lower0?_sourceExprRawPreludeOpenPathSoundWhen_callFamilySafe_prim_of_lower0?_actual_fuel_recursive`
+show that a successful `lower0?` CALL-family primitive head is really a safe
+zero-output non-CALL primitive while its generated arguments remain
+family-recursive. The sequence wrappers
+`sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_exprStmt_prim_recursive_callFamilySafe`
+and
+`sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_cons_exprStmt_prim_recursive_callFamilySafe`
+ then move nested `CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL` through
+discarded primitive expression statements and their later syntactic tails.
+
+2026-06-06 01:57 CEST update: the CALL-family widening now has checked
+program-context and compiler-output expression-statement wrappers. Added the
+family-safe program bridge context, family recursive path/kont/loop callback
+adapters from finite frontiers, family selected user-call body/path packaging,
+and the checked wrappers
+`checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_exprStmt_prim_of_programCALLFamily_recursive`
+and
+`checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_exprStmt_prim_of_programCALLFamily_recursive`.
+This removes the old CALL-safe context dependency for zero-output primitive
+expression statements whose arguments or tails contain
+`CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL`.
+
+2026-06-06 05:19 CEST update: the CALL-family widening has now crossed the
+public source-open and first runtime-open boundary. Checked additions include
+`RecursiveBridgeCALLFamilyFeatureCoverage`,
+`compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeatures(SourceStatic)?`,
+`RecursiveBridgeCALLFamilyTopAssumptions`,
+`RecursiveBridgeCALLFamilyTopAssumptions.sourceOpenDispatcherBlockResult_callFamily_canonical`,
+the family regular-open compile gate
+`compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpen?`,
+and the runtime bridge
+`compileCheckedCALLFamilyRegularOpen_sourceOpenDispatcherBlockResult_compiledOpen(_of_checked)`.
+`LayerAudit` pins the new family regular-open, functions-open, dispatcher
+support, and compiled-open surfaces. Remaining CALL-family work is now below
+that first compiled-open runtime wrapper: clone/lift the no-RDC, stack-safe,
+gas-ready, replay-above, and committed-safety public route from the ordinary
+CALL path to the family gate, then run the public assumption audit. This does
+not reopen the ordinary `CALL` recursive corridor; it generalizes the already
+checked CALL path to the full CALL family and removes any remaining public
+callbacks or compiler-generated evidence from the final route.
+
+2026-06-06 05:49 CEST update: the CALL-family runtime route has advanced below
+the first compiled-open wrapper. Checked and pinned additions now include the
+family no-RETURNDATACOPY regular-open gate, the assembly-inferred-bound
+stack-safe no-RETURNDATACOPY gate, bytecode/decode safety helpers, and the
+public replay wrappers
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady_noReturnDataCopy`
+and
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXReplayAbove_and_committedSafeForAllGas_of_checked_traceAccepted_sourceBridgeGasReady_noReturnDataCopy`.
+The remaining CALL-family work is now the final public route packaging:
+decide whether the family endpoint should expose the direct assembly-bound
+route or a spill-aware convenience wrapper, add any route-2/liveness aliases
+needed by the public theorem spine, incorporate the outstanding gas-budget
+work from the other agent when available, and run the final assumption audit.
+
+2026-06-06 06:05 CEST update: the direct assembly-bound CALL-family endpoint
+now has route-2/liveness packaging. Added and pinned
+`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions`,
+including replay-at/above, replay-some-gas, committed-safe-above/for-all-gas,
+storage-image, gas-budget, response-tracking, and strict/all-gas-OOG
+liveness/safety convenience theorems. `lake build
+EvmCompiler.Yul.OpenRuntime` passes after the family route-2 addition and the
+small Lean 4.28 `GasExecRel.of_eraseGas_eq` dependency fix. Remaining
+CALL-family work is now narrower: fold this family route-2 endpoint into the
+chosen public theorem spine, decide whether to add a spill-aware CALL-family
+convenience wrapper or keep the direct assembly-bound route as the endpoint,
+integrate the other agent's gas-budget discharge when available, and run the
+final assumption audit.
+
+Current CALL-family route-2 premise audit: the compiler-generated no-RDC,
+decode/window/jumpdest, assembly-bound stack safety, initial 1024 stack bound,
+source-open dispatcher bridge, replay-above, all-gas committed safety, and
+storage-image bridge are now checked consequences of the family compile route
+plus source/open runtime premises. The direct family endpoint still exposes the
+following source-facing/resource/runtime premises: semantic contracts for the
+source primitive family, initial code-image relation, the actual source run,
+target runtime entry facts, internal user-call body-fuel adequacy up to the
+chosen source fuel, source-open trace acceptance for the shared external
+responses, initial non-static permission (`initial.executionEnv.perm = true`),
+and the external response-gas/resource contract. The base route-2 package still
+uses the trace-local `OpenXCallFamilyResponseGasTraceAdmissibleReadyFor asm
+target`, while the newer public wrappers accept the broader
+`OpenXCallFamilyResponseGasAdmissibleReadyFor asm target` and derive the
+trace-local carrier internally. The response-gas contract is the one expected
+to shrink when the separate gas-budget agent lands its discharge; the rest are
+ordinary theorem-boundary inputs unless we later choose a stronger public
+wrapper that derives them from a still higher source entrypoint.
+
+2026-06-06 06:22 CEST update: added the direct CALL-family final-observation
+wrapper
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeGasReady_noReturnDataCopy`.
+It packages the route-2 endpoint for ordinary callers, exposing replay-above,
+replay-some-gas under the UInt256 bound, all-gas committed safety,
+whole-program outcome relation, and committed storage image relation directly
+from the checked CALL-family assembly-bound/no-RDC compile route plus the
+source/open runtime premises. `lake build EvmCompiler.Yul.OpenRuntime
+EvmCompiler.LayerAudit` passes, and the direct wrapper axiom audit reports only
+`propext`, `Classical.choice`, and `Quot.sound`.
+
+Follow-up CALL-family public-boundary cleanup: added and pinned
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeGlobalResponseGasReady_noReturnDataCopy`.
+This new wrapper keeps the checked final-observation conclusion but replaces the
+trace-local response-gas premise with the broader
+`OpenXCallFamilyResponseGasAdmissibleReadyFor asm target`, deriving the
+trace-local `OpenXCallFamilyResponseGasTraceAdmissibleReadyFor asm target`
+internally by the existing adapter. This does not discharge the external
+response-gas/resource contract; it sharpens the public boundary so callers can
+state it once globally rather than per selected trace. Verification:
+`lake build EvmCompiler.Yul.OpenRuntime`, `lake build EvmCompiler.LayerAudit`,
+diff/proof-hole scans, and axiom audit all passed; the axiom audit reports only
+`propext`, `Classical.choice`, and `Quot.sound`. Aristotle job
+`c919afea-70eb-4300-9fa6-97d694e432c4` returned only the already-local direct
+wrapper and was not merged.
+
+Follow-up route-2 public-boundary cleanup: added and pinned
+`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions`,
+its `to_traceLocal` adapter, and the full delegated global-response-gas route-2
+corollary family. The new delegates cover exact replay, replay-above,
+replay-some-gas, committed-safety-above, all-gas committed-safety bridges,
+response-tracking/fixed-trace wrappers, strict-or-all-gas-OOG result-tracking
+wrappers, gas-budget liveness/safety, and final observation with committed
+storage image relation. These wrappers preserve the checked route-2 conclusions
+while moving callers from the trace-local response-gas premise to
+`OpenXCallFamilyResponseGasAdmissibleReadyFor asm target`. Verification:
+focused `OpenRuntime` and `LayerAudit` checks, `lake build
+EvmCompiler.Yul.OpenRuntime`, `lake build EvmCompiler.LayerAudit`,
+diff/proof-hole scans, `git diff --check`, and axiom audit all passed; the axiom
+audit reports only `propext`, `Classical.choice`, and `Quot.sound`. Aristotle
+job `76d7053c-335d-4eff-8c09-2409aadee494` returned the initial four-wrapper
+package and was superseded by the local full route-2 lift.
+
+Direct replay public-boundary cleanup: added and pinned direct
+global-response-gas versions of the family replay wrappers
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGlobalResponseGasReady_noReturnDataCopy`
+and
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXReplayAbove_and_committedSafeForAllGas_of_checked_traceAccepted_sourceBridgeGlobalResponseGasReady_noReturnDataCopy`.
+The trace-local `SourceBridgeGasReady` family replay/final-observation aliases
+were removed from `LayerAudit`; the underlying `OpenRuntime` proofs remain as
+internal bricks. Verification: focused `OpenRuntime` and `LayerAudit` checks,
+`lake build EvmCompiler.Yul.OpenRuntime`, `lake build EvmCompiler.LayerAudit`,
+diff/proof-hole scans, `git diff --check`, and axiom audit all passed; the axiom
+audit reports only `propext`, `Classical.choice`, and `Quot.sound`. Aristotle
+job `76d7053c-335d-4eff-8c09-2409aadee494` returned the smaller four-wrapper
+package and was superseded locally; follow-up job
+`4609e679-a6ab-4c74-bce9-146375d585d2` was a malformed prompt-path submission,
+and corrected retry job `fc978a76-df7b-450c-b304-393e1a9b9754` is running on the
+direct-wrapper package.
+
+Public audit cleanup: the old target-side current-call bridge aliases
+`openXCompiledOpenCurrentCallBridgeReadyFor*`,
+`openXCompiledOpenCurrentEmittedEvidenceForOfCurrentCallBridgeReady`,
+`openXCurrentEmittedTraceReadyForOfCompiledOpenCurrentCallBridgeReady`, and
+`openXReplayTraceReadinessForCheckedTraceOfCompiledOpenCurrentCallBridgeReady`
+are no longer pinned in `LayerAudit`. The underlying `OpenRuntime` facts remain
+available internally, but the import-visible CALL-family surface now pins the
+real open request-normalization facts from `OpenExternal.CallKind` and
+`OpenExternal.CallContextRel.callSite_eq`: `CALL`, `CALLCODE`, `DELEGATECALL`,
+and `STATICCALL` compute the same source/target call site under the checked
+context relation, with per-kind caller/recipient/code/value/permission fields
+encoded in the request. Verification: focused `LayerAudit` check and
+`lake build EvmCompiler.LayerAudit` passed. Aristotle job
+`3cfd76bf-96ec-4f84-b54b-29cfe0a3f99f` is running on the same public-audit
+cleanup package.
+
+The stale `LayerAudit` pins for
+`OpenXBlockTraceRelReady.CurrentNoCallPathChecksReady`, its residual/no-RDC
+constructors, and adjacent current-no-CALL residual/static trace helper aliases
+were also removed. These remain internal lower-level proof bricks only; the
+live public CALL-family route constructs no-RDC/non-CALL residual readiness
+inside the checked runtime wrappers rather than exposing that local callback as
+a public premise.
+
+Likewise, the import-visible pins for the trace-local current-instruction CALL
+response-gas/budget carriers and `OpenXCallFamilyGasBudgetTraceReadyFor` were
+removed from `LayerAudit`. The public route keeps the global
+`OpenXCallFamilyResponseGasAdmissibleReadyFor` contract, plus the explicit
+low-gas response-tracking/safety frontiers where those are genuinely consumed;
+the intermediate trace/budget carrier is derived inside the checked wrappers.
+
+The import-visible pins for the global `OpenXCallFamilyReturnedGasBudgetReadyFor`
+and `OpenXCallFamilyGasBudgetReadyFor` carriers were also removed from
+`LayerAudit`. The live CALL-family endpoint no longer asks callers for those
+intermediate gas-budget surfaces; it accepts the broader response-gas
+admissibility contract and derives the budget side internally where needed.
+
+Aristotle job `fc978a76-df7b-450c-b304-393e1a9b9754` returned a useful but
+older-snapshot direct-wrapper cleanup. Only the checked theorem-form promotion
+was incorporated: the two direct global-response-gas replay wrappers in
+`OpenRuntime` are now explicit `theorem`s with spelled-out conclusions. The
+older `LayerAudit` aliases present in that artifact were intentionally not
+restored.
+
+The global-response-gas route-2 assumption record now has its own checked
+final-observation projection:
+`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions.openXLivenessAndSafetyFinalObservation`.
+`LayerAudit` pins it as
+`recursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2OpenXLivenessAndSafetyFinalObservation`.
+This packages the final replay/replay-some-gas/all-gas committed-safety/
+whole-program-outcome/storage-image conclusion directly from the bundled
+assumption record and the global response-gas contract.
+
+The remaining single-instruction returned-gas/gas-budget adapter pins were
+removed from `LayerAudit` as well:
+`OpenXCurrentRunningInstrCallReturnedGasBudgetReadyCase`,
+`OpenXCurrentRunningInstrCallGasBudgetReadyCase`, and their direct conversion
+aliases. The audit-visible CALL-family gas surface is now the response-gas
+contract plus the low-gas response-tracking/safety facts that are actually
+consumed by the route.
+
+The reusable low-gas/all-outcomes block induction is now checked and pinned:
+`OpenXBlockTraceRelReady.openBlockTraceResult_all_outcomes_safelyTracks_of_ready`
+threads done, running, and halted path all-outcome safety premises through
+`OpenAssembly.OpenBlockTraceResult`. `lake build EvmCompiler.Yul.OpenGasAware`
+and `lake build EvmCompiler.LayerAudit` pass, and axiom audit reports only the
+standard `[propext, Classical.choice, Quot.sound]`. This moves the remaining
+all-gas committed-safety work from a generic block induction problem to the
+concrete path-ready instantiation and `OpenRuntime` route-assumption lift.
+
+The halted no-CALL all-outcomes path-ready instantiation is now checked and
+pinned as well:
+`openX_runListResult_halted_all_outcomes_safelyTracks_of_path_decode_checks`,
+`OpenXBlockTraceRelReady.openXRunListHaltedAllOutcomeTracksReady_current_emitted_no_call_of_current_path_checks`,
+and
+`OpenXBlockTraceRelReady.runListHaltedAllOutcomeTracksReadyFor_current_emitted_no_call_of_current_path_checks`.
+The no-CALL side now has both running and halted all-outcome run-list carriers.
+Remaining work on this lane is the CALL-response current-emitted all-outcome
+carrier and the `OpenRuntime` route-assumption lift.
+
+The current-emitted path-level all-outcomes constructors are now checked and
+pinned in `OpenRuntime`:
+`runningPathAllOutcomeTracksReady_of_current_emitted_response_strict_cases`
+combines the no-CALL running carrier with the strict-or-all-forwarded-gas-OOG
+CALL-response carrier, and
+`haltedPathAllOutcomeTracksReady_of_current_emitted_no_call_cases` combines
+halted no-CALL path checks with an explicit
+`OpenXResultAgrees (.halted halt) reference` premise. Remaining work is to
+derive that halted-reference premise from the actual block trace/result at the
+route boundary and feed these path constructors into the below-bound/
+`OpenRuntime` route-assumption lift.
+
+That trace-local route-boundary lift is now also checked and pinned:
+`OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking.of_openBlockTraceResult_current_emitted_response_strict_cases`.
+It performs the block induction directly, uses code-stability for running
+tails, consumes the strict response carrier only in CALL branches, and uses the
+actual top-level `OpenXResultAgrees targetResult reference` in the halted
+branch.
+
+The route-local committed-safety bridge is now checked and pinned as well:
+`OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking.committedSafeBelow_of_openBlockTraceResult_current_emitted_response_strict_cases`.
+It composes the current-emitted all-outcomes block lift with
+`to_committedSafeBelow`, yielding an existential
+`OpenGasAware.OpenXCommittedSafeBelow` witness for the actual
+`OpenAssembly.OpenBlockTraceResult`. Remaining work on this lane is to thread
+that committed-safe-below witness into the existing route assumption record and
+public `OpenRuntime` spine, then run the final public assumption audit.
+
+2026-06-06 08:41 CEST update: the no-fixed-cap strict/all-forwarded-OOG
+CALL-family route is now threaded through the public final-observation spine.
+The checked endpoint
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeGlobalResponseGasStrictReady_noReturnDataCopy`
+returns high-gas replay, replay-some-gas under the UInt256 bound, all-gas
+committed safety, whole-program outcome agreement, and committed storage-image
+agreement. Ordinary continuing CALL responses must agree on success, return
+data, and reentrant mutation; the only asymmetric response escape hatch is
+candidate all-forwarded child out-of-gas, which is consumed by whole-run
+outcome tracking rather than caller-continuing equivalence. Verification:
+`lake build EvmCompiler.LayerAudit`, scoped hole/tab scans, and manual axiom
+audit passed; the axiom audit reports only `[propext, Classical.choice,
+Quot.sound]`. The remaining source-facing external-world premises are the
+response-gas admissibility/resource contract and the strict-or-all-forwarded-OOG
+response-result tracking contract.
+
+Follow-up exact-response specialization: the final-observation spine now also
+has route-local, global-response-gas, and compiled public wrappers for the
+stronger `OpenXCallFamilyCommittedResponseSafetyTraceReadyFor` carrier. These
+wrappers derive the strict/all-forwarded-OOG carrier with
+`OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.of_committed_response_safety`,
+so exact committed-response external worlds can consume the same final
+contract theorem without restating the low-gas branch manually. The primary
+public theorem boundary remains the strict/all-forwarded-OOG one above.
+Verification: focused `OpenRuntime`, `lake build EvmCompiler.LayerAudit`,
+scoped hole/tab scans, and direct axiom audit passed; the axiom audit reports
+only `[propext, Classical.choice, Quot.sound]`.
+
+Public audit surface cleanup: `LayerAudit` no longer pins the gas-ready
+all-gas committed-safety/final-observation aliases as import-visible CALL-family
+safety endpoints. The pinned final-observation surface is now the strict,
+result-tracking, outcome-tracking, and committed-response family of wrappers;
+the older gas-ready theorems remain lower-level `OpenRuntime` compatibility
+bricks rather than the advertised external-world contract. Verification:
+`lake build EvmCompiler.LayerAudit` and focused hygiene greps passed.
+
+The compiled public final-observation pins were tightened further: `LayerAudit`
+now keeps the global-response-gas compiled strict/result/outcome/committed
+wrappers and drops the trace-local compiled variants. This keeps the import
+surface aligned with the intended theorem boundary: one global
+`OpenXCallFamilyResponseGasAdmissibleReadyFor` resource contract plus the
+explicit strict/result/outcome/committed response-tracking premise. Verification:
+`lake build EvmCompiler.LayerAudit`, removed-alias grep, scoped hole/tab scans,
+and `git diff --check` passed.
+
+Latest strict CALL response dichotomy audit: `OpenRuntime` now has checked
+CALL-site corollaries
+`OpenXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase.committedSafe_of_not_outcome_safelyTracks_for_call`
+and
+`OpenXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase.allForwardedGasOutOfGas_and_outcomeTracks_of_not_committedSafe_for_call`,
+and `LayerAudit` pins both. These make the intended safety split explicit:
+if the candidate whole-run outcome is not already safely tracking the reference
+result, then the actual CALL responses at that site must be committed-safe;
+conversely, any non-committed-safe response pair is exactly the all-forwarded
+child-OOG branch plus whole-run outcome safety. Verification: focused
+`OpenRuntime`, `lake build EvmCompiler.LayerAudit`, scoped hole/tab/diff
+checks, and direct axiom audits passed; the axiom audits report only
+`propext` and `Quot.sound`.
+
+Follow-up carrier-level packaging: the same split is now exposed on
+`OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor` itself
+via `committedSafe_or_allForwardedGasOutOfGas_tracks`,
+`committedSafe_of_not_outcome_safelyTracks_for_call`, and
+`allForwardedGasOutOfGas_and_outcomeTracks_of_not_committedSafe_for_call`.
+`LayerAudit` pins these family-level projections so callers of the public
+contract theorem can use the global response-tracking assumption directly.
+Verification: focused `OpenRuntime`, `lake build EvmCompiler.LayerAudit`, and a
+direct axiom audit for the non-committed-safe branch passed; that audit reports
+only `propext`, `Classical.choice`, and `Quot.sound`.
+
+CREATE/CREATE2 should follow the same open-interaction proof pattern as the
+CALL family without being forced into the current `CallSite` payload. Add a
+wider external-interaction boundary, for example `ExternalKind := call CallKind
+| create | create2`, keep the generic theorem shape as "same site, same
+admissible response, related continuation," and give creation its own request
+and response records: value, initcode bytes, optional salt, creator/context and
+gas-relevant fields on the request; address-or-zero result word, returned gas,
+returndata behavior, and opaque world/internal mutation on the response. The
+compiler proof should show both sides compute the same creation request and
+resume identically for every admissible response. Nonce, address-collision,
+CREATE2 address derivation, initcode execution, and code installation belong in
+a later concrete-world adequacy/refinement theorem showing the real chain is
+one admissible response generator for that open creation request.
+
+Follow-on after the current CALL-family push: implement this as a separate
+open-creation corridor, not by overloading the existing `CallKind`/`CallSite`
+shape. The near-term goal is request/response preservation for `CREATE` and
+`CREATE2` in the same open-world sense as CALL-family preservation; concrete
+chain creation semantics stay outside the compiler proof until a later
+adequacy theorem.
+
+Yul object/dialect builtin checkpoint: `EvmCompiler.Yul.ObjectModel` gives the
+checked top-layer object adapter for `datasize`, `dataoffset`, `datacopy`,
+`linkersymbol`, `loadimmutable`, `setimmutable`, and `memoryguard`, while
+`EvmCompiler.Yul.ObjectSemantics` gives an independent source interpreter over
+that object syntax. The object syntax carries named data/subobjects plus
+source-facing linker-symbol, immutable-value, and immutable-reference tables.
+The checked elaborator lowers `datasize`/`dataoffset` to payload-layout
+constants, `datacopy` to EVM-Yul `codecopy`, `linkersymbol` and
+`loadimmutable` to checked literal values, `memoryguard` to its literal return
+value, and `setimmutable(offset, name, value)` to the MSTORE patch block for
+all checked immutable references of `name`. The source interpreter reads
+`datasize`/`dataoffset` from its object runtime layout, reads linker and
+immutable values from the object runtime context, treats `memoryguard` as the
+same literal promise value as the lowered core expression, and executes
+`setimmutable` by source-level immutable patch statements before hiding the
+generated block behind the usual store restriction. `datacopy` executes through
+the same expression/expression-statement fuel paths as lowered core Yul. The
+runtime used by source execution is constructed from `Program.toObjects?`,
+`Objects.Program.payloadLayout?`, and `Objects.Program.bytecodeImage?`, and it
+now also carries the checked lowered root contract solely to install
+`ExecutionEnv.code` at the same boundary as core `Yul.Program.runWithCodeImage`;
+layout/image/installed code are computed rather than caller-supplied.
+`EvmCompiler.Yul.ObjectPreservation` now pins the
+first
+checked preservation bricks: layout-stability implies payload-layout equality,
+the computed root core program uses the runtime's checked layout and installed
+contract, source installation equals core `installContractWithCodeImage`,
+`runContract` reduces to dispatcher preservation, internal user calls match
+imported core Yul's account/function-lookup boundaries, dispatcher calls are
+packaged behind the recursive dispatcher-body premise, `datasize`/`dataoffset`
+evaluate like their checked lowered constants, and `datacopy` evaluates/
+executes like lowered core-Yul `codecopy` for both successful and failed
+lowered-argument evaluation. The internal-call lookup bridge is also checked locally in both
+directions needed by the call cases: `functionMap?_lookup_of_source_lookup`
+connects successful source lookup to lowered core `Finmap.lookup`, while
+`functionMap?_lookup_none_of_source_lookup_none` handles missing functions.
+Expression-call bricks for vars, literals, primitive calls, user calls, and
+primitive/user expression statements now expose the argument-agreement and
+call-preservation callbacks the eventual fuel induction must discharge. The
+checked expression dispatcher
+`evalValues_succ_toAst?_checked_core_of_args_and_calls` now packages every
+object expression constructor at successor fuel, including the object builtins,
+behind those argument/call callbacks. The `evalArgs`/`evalTail` zero/successor
+recursion bricks are also checked, and the checked wrappers
+`evalTail_succ_toAst?_checked_core_of_evalArgs` and
+`evalArgs_succ_toAst?_checked_core_of_evalValues_and_tail` now thread
+expression preservation through argument lists without reopening the imported
+helper definitions. Statement-structure bricks are
+checked for `execSeq` zero/nil/cons, block wrapping, `let`, assignment,
+`continue`/`break`/`leave`, `if`, switch selection/execution, the `for`
+statement boundary over a loop-preservation fact, and the successor/successor
+loop-iteration step itself. The checked statement-list dispatcher
+`execSeq_succ_toAst?_checked_core_of_exec_tail`, checked statement dispatcher
+`exec_succ_toAst?_checked_core_of_parts`, checked loop wrapper
+`loop_succ_succ_toAst?_checked_core_of_parts`, internal user-call wrapper
+`call_user_succ_toAst?_checked_core_of_contract_and_blocks`, and dispatcher
+wrapper `callDispatcher_succ_toAst?_checked_core_of_contract_and_blocks` now
+package the remaining local recursion cases behind smaller-fuel callbacks. The
+fuel-recursive composition theorem
+`checkedPreservationAt_of_contractAst` is now checked: for every fuel, any
+object expression, argument list, statement, statement list, loop, internal
+user call, and dispatcher call that lowers under the checked object layout has
+the same result in the independent object-source interpreter and imported
+core-Yul interpreter. The public source bridge is also checked for live
+top-level entry states: `runContract_to_runWithCodeImage_of_checked_ok`
+connects the independent object runtime to `Yul.Program.runWithCodeImage`, and
+`sourceRun?_eq_sourceRunChecked?_of_checked_ok` wires the public independent
+`Source.Program.sourceRun?` interface to the existing checked core-image
+entrypoint when `Runtime.ofCheckedProgram?` and `toRootCoreProgram?` compute
+successfully. The stronger `sourceRun?_success_to_sourceRunChecked?_ok`
+removes the separate root-core success premise at the source-facing boundary:
+from a successful independent object-source run on an `.Ok shared store` entry
+state, the theorem derives the checked root-core program and code image and
+proves `sourceRunChecked?` returns the same result. The companion theorem
+`sourceRun?_success_exists_runWithCodeImage_ok` exposes the computed
+`Yul.Program.runWithCodeImage` core run directly, returning the derived core
+program and bytecode image as witnesses. The additional connector
+`sourceRun?_success_exists_coreRun_ok_of_initial_codeBytes` collapses that
+code-image run to the existing plain `Yul.Program.run` spine when the live entry
+state’s `executionEnv.codeBytes` is already the computed object bytecode image,
+which matches the code-image relation used by the current runtime routes. The
+public aliases `Program.sourceRunChecked?_of_sourceRun?_ok`,
+`Program.exists_runWithCodeImage_of_sourceRun?_ok`, and
+`Program.exists_coreRun_of_sourceRun?_ok_initial_codeBytes` expose these facts
+from the object program namespace, so callers no longer need to depend on the
+internal `Preservation` namespace. The `ObjectRuntime` connector now threads
+this result into the existing recursive bridge spine:
+`Program.exists_recursiveBridgeSourceRun_of_sourceRun_succ_ok` turns a
+successful object-source run at `sourceFuel.succ` into a core-Yul
+`RecursiveBridgeSourceRun` for the computed root core program, and
+`RecursiveBridgeObjectTopAssumptions`/`compile_whole_program_result_sound_of_recursiveBridgeObjectTopAssumptions`
+replace the imported-Yul source-run premise in the existing public top theorem
+with the independent object-source run plus the checked object-to-core equation.
+The bridge is intentionally stated for `.Ok shared store` initial states;
+arbitrary `.OutOfFuel` or checkpoint states are not valid entry states because
+neither source nor core installation can rewrite their execution environment.
+The object-top theorem still consumes the normal lower core-Yul acceptedness,
+compiler-resource, semantic-contract, compiler-target, and EVM runtime premises
+for the computed core program; those are the existing lower compiler proof
+obligations, not object-layout certificates. Solidity/Yul `verbatim_*` and EOF
+dialect builtins remain outside this object layer: the current frontend rejects
+them before executable lowering, so supporting them fully requires a later
+core-Yul/verbatim semantics and target-code-image proof rather than another
+object-layout lemma.
 
 The old invariant,
 `FunctionsBlockCompiledOpenResultRel` at the current PC, is too strong for
@@ -104,13 +925,685 @@ old seed/response arguments.
 
 The source-open carrier is lifted through the initial scoped
 block-plus-cleanup wrapper, whole-program/postamble wrapper, block-level shim,
-and the no-seed checked compile wrapper
-`FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready`.
-The public runtime route now consumes this no-seed source-open carrier in
+and the checked source/gas compile wrapper
+`FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_sourceGasSeed_responses`.
+The public runtime route now consumes this actual-trace source/gas carrier in
 `compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady`
 and its no-`RETURNDATACOPY` sibling. The remaining public CALL gap is no longer
-target-side bridge callbacks; it is deriving or classifying the explicit
-source-readiness and gas/runtime readiness premises.
+target-side bridge callbacks, broad source-readiness callbacks, or explicit
+non-CALL source/gas seed callbacks. The remaining public CALL gap is generating
+or classifying the gas/runtime readiness premises used to lift the checked
+source-open trace to `OpenXReplayAbove`. The return-buffer-cleanliness part of
+final fallthrough is now resolved at the open gas-aware observation boundary:
+running success may compare against the state after the implicit fallthrough
+`STOP` clears internal return buffers, so the current public source-bridge/gas
+no-RDC/stack-safe routes now generate final pc-at-end from the checked
+source-open/postamble `TargetOutcomeEndPc` carrier. Their remaining final
+fallthrough premise is the stack-bound fact only; the stack-too-deep/spill
+track owns generating or discharging that bound.
+
+2026-06-05 09:23 CEST update: the non-CALL seed frontier has been tightened to
+an actual-run theorem boundary. `compilerOpenPrimitive_no_callCreate_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady`
+now returns target gas preservation for checked non-CALL primitive replay, and
+`LocalsExprNonCallSourceGasSeedReadyFor` now requires that actual
+`evmAfter.gasAvailable = evmAfterArgs.gasAvailable` fact instead of trying to
+prove source/gas preservation from an arbitrary erased target state. The helper
+`SourceStateTargetGasRel.ok_of_source_target_gasAvailable_eq` is checked for
+the final recombination step. Remaining work for the CALL proof is therefore
+not another CALL recursion pass: prove the structured non-CALL primitive
+source/shared-state constructor, use it to generate `hNonCallSourceGas`, delete
+that public parameter from `OpenRuntime`, then run the final public wrapper and
+assumption audit.
+
+2026-06-05 09:47 CEST update: the non-CALL primitive frontier is now also
+tightened at the operation classifier. `BasicOpOpenSupported` no longer means
+"anything whose `toPrimOp` is not CALL/CREATE"; it means
+`BasicOpSourceBridgeSafe op` or an actual open CALL-family kind. The checked
+`BasicOpSourceBridgeSafe.no_callCreate` projection feeds the existing
+non-CALL replay lemmas, while external-code-image/resource-only operations are
+kept out of the source/gas seed until a real source-state bridge is proved for
+them or they remain rejected by the public supported-feature checker. Focused
+checks passed for `OpenLowering`, `OpenRuntime`, `LayerAudit`, and the
+corresponding module build. Remaining CALL work is unchanged but sharper:
+construct the source/shared-state seed for source-bridge-safe non-CALL
+primitives, generate `hNonCallSourceGas`, delete the public parameter, and
+perform the final public assumption audit.
+
+2026-06-05 10:36 CEST update: the source-bridge-safe non-CALL source/gas seed
+is now generated. `basicOpSourceBridgeSafe_step_sharedStateRel`,
+`structured_eval_sourceBridgeSafe_sourceStateRel`, and
+`localsExprNonCallSourceGasSeedReadyFor_structured` construct the actual
+source/shared-state and source/target gas evidence for structured non-CALL
+primitive steps. `OpenRuntime` now supplies this theorem internally to
+`FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_sourceGasSeed_responses`;
+`hNonCallSourceGas` is gone from the public runtime wrappers and from
+`LayerAudit`. Verification: direct checks for `OpenLowering`, `OpenRuntime`,
+and `LayerAudit` passed, and `lake build EvmCompiler.Yul.OpenLowering
+EvmCompiler.Yul.OpenRuntime EvmCompiler.LayerAudit` passed. Remaining CALL work
+is the final gas/runtime readiness premise classification/generation and the
+public assumption audit.
+
+2026-06-05 10:45 CEST update: the no-`RETURNDATACOPY`
+source-bridge/gas wrapper now generates its local no-CALL path checks from
+core replay. The theorem
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady_noReturnDataCopy`
+now takes `XBlockReplayCoreNonGasReady asm target (validJumps target)` and
+uses the checked no-`RETURNDATACOPY` fact plus
+`CurrentNoCallPathChecksReady.of_core_noReturnDataCopy_current_no_call` to
+construct `CurrentNoCallPathChecksReady` internally. Remaining no-RDC public
+runtime inputs are the running-instruction gas/CALL budget case, halted
+no-CALL case, final clean fallthrough/stack bound, and the core replay premise.
+
+2026-06-05 later update: the stack-safe CALL public route no longer exposes
+that global core replay premise. This was intentionally narrowed after a
+theorem-boundary check: `XBlockReplayCoreNonGasReady` is too broad for CALL
+programs because CALL-family instruction readiness belongs to the CALL
+gas-budget case. A follow-up narrowing now derives
+`CurrentNoCallPathChecksReady asm target` internally from checked assembly
+compile/jumpdest evidence, checked no-`RETURNDATACOPY`, and the remaining
+`CurrentNoCallInstrCoreResidualResources asm target` field. At that checkpoint,
+the live non-CALL target frontier was no-CALL residual core resources, not the
+whole path-check replay predicate and not CALL-family block readiness. This
+intermediate frontier is superseded by the later source-bridge/static route
+below.
+
+2026-06-05 10:54 CEST update: the halted no-CALL public runtime premise is now
+generated for the source-bridge/gas route. `OpenAssembly` proves
+`Target.openRunListResult_emitInstr_halted_no_callCreate`, using a small
+`openResultResolves_done_inv` inversion lemma, and the public
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady`
+theorem plus its no-`RETURNDATACOPY` sibling now pass that checked theorem
+internally instead of taking `hHaltedNoCall` from the caller. Remaining public
+runtime inputs are the running-instruction gas/CALL budget case, final clean
+fallthrough/stack bound, and the no-RDC core replay premise/classification.
+
+2026-06-05 11:02 CEST update: the stale no-RDC route-2 assumptions package no
+longer exposes `haltedNoCall` either. The private no-RDC
+`callSharedBridgeReady` adapter now also supplies
+`Target.openRunListResult_emitInstr_halted_no_callCreate` internally, and
+`RecursiveBridgeCALLRegularOpenNoReturnDataCopyRoute2Assumptions` has dropped
+the field. Remaining `hHaltedNoCall` occurrences are lower/internal helper
+surfaces, not the pinned public source-bridge/gas wrappers or the route-2
+assumptions package.
+
+2026-06-05 11:07 CEST update: the running-gas premise has been audited and the
+current old `OpenXCurrentRunningInstrGasReadyCase` shape is over-strong for
+generation: its CALL branch asks for `XStepChecksPass` for every gas lower
+bound, including `0`. A gas-consuming CALL cannot satisfy that globally. The
+checked replacement boundary is now pinned as
+`OpenXCurrentRunningInstrGasBudgetReadyCase`: in the CALL branch it chooses a
+sufficient `gasBound` for each concrete response/tail budget and proves both
+step checks and post-response budget above that bound. The theorem
+`OpenXCurrentRunningInstrGasBudgetReadyCase.runListRunningReadyFor_current_emitted`
+turns this budgeted case plus current no-CALL path checks into the emitted
+running-block readiness consumed by `OpenX`. Next step is to thread this
+budgeted evidence family through the source-open current-emitted carrier and
+replace the public `hRunningGasReady` callback with a resource-facing budgeted
+premise/constructor.
+
+2026-06-05 11:15 CEST update: the budgeted running-gas evidence has now been
+threaded through the source-open current-emitted carrier. The checked theorem
+`currentEmittedTraceReadyFor_of_source_trace_current_shared_bridge_ready_gas_budget_cases`
+is pinned in `LayerAudit`, and the public source-bridge/gas wrappers now take
+the budgeted `OpenXCurrentRunningInstrGasBudgetReadyCase` premise rather than
+the old all-lower-bound `OpenXCurrentRunningInstrGasReadyCase`. The no-RDC
+route-2 assumptions package also no longer exposes
+`runningCallSharedBridgeRel`; it delegates through the public budgeted route.
+Remaining work for this item is to generate or classify that budgeted premise
+from source/compiler resource facts, then remove any stale public wrapper
+surface that still asks callers for compiler-generated runtime evidence.
+
+2026-06-05 11:22 CEST update: the stale base no-RDC route-2 assumptions
+package was deleted instead of kept for compatibility, and the remaining
+stack-safe no-RDC route package now exposes the budgeted running-gas readiness
+shape directly. While auditing the final fallthrough premise, we found a real
+theorem-boundary issue: `returnDataCopyBoundary` only rejects
+`RETURNDATACOPY`; it does not force external CALL responses to have empty
+`returnData`. Because the current gas-aware running-result agreement compares
+`eraseGas` states, and `eraseGas` does not erase `returnData`/`H_return`, the
+old public `ReturnBuffersClean finalState` premise can be false for arbitrary
+CALL responses. This item is therefore not just missing a constructor. The
+proof must either weaken the running-completion observation so the final
+fallthrough `STOP` may clear internal return buffers, or make clean final
+return buffers an explicit source/response-side premise and record that as a
+real restriction.
+
+2026-06-05 11:27 CEST update: the budgeted running-gas premise itself has a
+second theorem-boundary issue. `GasExecRel` deliberately relates a target state
+to gasful states with arbitrary gas bookkeeping, so a post-CALL budget premise
+quantified over every `gasPost` with only
+`GasExecRel gasPost (incrPC (call.resume response))` cannot be generated for a
+positive tail budget. The sound route is to tighten the open gas-aware CALL
+bridge so the tail budget is proved for the actual gas-aware resume state
+produced from `gasChargedState`/`finishGasAwareCall`, or to classify the
+remaining gas continuation budget as an explicit source-facing resource
+premise. This is local to the open EVM gas-aware replay boundary; it does not
+invalidate the already-checked recursive Yul CALL corridor.
+
+2026-06-05 11:33 CEST update: the arbitrary-post-state part of that boundary
+has been removed from the checked public budgeted route. `OpenGasAware` now
+has actual-post CALL replay helpers ending in
+`...actual_post`, including
+`openXRunListRunningRelReady_current_emitted_prim_call_actual_post`, and
+`OpenXCurrentRunningInstrGasBudgetReadyCase` now asks for the tail budget on
+the actual gas-aware resume state
+`incrPC (finishGasAwareCall gasCall response)`. The old stronger
+gas-ready shape still implies the new budgeted shape, but the public budgeted
+predicate no longer requires proving enough gas for every arbitrary
+`GasExecRel` post-state. Remaining work for this subitem is to generate or
+classify the actual post-CALL tail budget itself, especially around
+`CallResponse.returnedGas` and 256-bit gas arithmetic.
+
+2026-06-05 11:38 CEST update: the `returnedGas` arithmetic boundary now has a
+checked local bridge. `uint256_add_toNat_of_lt_size`,
+`finishGasAwareCall_incrPC_gasAvailable_toNat_of_no_overflow`, and
+`finishGasAwareCall_incrPC_tail_budget_of_no_overflow` show that, under an
+explicit no-overflow condition on `(call.resume response).gasAvailable +
+response.returnedGas`, a natural tail budget on that sum transfers to the
+actual gas-aware post-CALL state. The remaining classification question is
+whether this no-overflow/tail-budget response condition is generated from
+source-facing gas admissibility or remains an explicit resource premise.
+
+2026-06-05 13:21 CEST update: `OpenRuntime` now has the checked parent-side
+resource bridge for that classification:
+`OpenCallActualPostGasBudgetFacts`,
+`OpenXCurrentRunningInstrCallReturnedGasBudgetReadyCase`, and
+`OpenXCallFamilyGasBudgetReadyFor.of_returned_gas_budget` derive the existing
+`hCallGasBudgetReady` surface from explicit returned-gas no-overflow plus tail
+budget facts on the actual gas-aware CALL resume state. The child-call boundary
+is still intentionally separate: a source-facing response admissibility layer
+must still supply same-forwarded-gas/OOG agreement and the returned-gas facts
+for actual CALL trace responses.
+
+2026-06-05 13:29 CEST update: the stack-safe public route-2 assumption bundle
+now exposes `OpenXCallFamilyReturnedGasBudgetReadyFor` instead of raw
+`OpenXCallFamilyGasBudgetReadyFor`; the route derives the old
+`hCallGasBudgetReady` package internally via
+`OpenXCallFamilyGasBudgetReadyFor.of_returned_gas_budget`. This moves the
+public boundary one step closer to the intended source-facing response gas
+admissibility contract. The same route now derives its non-CALL
+`CurrentNoCallPathChecksReady` internally from the checked no-RDC/residual
+resource package, so the public residual frontier is explicit. `LayerAudit`
+pins the returned-gas bridge.
+
+2026-06-05 13:38 CEST update: the route-2 CALL gas premise has been lifted one
+more level. `OpenCallChildGasStatus`, `OpenCallSameGasBudgetOutcome`,
+`OpenCallResponseGasAdmissible`, and
+`OpenXCallFamilyResponseGasAdmissibleReadyFor` express the intended external
+response gas contract: source and target use the same forwarded gas budget,
+the child out-of-gas/completed status agrees, and the response's returned gas
+is compatible with that status. The public route now derives returned-gas
+budget readiness and then `hCallGasBudgetReady` from that contract.
+
+2026-06-05 13:41 CEST update: the public route no longer asks for that
+response-gas contract over arbitrary possible responses. The checked trace-local
+surface `OpenXCallFamilyResponseGasTraceAdmissibleReadyFor` only requires the
+contract for responses in the current open trace; `OpenRuntime` inverts the
+emitted CALL run to recover the singleton actual response and applies the
+budget proof there. The older all-responses bridges remain available only as
+checked projection helpers; the route-2 package now exposes the trace-local
+contract.
+
+2026-06-05 13:52 CEST update: the response-gas contract is no longer a single
+opaque bucket. `OpenCallResponseGasAgreementFacts` now carries the same
+forwarded-gas and same child-status/OOG agreement separately from
+`OpenCallActualPostGasBudgetFacts`, which is the parent-side no-overflow and
+tail-budget fact. Checked projections show the agreement implies
+`response.returnedGas.toNat` is bounded by the agreed forwarded gas, and the
+route still derives `hCallGasBudgetReady` by projecting the parent post-budget
+piece. This matches the intended split: external child outcome agreement is a
+source/target response premise; parent completion follows from explicit
+sufficient parent gas and UInt256 no-overflow facts.
+
+2026-06-05 14:03 CEST update: the agreement witness is now tied to the actual
+open call request. `OpenCallResponseGasAgreementFacts` requires the source and
+target gas-budget witnesses to match `call.site.request.requestedGas.toNat` and
+`gasCall.site.request.requestedGas.toNat`, respectively, and exposes checked
+requested-gas returned-gas bounds. This avoids a vacuous "pick any large gas
+witness" interpretation while preserving the current open-boundary abstraction:
+the request gas operand is shared, while any chain-specific forwarding formula
+remains outside this compiler proof boundary.
+
+2026-06-05 15:12 CEST update: the artificial capped-call route was removed from
+the public spine. The route-2 package now consumes the uncapped
+`OpenXCallFamilyResponseGasTraceAdmissibleReadyFor asm target` carrier and
+derives `hCallGasBudgetReady` through
+`OpenXCallFamilyGasBudgetTraceReadyFor.of_response_gas_admissible`. This is the
+proof-facing slot for the external gas-stability assumption: for each observed
+trace response and continuation budget, there is a parent gas budget under
+which the CALL response gas agrees source/target, the parent post-CALL gas is
+enough to continue, and UInt256 addition does not wrap. There is no global 30m
+cap and no compile-time attempt to predict child gas consumption.
+
+2026-06-05 public-surface update: the public source-bridge/gas wrappers now
+also consume `OpenXCallFamilyResponseGasTraceAdmissibleReadyFor` directly and
+derive the intermediate `OpenXCallFamilyGasBudgetTraceReadyFor` internally
+before calling the lower replay helpers. This keeps the import-visible CALL
+route on the trace-local response-gas premise rather than exposing the old
+budget carrier as a public theorem argument.
+
+2026-06-05 route-2 split update: `OpenXCallFamilyCommittedResponseSafetyTraceReadyFor`
+has been removed from the base route-2 assumption package. Exact replay
+(`openXReplayAbove` / `openXReplayAt`) and high-gas committed-safety consequences
+do not need the low-gas response-safety premise. The all-gas committed-safety
+wrappers now take that premise explicitly, exactly where they consume the
+low-gas/all-gas response-tracking frontier.
+
+2026-06-05 15:19 CEST update: the gas-aware target replay layer now has an
+exact-gas surface. `OpenGasAware.OpenXReplayAt` states replay at one concrete
+initial gas value, and `OpenXReplaySomeGas` packages existential exact replay.
+`OpenXReplayAbove.to_replayAt` / `.to_replaySomeGas` bridge the older monotone
+replay theorem to the exact surface when a concrete feasible gas value is
+available, and `.to_replaySomeGas_of_bound_lt` specializes this to choosing
+`gas = gasBound` when the generated bound itself fits. The route-2 package exposes
+`RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXReplayAt`,
+which returns the generated `gasBound` plus a checked proof that every
+`gasBound <= gas < 2^256` gives exact replay, and `openXReplaySomeGas`, which
+reduces existential exact replay to the crisp feasibility fact
+`gasBound < 2^256`. This feasibility fact is now classified as an explicit
+resource-size boundary, not a compiler replay callback: without a
+source-facing gas/resource cap or sufficient-gas premise on the generated
+whole-run bound, `OpenXReplayAbove` may be vacuous because the lower bound can
+be at or above the UInt256 gas domain.
+
+2026-06-05 15:25 CEST update: the gas-aware observation boundary now has names
+for the intended two-property story. `Assembly.GasAware.XCommittedObservation`
+records only successful committed shared-state/output observations and collapses
+revert-like results through `XRunOutcomeFails`; `XRunOutcomeSafelyMatches` says
+that a run either has the same committed observation as the gasless result or
+falls into the REVERT/OOG failure bucket. The open runner mirrors this with
+`OpenGasAware.OpenXCommittedSafeAt`, `OpenXCommittedSafeAbove`, and
+`OpenXCommittedSafeForAllGas`. Existing exact/high-gas replay implies the
+coarser committed safety property via checked projections, and the CALL route-2
+package now exposes this consequence as `openXCommittedSafeAbove`. The full
+all-gas safety theorem is still a theorem-boundary: it needs an external-world
+premise ruling out gas-budget-sensitive successful CALL responses that differ
+without either side failing.
+
+2026-06-05 later update: the all-gas safety frontier is split at the generated
+high-gas bound. `OpenGasAware.OpenXCommittedSafeBelow` names the low-gas side
+condition, and `OpenXCommittedSafeForAllGas.of_below_and_above` combines that
+premise with checked high-gas committed safety. Route 2 exposes this exact
+bridge as `openXCommittedSafeForAllGasOfBelow`: once the external-world safety
+argument proves committed safety for every gas below the generated bound,
+checked replay covers the rest.
+
+2026-06-05 later update: the external-world side of the low-gas premise now has
+a response-level contract. `OpenCallResponsesCommittedSafeEquivalent` says that
+two continuing responses to the same external CALL must agree on the
+caller-visible success bit, return data, and extensionally equal reentrant
+state mutation; returned gas is deliberately ignored as an observation.
+Asymmetric child-OOG is not hidden at this response layer, because a failed
+CALL still returns a status word to the caller. It belongs at the whole-run
+outcome layer only when the child was given all remaining gas and the candidate
+run is proved to fail/revert, or otherwise to commit the same final observation.
+`OpenXCallFamilyCommittedResponseSafetyTraceReadyFor` lifts the strict response
+contract to actual trace-local CALL sites, giving the eventual low-gas induction
+a concrete assumption about gas-budget-insensitive child behavior rather than a
+bare `OpenXCommittedSafeBelow` oracle.
+
+2026-06-05 later update: the low-gas response tracker now has a checked
+proof-facing exception for the only asymmetric child failure we want to allow.
+`OpenCallAllForwardedGasOutOfGas` records that the candidate child was given
+the entire post-charge forwarded budget and ended out-of-gas, with the usual
+gas-admissible failed/zero-returned-gas facts and an explicit zero parent
+post-CALL gas fact. `OpenCallResponseTracksReferenceOrAllGasOOG` then says a
+candidate response either satisfies strict continuing-response equivalence with
+the reference response, or is this all-forwarded child-OOG case. The projection
+`committedSafe_of_not_allForwardedGasOutOfGas` pins the important boundary:
+away from the all-forwarded child-OOG fact, the proof must recover strict
+continuing-response equivalence. The projection
+`allForwardedGasOutOfGas_of_not_committedSafe` states the stronger internal
+form: any non-equivalent caller-visible response must be the all-forwarded
+child-OOG case. The projections `success_eq_or_allForwardedGasOutOfGas`,
+`allForwardedGasOutOfGas_of_success_ne`, and
+`allForwardedGasOutOfGas_of_reference_success_true_candidate_success_false`
+state the especially important caller-visible corollary: if the CALL success
+bits differ, the all-forwarded child-OOG certificate is forced.
+
+2026-06-05 later update: the all-forwarded-OOG branch now has a checked
+outcome-level landing point. `XRunOutcomeSafelyTracks.of_candidate_fails`
+turns any candidate OOG/revert outcome into directional tracking of the
+reference result, and `OpenXOutcomeTraceSafelyTracksResult.of_failure_trace`
+lifts that through open traces. The CALL-specific projections
+`outcome_tracks_of_not_committedSafe_candidate_fails`,
+`outcome_tracks_of_success_ne_candidate_fails`, and
+`outcome_tracks_of_reference_success_true_candidate_success_false` combine the
+non-equivalent-response rule with candidate whole-run failure: they recover the
+all-forwarded child-OOG certificate and produce the directional tracking fact.
+This still leaves the hard induction step of proving that the exceptional
+low-gas CALL branch either yields such a candidate failure or commits the same
+final observation as the fixed reference result.
+
+2026-06-05 later update: the response tracker has an outcome-aware refinement.
+`OpenXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCase` keeps the
+same trace-local response relation but also carries the obligation that any
+non-equivalent caller-visible CALL response makes the candidate whole-run
+outcome fail.
+`OpenXCallFamilyResponseOutcomeTrackingTraceReadyFor` lifts that to emitted
+CALL-family sites, projects back to ordinary response tracking, and is generated
+vacuously from strict committed-response safety. The new frontier
+`OpenXCommittedSafeBelowTracksFixedTraceOfResponseOutcomeTracking` is therefore
+the proof-facing shape for the remaining induction: compare concrete reference
+and candidate traces, and route the all-forwarded-OOG mismatch branch through
+candidate whole-run failure rather than caller-continuation equivalence.
+Route 2 now exposes this exact surface through
+`openXCommittedSafeForAllGasOfResponseOutcomeTrackingFixedTrace`, which combines
+the refined low-gas frontier with the existing high-gas replay bridge to produce
+all-gas committed safety.
+
+2026-06-05 later update: the failure-only carrier now has a result-tracking
+successor that matches the final-observation safety contract. The checked
+`OpenXCurrentRunningInstrCallResponseResultTrackingTraceReadyCase` and
+`OpenXCallFamilyResponseResultTrackingTraceReadyFor` still require strict
+continuing-response equivalence away from the all-forwarded child-OOG branch,
+but a non-equivalent caller-visible response only has to prove
+`XRunOutcomeSafelyTracks candidateOutcome (.ok referenceResult)`. Thus the
+candidate may fail/revert or commit the same final observation. The frontier
+`OpenXCommittedSafeBelowTracksFixedTraceOfResponseResultTracking` and route-2
+bridge `openXCommittedSafeForAllGasOfResponseResultTrackingFixedTrace` expose
+this weaker and more accurate low-gas premise directly. The projection
+`OpenXCallFamilyResponseResultTrackingTraceReadyFor.outcomeTracks_of_not_committedSafe`
+lifts the key non-equivalence branch to emitted CALL-family sites, so the
+remaining low-gas induction can consume route-local facts without re-unpacking
+the current-instruction carrier. The companion
+`committedSafe_or_allForwardedGasOutOfGas_tracks` projections package the same
+fact in the induction-ready disjunction: strict continuing-response equivalence,
+or the all-forwarded child-OOG certificate plus whole-run result tracking.
+
+2026-06-05 later update: the all-forwarded-OOG response tracker is now lifted
+to the trace/route layer. `OpenXCurrentRunningInstrCallResponseTrackingTraceReadyCase`
+compares CALL responses that actually appear in a reference trace and a
+candidate low-gas trace, and `OpenXCallFamilyResponseTrackingTraceReadyFor`
+lifts that to route-local emitted CALL sites. The existing strict
+`OpenXCallFamilyCommittedResponseSafetyTraceReadyFor` maps into this tracker,
+and route 2 exposes
+`openXCommittedSafeForAllGasOfResponseTrackingFixed`, so the remaining low-gas
+induction can target `OpenXCommittedSafeBelowTracksFixedOfResponseTracking`.
+
+2026-06-05 later update: that route frontier now has a trace-indexed outcome
+variant. `OpenXCommittedSafeBelowTracksFixedTraceResult` keeps the candidate
+low-gas trace visible while proving it tracks the fixed reference result, and
+`OpenXCommittedSafeBelowTracksFixedTraceOfResponseTracking` lifts that shape to
+the route boundary. The bridge
+`openXCommittedSafeForAllGasOfResponseTrackingFixedTrace` feeds the trace-indexed
+frontier into the existing all-gas safety wrapper.
+
+2026-06-05 later update: route 2 now carries that committed-response safety
+premise directly. `OpenXCommittedSafeBelowOfCommittedResponseSafety` names the
+remaining low-gas induction target as a function from the concrete response
+safety carrier to `OpenXCommittedSafeBelow`, and
+`openXCommittedSafeForAllGasOfCommittedResponseSafety` is the checked route
+bridge from that induction target plus high-gas replay to all-gas committed
+safety.
+
+2026-06-05 later update: the low-gas induction target has a more proof-friendly
+directional tracking form. `XRunOutcomeSafelyTracks` says a low-gas candidate
+either fails or commits to the same observation as a reference result; failure
+of the reference alone is not enough. `OpenXCommittedSafeBelowTracksResult`
+packages the corresponding per-gas open-run obligation, and
+`openXCommittedSafeForAllGasOfCommittedResponseSafetyTracks` is the checked
+route bridge from that tracked-result induction target to all-gas committed
+safety.
+
+2026-06-05 later update: the trace-local response-gas package can now be
+generated from the stronger all-responses package by the checked projection
+`OpenXCallFamilyResponseGasTraceAdmissibleReadyFor.of_response_gas_admissible_ready_for`.
+This does not change the public route-2 surface, but it eliminates a duplicate
+gas-readiness shape when an upstream proof already has the stronger contract.
+The primitive-static frontier was also theorem-truth checked: it is not
+derivable from `OpenAssembly.Source.OpenTraceResult` alone, because assembly
+source stepping delegates primitives to the raw target primitive semantics and
+raw target `SSTORE` can succeed in static mode. Discharging
+`SourceOpenTraceCurrentSharedBridgePrimitiveStaticTraceReadyFor` therefore
+needs a higher-level source/open-lowering static-safety carrier tied to the
+accepted Yul run, not another assembly-trace-only wrapper.
+
+2026-06-05 later update: `OpenRuntime` now has a checked sufficient static
+bridge:
+`SourceOpenTraceCurrentSharedBridgeWritableReadyFor.to_primitiveStaticReadyFor`
+and the trace wrapper
+`SourceOpenTraceCurrentSharedBridgeWritableTraceReadyFor.to_primitiveStaticTraceReadyFor`.
+If every source-bridge step is in writable mode (`perm = true`), primitive
+static-safety is generated automatically via
+`InstrPrimitiveStaticInputsReady.of_perm_true`. The remaining work is not this
+local static conversion; it is generating a writable/static-safe trace carrier
+from the accepted Yul run, entry permission, and/or strengthened response
+admissibility.
+
+2026-06-05 later update: the finite open-response relation now includes
+checked target caller-frame permission stability. In addition to preserving the
+installed target code image, every admissible response must leave
+`executionEnv.perm` unchanged on the target caller frame; the checked lemmas
+`RelationallyAdmissibleOpenResponse.target_perm_stable`,
+`RelationallyAdmissibleOpenResponse.evmOpenCall_resume_perm_stable`, and
+`SourceOpenTraceResponsesAdmissible.event_target_perm_stable` expose that fact
+through individual responses, resumed EVM open calls, and finite traces. This
+turns one piece of the static-readiness boundary into semantic response
+stability.
+
+2026-06-05 latest update: the writable/static-safe trace carrier is now checked
+from accepted source/current-shared bridge evidence, entry `executionEnv.perm =
+true`, finite response admissibility, and the current CALL-family gas readiness
+package. The pinned theorem family
+`SourceOpenTraceCurrentSharedBridgeWritableReadyFor.of_source_trace_current_shared_bridge_ready_gas_budget_responses_initial_perm`,
+`SourceOpenTraceCurrentSharedBridgeWritableTraceReadyFor.of_source_trace_current_shared_bridge_ready_gas_budget_responses_initial_perm`,
+and
+`SourceOpenTraceCurrentSharedBridgePrimitiveStaticTraceReadyFor.of_source_trace_current_shared_bridge_ready_gas_budget_responses_initial_perm`
+is the replacement for the old opaque static-safety callback.
+
+2026-06-05 route update: route-2 no longer takes `noCallStaticReady`.
+`RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions`
+now exposes only `initialPerm : initial.executionEnv.perm = true` for this
+boundary, and the stack-safe/no-RDC CALL wrapper generates primitive static
+trace readiness internally from `traceAccepted.responses`,
+`OpenXCallFamilyGasBudgetTraceReadyFor`, checked `assemble?`, and the new
+writable/static-safe carrier theorem family.
+
+2026-06-05 13:45 CEST update: the internal user-call body fuel premise has
+been audited and the route-2 package now exposes the direct source-facing
+predicate
+`SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg program.contract sourceFuel`
+instead of the misleading wrapper
+`RecursiveBridgeCALLSourceRunInternalBodyFuelAdequate`. This premise is not
+generated by the single top-level `RecursiveBridgeSourceRun`: it quantifies
+over every initialized internal callee body clock up to `sourceFuel` and every
+admissible open response trace. It remains classified as an explicit source
+fuel/resource boundary.
+
+2026-06-05 16:44 CEST update: the body-fuel zero case has been split out and
+the premise has been corrected to a positive-body-clock boundary. Direct
+internal user-call paths now discharge `bodyFuel = 0` through the checked
+`call_fuel_two` low-fuel rejection theorem before invoking callee-body
+recursion; the ordinary and typed discarded/assignment/declaration wrappers all
+case-split the selected body clock. `SourceOpenInternalUserCallBodyFuelAdequateUpTo`
+now quantifies only over `0 < bodyFuel`, with `.of_le`/`.mono` preserving the
+positivity proof. Verification: focused `RecursiveBridgeSupport`, refreshed
+`RecursiveBridgeSupport.olean`, focused `OpenRuntime`, and focused
+`LayerAudit` checks passed. This closes the low-fuel split for the current
+route: zero selected body fuel is rejected before the premise is invoked, and
+positive selected body clocks remain under the explicit source-facing
+fuel/relatability resource premise.
+
+2026-06-05 16:56 CEST update: the remaining positive body-fuel premise has a
+checked counter-boundary explaining why it is not generated by the current
+single dispatcher source-run package. Even `bodyFuel = 1` can be too low for an
+initialized callee body whose first statement is a block:
+`SourceOpenInternalUserCallBodyFuelAdequateUpTo.one_false_of_lookup_block_nil_domain`
+and `...one_false_of_lookup_block_nil_domain_upTo` show that such a body
+resolves to imported `OutOfFuel`, which `SourceResultRelatable` rejects. This
+classifies the current route's body-fuel field as a genuine sufficient-source-
+fuel/relatability resource premise unless a stronger all-internal-bodies
+adequacy theorem is added.
+
+2026-06-05 body-fuel completion update: added and pinned
+`SourceOpenInternalUserCallBodyFuelAdequateUpTo.zero_bound`, so the route can
+construct the adequacy premise automatically when the enclosing source-fuel
+bound is zero. For positive bounds, the checked one-tick counter-boundary above
+settles the current theorem boundary: this field remains an explicit
+source-facing sufficient-fuel/relatability premise unless the source semantics
+is later strengthened with an all-internal-bodies adequacy theorem.
+
+2026-06-05 17:45 CEST body-fuel vacuity update: added and pinned
+`SourceOpenInternalUserCallBodyFuelAdequateAt.of_no_lookup`,
+`SourceOpenInternalUserCallBodyFuelAdequateUpTo.of_no_lookup`, and
+`SourceOpenInternalUserCallBodyFuelAdequateUpTo.of_lookup_none`. This
+discharges the body-fuel adequacy field automatically when there is no
+initialized internal function-body lookup to quantify over. Together with the
+zero-bound constructor and the checked low-fuel/counter-boundary facts, body
+fuel is complete as far as the current route permits: the remaining positive
+existing-callee case is a real sufficient-source-fuel premise.
+
+2026-06-05 16:56 CEST CALL-family update: the non-disruptive acceptance-gate
+brick for `CALLCODE`, `DELEGATECALL`, and `STATICCALL` is checked.
+`Safe.CallFamilySafe.program_of_coverage` now lifts
+`importedIncompleteProgram`, `createBoundaryProgram`, and
+`objectBuiltinProgram` into the widened CALL-family safety predicate, while
+still rejecting `CREATE`/`CREATE2`. The ordinary-CALL proof route still uses
+`CallSafe`; this is the first checked gate needed before swapping semantic
+carriers to `CallFamilySafe`.
+
+2026-06-05 CALL-family subset update: added generic
+`FeatureCoverage.Family.*_mono` structural monotonicity lemmas and the checked
+`Safe.CallFamilySafe.program_of_callSafe` bridge. Every existing ordinary
+`CallSafe`-accepted program is now reusable as `CallFamilySafe`, so later
+carrier rewiring can move one consumer at a time without invalidating the
+ordinary-CALL route.
+
+2026-06-05 CALL-family bridge update: added and pinned checked
+`CallFamilySafe` siblings for selected-function-body lookup, scoped
+statement/sequence checkpoint execution, successful selected callee-body
+checkpointing, and dispatcher no-checkpoint derivation. This widens the
+callee/dispatcher structural proof interface without changing the ordinary
+`CallSafe` public CALL route yet.
+
+2026-06-05 CALL-family finite-trace frontier update: added the family-parametric
+finite-path sequence, typed-continuation, and generated-loop frontier names,
+plus `CallFamilySafe` specializations and checked low-fuel base cases for
+sequence/kont fuel `0`/`1` and loop fuel `≤ 2`. This threads the accepted
+primitive/user-call family through the finite-trace frontier boundary while
+leaving the productive recursive CALL-family cases as the next integration
+step.
+
+2026-06-05 17:58 CEST CALL-family specialization update: added checked
+`CallSafe` specializations of the family-parametric finite-trace sequence,
+typed-continuation, and generated-loop frontiers, plus adapters in both
+directions between the old ordinary CALL frontier names and the new
+family-parametric `CallSafe` names. This keeps the ordinary CALL route wired
+through the refactored frontier API without claiming productive
+`CALLCODE`/`DELEGATECALL`/`STATICCALL` semantics yet.
+
+2026-06-05 18:10 CEST CALL-family primitive dispatcher update: added the
+checked classifier from `Safe.externalCallBoundaryPrimitive` to a concrete
+`OpenExternal.CallKind`, the `Safe.CallFamilySafe.primitive` safe-or-call-kind
+case split, and family-safe prelude/raw primitive expression dispatchers.
+Nested `CALLCODE`, `DELEGATECALL`, and `STATICCALL` primitive heads can now use
+the same expression-level open boundary as ordinary `CALL`; productive
+statement/loop/frontier lifting is still the next integration step.
+
+2026-06-05 18:26 CEST CALL-family whole-expression dispatcher update: added
+and pinned the prelude/raw whole-expression `CallFamilySafe` dispatchers
+`lower1?_sourceExprPreludeOpenSoundAtExactTarget_callFamilySafe_expr_of_lower1?_cases`
+and
+`lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callFamilySafe_expr_of_lower1?_cases`.
+These lift the checked family-safe primitive CALL boundary through the ordinary
+expression case split, while keeping the user-call branch as an explicit
+callback at the widened `Safe.CallFamilySafe.expr` type. The next CALL-family
+expression frontier is the reserve/argument-list lift: the existing reserve
+helper still consumes `Safe.CallSafe.exprs args`, so it needs a real
+`CallFamilySafe.exprs` argument-list invariant rather than a compatibility
+coercion back to ordinary `CallSafe`.
+
+2026-06-05 later update: the residual-resource public frontier has been
+narrowed again. `OpenGasAware` now names
+`CurrentNoCallInstrCoreResidualResources`, which supplies
+`InstrCoreResidualInputsReady` only under the current instruction's
+`Assembly.Instr.usesCallCreate instr = false` guard. The stack-safe route uses
+`CurrentNoCallPathChecksReady.of_current_residual_noReturnDataCopy_current_no_call`
+to derive no-CALL path checks from checked compile/jumpdest/no-RDC evidence
+plus this narrower residual premise. CALL-family blocks are handled by the
+response-gas admissibility route, not by this no-CALL residual premise.
+
+2026-06-05 later update: the no-CALL residual frontier now has a checked
+trace-local route. `OpenGasAware` defines
+`CurrentNoCallInstrCoreResidualTraceReadyFor` over the actual
+`OpenAssembly.OpenBlockTraceResult`, with a checked constructor
+`...of_current_resources` from the current no-CALL resource predicate. It also
+factors the one-step bridge
+`current_no_call_path_checks_of_residual_noReturnDataCopy`, which derives
+gas-aware path checks for a single emitted no-CALL block from checked
+assembly, jumpdest, no-RDC, and one residual proof. `OpenRuntime` now proves
+`currentEmittedTraceReadyFor_of_openBlockTrace_current_emitted_response_admissible_trace_residual_cases_of_initial_code`
+and packages it as
+`OpenXReplayTraceReadinessForCheckedTrace.of_current_emitted_response_admissible_trace_residual_cases`.
+The remaining integration is to feed this trace-local residual carrier from
+the current source/gas bridge or from a source-facing static/resource theorem,
+then switch the public route package away from even the no-CALL-only global
+resource predicate.
+
+2026-06-05 later update: the stack-safe public route has now switched away
+from the global no-CALL residual resource predicate. `OpenRuntime` defines the
+bridge-indexed carrier
+`SourceOpenTraceCurrentSharedBridgePrimitiveStaticReadyFor` and the actual-trace
+package `SourceOpenTraceCurrentSharedBridgePrimitiveStaticTraceReadyFor`, then
+proves
+`currentEmittedTraceReadyFor_of_source_trace_current_shared_bridge_ready_gas_budget_stack_static_cases`.
+The stack-safe route uses the checked open-CALL stack-bound table, checked
+jumpdest/no-RDC evidence, and that source-bridge/static carrier to derive the
+no-CALL path checks per actual emitted step. The route-2 package no longer
+exposes `CurrentNoCallInstrCoreResidualResources`; its remaining static frontier
+is now source/bridge-indexed primitive static-safety on the actual trace.
+
+2026-06-05 11:47 CEST update: the public budgeted running-gas premise has
+been narrowed again. The source-open current-emitted carrier now derives the
+no-CALL side of `OpenXCurrentRunningInstrGasBudgetReadyCase` internally from
+the existing no-call path checks; public wrappers and the stack-safe no-RDC
+route package ask only for
+`OpenXCurrentRunningInstrCallGasBudgetReadyCase` when the current instruction
+actually satisfies `Assembly.Instr.usesCallCreate instr = true`. The remaining
+resource gap is therefore no longer an all-running-instruction callback: it is
+the actual CALL-family gas budget/`returnedGas` no-overflow condition for
+running CALL-family current instructions.
+
+2026-06-05 12:03 CEST update: the final return-buffer observation boundary has
+been resolved without adding a response-side restriction. `OpenGasAware`
+defines `clearReturnBuffers`, extends `OpenXResultAgrees` with the checked
+cleared-running success case, and proves the fallthrough-`STOP` done
+continuation constructor
+`OpenXBlockTraceRelReady.DoneContinuationReady.running_of_fallthrough_stop_clear_return_buffers`.
+The current public source-bridge/gas wrappers and the stack-safe no-RDC route
+package therefore no longer ask for `ReturnBuffersClean finalState` on final
+running states; their final-fallthrough premise is only pc-at-bytecode-end plus
+stack length at most 1024. Later checkpoints have generated the final
+pc/stack facts, replaced the static callback with entry-permission-driven
+trace generation, and discharged the no-RDC/core replay field from the public
+route. The remaining live route boundaries are the classified internal-body
+fuel resource premise, CALL-family response-gas admissibility, feasibility of
+the generated whole-run `gasBound < 2^256` when existential exact gas replay is
+needed, CALL-family coverage audit, and the final public assumption audit.
+
+2026-06-05 12:21 CEST update: the final pc half is now generated on the
+public source-bridge/gas route. `OpenLowering` has end-pc-strengthened
+source-open wrappers ending in
+`FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_sourceGasSeed_responses_endPc`,
+and `OpenRuntime.targetOutcomeEndPc_running_pc_to_codeByteLength` converts
+that checked `TargetOutcomeEndPc` fact plus compile/decode-window facts into
+`finalState.pc.toNat = codeByteLength target.code`. The ordinary, no-RDC, and
+stack-safe public source-bridge/gas wrappers now take only the final stack
+bound at fallthrough. The remaining runtime gaps are the CALL-family gas-budget
+resource premise, the stack-bound proof/classification from the stack/spill
+track, no-RDC core replay classification, any remaining CALL-family public
+wiring, and the final assumption audit.
+
+2026-06-05 12:29 CEST update: stale replay wrappers are no longer pinned as
+the import-visible CALL surface. The old response-admissible and code-image
+checked-trace wrappers have been demoted to private compatibility scaffolding
+inside `OpenRuntime`, and `LayerAudit` no longer exports the old
+`OpenXCurrentRunningInstrResponseAdmissibleCase` route or the matching
+response-admissible replay constructors. Focused Lean checks for
+`OpenRuntime` and `LayerAudit` pass directly; full module builds are still
+being avoided while the separate stack/spill lane owns
+`CallAwareSpill.lean`.
 
 2026-06-05 CEST boundary update: the remaining source-readiness premise is not
 just missing compiler-generated evidence. Its current statement quantifies over
@@ -132,9 +1625,10 @@ been deleted. The source/gas-seeded initial-scoped, block-scoped, and
 checked-compile source-open wrappers now also call the no-readiness route
 directly; the checked-compile theorem is pinned as
 `FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_sourceGasSeed_responses`.
-Remaining work is to either migrate the runtime-facing no-seed route to this
-actual-trace source/gas carrier or derive its readiness premises from checked
-compiler/source contracts, then remove the remaining public readiness premises.
+The runtime-facing route has now been migrated to this actual-trace source/gas
+carrier, and the structured non-CALL source/gas seed is generated internally.
+Remaining work is to generate or classify the remaining gas/runtime premises
+before the final public assumption audit.
 
 2026-06-05 07:29 CEST update: the regular call-site source/gas corridor now
 also has a checked no-seed/readiness-driven path through statement level:
@@ -760,11 +2254,13 @@ Checked source/local carrier progress:
   `compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_of_compileOpen_supportedFor_programLayout`,
   compose those two bricks into `Functions.Source.WholeProgramOutcomeRel`.
   Finally,
-  `FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready`
+  `FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_sourceGasSeed_responses`
   lifts the carrier through `FunctionsOpen.Program.runState` and checked
-  compile, currently with explicit main-body and call-entry source-readiness
-  premises. These are pinned in `LayerAudit`, build-checked, and
-  axiom-audited with only the expected Lean kernel/library dependencies.
+  compile using initial shared-state relation, response evidence, and the
+  generated structured non-CALL source/gas seed instead of explicit main-body,
+  call-entry source-readiness, or public seed-callback premises. This route is
+  build-checked and axiom-audited with only the expected Lean kernel/library
+  dependencies.
 
 Checked lower/public replay progress:
 
@@ -778,8 +2274,10 @@ Checked lower/public replay progress:
   facts. The newest ordinary-path wrapper is
   `compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady`:
   it feeds the public `OpenXReplayAbove` replay theorem from the checked
-  source-open carrier plus gas-only current-instruction readiness, without a
-  public `hRunningCallSharedBridgeRel` / `hCallBridgeReady` callback. The
+  source/gas carrier plus response evidence and gas-only current-instruction
+  readiness, without public `hRunningCallSharedBridgeRel` /
+  `hCallBridgeReady`, `FunctionsProgramCallEntrySourceStateRelReadyFor`, or
+  main-body `FunctionsStmtListSourceStateRelReadyFor` callbacks. The
   no-`RETURNDATACOPY` sibling
   `compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady_noReturnDataCopy`
   now follows the same route. The older target-side bridge public wrappers
@@ -791,14 +2289,28 @@ Checked lower/public replay progress:
 Live remaining gap:
 
 The newest ordinary-path public wrapper no longer takes the old target-side
-CALL bridge callbacks. It still exposes source-readiness premises
-(`FunctionsProgramCallEntrySourceStateRelReadyFor` and main-body
-`FunctionsStmtListSourceStateRelReadyFor`) plus trace-local runtime premises:
-gas-only current-instruction readiness, halted no-CALL checks,
-`CurrentNoCallPathChecksReady`, and final fallthrough/clean-return-buffer
-readiness. These remaining premises must either be derived from checked
-source/compiler contracts or explicitly classified as fundamental resource
-inputs.
+CALL bridge callbacks, `FunctionsProgramCallEntrySourceStateRelReadyFor`, or
+main-body `FunctionsStmtListSourceStateRelReadyFor`, and it no longer exposes
+`hNonCallSourceGas` or halted no-CALL checks. The stack-safe CALL route now
+derives its 1024 stack bound from the open-CALL inferred assembly checker and
+derives exact no-CALL path checks internally from checked no-RDC,
+checked bytecode/jumpdest facts, the checked stack-bound table, and the
+source-bridge-indexed primitive static-safety carrier. It no longer exposes
+clean final return buffers; the gas-aware running observation handles the
+implicit fallthrough `STOP` clearing internal return buffers. The current
+stack-safe route-2 assumption package has three live resource/runtime frontiers:
+`SourceOpenInternalUserCallBodyFuelAdequateUpTo` for source internal-call body
+fuel, `SourceOpenTraceCurrentSharedBridgePrimitiveStaticTraceReadyFor` for
+response-preserved/static-mode safety on actual source-bridge trace steps, and
+`OpenXCallFamilyResponseGasTraceAdmissibleReadyFor` for source/target
+response-gas facts on actual open-trace CALL responses. The response-gas
+frontier has a checked projection from the stronger all-responses package; the
+static frontier now has a checked writable-trace-to-static projection, but still
+needs a higher-level source/open-lowering proof carrier that generates either
+writable steps or the more general static-safe property.
+These must either stay explicitly classified as fundamental
+resource inputs or be narrowed/generated from checked source/compiler contracts
+before the final public assumption audit.
 
 The immediate source-readiness blocker is no longer list recursion, argument
 evaluation, the resolved CALL branch, response splitting across
@@ -807,16 +2319,16 @@ statement-head seed wrappers, ordinary block-head frame/result seed wrappers,
 or the recursive block/list theorem. The no-seed source/gas recursive theorem
 now consumes no-seed `expr`/`let`/`assign` heads and the no-seed regular
 `Stmt.call` source/gas consumer through the generated
-call-site/body/return/tail corridor. The next proof brick is therefore no longer
-consumer migration inside the block recursion; it is deriving or privatizing the
-remaining readiness predicates before deleting them from the public/import-visible
-spine.
+call-site/body/return/tail corridor. The runtime wrapper migration is also
+checked, and the generated structured non-CALL source/gas seed is wired through
+the public runtime wrapper. The next proof brick is therefore auditing and
+generating/classifying the remaining gas/runtime predicates before deleting or
+classifying every remaining public premise.
 
-Distance estimate, after the 2026-06-05 02:04 CEST audit:
+Distance estimate, after the 2026-06-05 runtime source/gas migration:
 
-- Immediate checklist progress is **6 / 9 mostly checked** at the top level,
-  with item 5 and item 6 checked on the public no-seed route but still carrying
-  readiness/runtime premises that need generation or classification. Item 4, the hard internal procedure-call
+- Immediate checklist progress is **about 8 / 9 mostly checked** at the top
+  level. Item 4, the hard internal procedure-call
   splice, is checked as a recursive regular block theorem. The proof now runs
   ordinary heads, nested CALL-bearing expressions, argument lists, generated
   call-site/proc-entry code, recursive callee bodies, return dispatch,
@@ -825,18 +2337,13 @@ Distance estimate, after the 2026-06-05 02:04 CEST audit:
   For item 5, the initial scoped block-plus-cleanup carrier, generated
   program-end postamble carrier, scoped/block whole-program carrier, and
   checked-compile `FunctionsOpen.Program.runState` carrier are checked on the
-  no-seed bridge-ready route. Item 5 remains open because the checked-compile
-  carrier still takes explicit main/function-body source-readiness premises. The function-entry premise is
-  now seed-aware down to the actual post-argument relation, expression
-  recursion, response splitting, ordinary statement heads, and parameter-store
-  construction proof; the next step is to derive those readiness premises from checked
-  source/compiler contracts or make them part of a checked compiler contract,
-  rather than exposing them as public proof callbacks. Item 6 now has a
-  checked ordinary-path source-bridge/gas-ready
-  public replay wrapper and a checked no-`RETURNDATACOPY` sibling; the old
-  target-side bridge wrappers are no longer import-visible. Item 6 remains
-  open until any remaining CALL-family wrappers are moved to that route and the
-  remaining gas-only/runtime premises are generated or classified.
+  source/gas route without broad source-readiness or seed-callback premises.
+  Item 6 now has a checked ordinary-path source-bridge/gas-ready public replay
+  wrapper and a checked no-`RETURNDATACOPY` sibling on the same source/gas
+  route; the old target-side bridge wrappers are no longer import-visible.
+  Item 6 remains open until any remaining CALL-family wrappers are moved to
+  this route and the remaining gas-only/runtime premises are generated or
+  classified.
 - The important refinement discovered during the block theorem is the
   source-layout invariant: `sourceLayout = sourceCtx.scope` must be explicit at
   this layer, because `let` freshness is derived from `CtxRel`/same-scope
@@ -1278,7 +2785,11 @@ Immediate proof tasks:
      source-open carrier.
    - [x] Stop advertising the source/gas-seeded top wrappers as public/audit
      surfaces. `LayerAudit` now pins the no-seed source-open checked-compile
-     wrapper and public runtime wrappers, not the seed top route.
+     wrapper and public runtime wrappers, not the seed top route; the stale
+     checked-compile seed aliases
+     `sourceOpenBridgeReadySoundOfCheckedCompileSourceGasSeedResponses` and
+     `sourceOpenBridgeReadySoundOfCheckedCompileSourceGasSeedResponsesEndPc`
+     have been removed.
    - [ ] Delete the unpinned legacy source/gas-seeded top wrappers and the
      temporary `...sourceGasSeed...supportedFor` adapter once no in-flight proof
      branch needs those names.
@@ -1310,19 +2821,568 @@ Immediate proof tasks:
      `compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady_noReturnDataCopy`.
    - [x] Retire the old target-side bridge public wrappers from the
      import-visible API and `LayerAudit` pins.
-   - [ ] Move any remaining public CALL-family wrappers to the
-     source-bridge/gas-ready route, then remove any internal-only target-side
-     bridge scaffolding that no later proof uses.
-7. [ ] Derive or classify the remaining non-CALL trace-local premises:
-   `hRunningReady`, `hHaltedNoCall`, `CurrentNoCallPathChecksReady`, and final
-   fallthrough/clean-return-buffer readiness, from checked emitted-code and
-   resource facts rather than public callbacks.
-8. [ ] Extend/audit the same abstract-response architecture across the CALL
-   family: `CALLCODE`, `DELEGATECALL`, `STATICCALL`, `CREATE`, and `CREATE2`,
-   with unsupported members explicitly rejected or proven.
+   - [x] Demote the stale response-admissible public replay wrapper from the
+     import-visible audit surface; it remains private scaffolding only.
+   - [x] Demote the stale code-image replay wrappers from the import-visible
+     audit surface; they remain private compatibility scaffolding only.
+   - [x] Remove the old response-admissible current-instruction/replay aliases
+     from `LayerAudit`, so the audit pins stay on the source-bridge/gas route.
+   - [x] Move any remaining public CALL-family wrappers to the
+     source-bridge/global-response-gas-ready route. `LayerAudit` now pins the
+     direct global replay/final-observation wrappers and the full global route-2
+     family, while the trace-local family wrappers remain internal `OpenRuntime`
+     proof bricks.
+7. [x] Derive or classify the remaining trace-local runtime premises from
+   checked emitted-code and resource facts rather than public callbacks.
+   - [x] Generate halted no-CALL checks for the public source-bridge/gas
+     wrappers via
+     `OpenAssembly.Target.openRunListResult_emitInstr_halted_no_callCreate`.
+   - [x] Remove the stale `haltedNoCall` field from the no-RDC route-2
+     assumptions package and its private adapter.
+   - [x] For the no-`RETURNDATACOPY` public wrapper, derive
+     `CurrentNoCallPathChecksReady` from checked no-RDC plus core replay.
+   - [x] For the stack-safe public route, derive
+     `CurrentNoCallPathChecksReady` from checked compile/jumpdest evidence,
+     checked no-RDC, and `CurrentNoCallInstrCoreResidualResources`, so the
+     public route no longer exposes the whole path-check predicate or CALL
+     residual resources on the no-CALL side.
+   - [x] Add the checked trace-local residual route
+     `CurrentNoCallInstrCoreResidualTraceReadyFor` plus the open-block
+     current-emitted replay constructor that consumes it.
+   - [x] Split the actual-trace no-CALL residual frontier: checked
+     open-CALL stack-bound evidence plus trace-local primitive static-safety
+     evidence now derives `CurrentNoCallInstrCoreResidualTraceReadyFor`, so the
+     overflow/headroom half is generated by the stack checker and the remaining
+     hard part is response-preserved/static-mode safety.
+   - [x] Thread the residual/static frontier through the public stack-safe route
+     package without the global `CurrentNoCallInstrCoreResidualResources`
+     predicate: the checked stack-bound table plus source-bridge-indexed
+     primitive static-safety now generates no-CALL path checks for actual
+     source/gas trace steps.
+   - [x] Generate/classify `hRunningReady` / current-instruction gas and CALL
+     budget readiness.
+     - [x] Audit the old `OpenXCurrentRunningInstrGasReadyCase` and identify
+       the over-strong all-gas-bound CALL step-check quantification.
+     - [x] Add and pin the checked budgeted replacement boundary,
+       `OpenXCurrentRunningInstrGasBudgetReadyCase`, plus the emitted-block
+       running-readiness theorem.
+     - [x] Thread the budgeted evidence through the source-open
+       current-emitted carrier and switch the public wrappers to the budgeted
+       `hRunningGasReady` shape.
+     - [x] Identify that the current post-budget shape is still too broad if it
+       quantifies over arbitrary `GasExecRel` post-states; the budget must be
+       tied to the actual gas-aware CALL resume state or classified as a real
+       resource premise.
+     - [x] Tighten the public budgeted route to the actual gas-aware CALL
+       resume state via the checked `OpenGasAware` `...actual_post` helpers.
+     - [x] Add checked no-overflow/tail-budget bridge lemmas for
+       `finishGasAwareCall` and `CallResponse.returnedGas`.
+     - [x] Narrow the public running-gas premise so no-CALL current-running
+       cases are generated internally and only CALL-family instructions expose
+       `OpenXCurrentRunningInstrCallGasBudgetReadyCase`.
+     - [x] Classify the remaining CALL-family gas-budget premise as
+       `OpenXCallFamilyResponseGasAdmissibleReadyFor`, a source/target
+       response-gas contract that generates returned-gas readiness and then
+       `hCallGasBudgetReady`.
+     - [x] Narrow that public premise to the actual open trace via
+       `OpenXCallFamilyResponseGasTraceAdmissibleReadyFor`, so callers only
+       prove the same-forwarded-gas/OOG agreement and returned-gas facts for
+       responses that the trace actually contains.
+     - [x] Add the checked projection
+       `OpenXCallFamilyResponseGasTraceAdmissibleReadyFor.of_response_gas_admissible_ready_for`
+       from the stronger all-responses response-gas package to the trace-local
+       package, avoiding duplicate gas-readiness assumptions when the stronger
+       contract is available upstream.
+     - [x] Split the CALL response-gas package into checked
+       `OpenCallResponseGasAgreementFacts` and parent-side
+       `OpenCallActualPostGasBudgetFacts`, with projections showing OOG/status
+       agreement and `returnedGas <= forwardedGas` before deriving the final
+       post-call budget.
+     - [x] Tie the response-gas witness to the actual shared CALL request gas,
+       so the returned-gas bound is over `call.site.request.requestedGas` rather
+       than an arbitrary large witness.
+     - [x] Remove the artificial capped-call public bridge:
+       route-2 now consumes the uncapped trace-local
+       `OpenXCallFamilyResponseGasTraceAdmissibleReadyFor` carrier, which is the
+       proof-facing form of the external gas-stability/admissibility premise.
+       A request-gas pessimistic helper remains available locally, but the
+       public route no longer requires a `callGasCap`.
+     - [x] Add an exact-gas replay surface:
+       `OpenXReplayAt`, `OpenXReplaySomeGas`,
+       `OpenXReplayAbove.to_replayAt`, and the route-2
+       `openXReplayAt` wrapper expose the generated `gasBound` and prove exact
+       replay for every feasible concrete gas at or above it.
+     - [x] Add the generated-bound feasibility bridge:
+       `OpenXReplayAbove.to_replaySomeGas_of_bound_lt` and route-2
+       `openXReplaySomeGas` prove existential exact replay from
+       `gasBound < 2^256`.
+     - [x] Classify `gasBound < 2^256` for the generated CALL gas bound as an
+       explicit resource-size premise for existential exact-gas replay; the
+       unconditional checked surface remains `OpenXReplayAbove` / `openXReplayAt`
+       for every feasible concrete gas.
+     - [x] Add committed-result safety vocabulary:
+       `XCommittedObservation`, `XRunOutcomeSafelyMatches`,
+       `XRunOutcomesSafeEquivalent`, `OpenXCommittedSafeAt`, and
+       `OpenXCommittedSafeAbove` collapse revert/OOG failures and make the
+       desired all-gas safety theorem stateable without preserving low-gas
+       traces.
+     - [x] Expose the route-2 committed-safety corollary
+       `openXCommittedSafeAbove`, derived directly from the existing high-gas
+       replay theorem.
+     - [x] Split the all-gas safety frontier at the generated high-gas bound:
+       `OpenXCommittedSafeBelow` is the remaining external-world/low-gas
+       premise, while `openXCommittedSafeForAllGasOfBelow` is a checked route-2
+       bridge from that premise plus high-gas replay to
+       `OpenXCommittedSafeForAllGas`.
+     - [x] Add the response-level external-world safety carrier:
+       `OpenCallResponsesCommittedSafeEquivalent` and
+       `OpenXCallFamilyCommittedResponseSafetyTraceReadyFor` state the intended
+       assumption that continuing responses to the same CALL are independent of
+       gas budget in success bit, return data, and committed effects; asymmetric
+       child-OOG is deferred to the whole-run outcome layer.
+     - [x] Add the directional all-gas-OOG escape hatch:
+       `OpenCallAllForwardedGasOutOfGas`,
+       `OpenCallResponseTracksReferenceOrAllGasOOG`, and
+       `committedSafe_of_not_allForwardedGasOutOfGas` encode that the
+       all-forwarded child-OOG branch is the only escape from strict
+       continuing-response equivalence.
+     - [x] Add checked non-equivalence and caller-visible projections for that
+       boundary: `allForwardedGasOutOfGas_of_not_committedSafe`,
+       `success_eq_or_allForwardedGasOutOfGas`,
+       `allForwardedGasOutOfGas_of_success_ne`, and
+       `allForwardedGasOutOfGas_of_reference_success_true_candidate_success_false`
+       prove that non-equivalent caller-visible responses, and in particular
+       mismatched CALL success bits, force the all-forwarded child-OOG case.
+     - [x] Lift the response tracker to trace/route level:
+       `OpenXCurrentRunningInstrCallResponseTrackingTraceReadyCase`,
+       `OpenXCallFamilyResponseTrackingTraceReadyFor`,
+       `OpenXCommittedSafeBelowTracksFixedOfResponseTracking`, and
+       `openXCommittedSafeForAllGasOfResponseTrackingFixed` make the remaining
+       low-gas induction compare one reference trace against one candidate
+       low-gas trace.
+     - [x] Add the trace-indexed fixed-result low-gas target:
+       `OpenXCommittedSafeBelowTracksFixedTraceResult`,
+       `OpenXCommittedSafeBelowTracksFixedTraceOfResponseTracking`, and
+       `openXCommittedSafeForAllGasOfResponseTrackingFixedTrace` keep the
+       candidate low-gas trace explicit through the route-2 all-gas bridge.
+     - [x] Thread the response-level safety carrier into route 2 and expose the
+       checked bridge
+       `openXCommittedSafeForAllGasOfCommittedResponseSafety`, so the remaining
+       low-gas proof consumes `OpenXCallFamilyCommittedResponseSafetyTraceReadyFor`
+       instead of an unstructured `OpenXCommittedSafeBelow` oracle.
+     - [x] Add a directional tracked-result low-gas frontier:
+       `XRunOutcomeSafelyTracks`, `OpenXCommittedSafeBelowTracksResult`, and
+       `openXCommittedSafeForAllGasOfCommittedResponseSafetyTracks` let the
+       eventual low-gas induction prove "fail, or same committed observation as
+       a reference result" rather than constructing committed safety directly.
+     - [x] Add the candidate-failure landing theorem for the all-forwarded-OOG
+       branch: `XRunOutcomeSafelyTracks.of_candidate_fails`,
+       `OpenXOutcomeTraceSafelyTracksResult.of_failure_trace`, and the
+       CALL-specific `outcome_tracks_of_not_committedSafe_candidate_fails` /
+       `outcome_tracks_of_success_ne_candidate_fails` /
+       `outcome_tracks_of_reference_success_true_candidate_success_false`
+       projections turn a proven low-gas candidate failure into directional
+       tracking while preserving the all-forwarded child-OOG certificate.
+     - [x] Add the outcome-aware response-tracking frontier:
+       `OpenXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCase`,
+       `OpenXCallFamilyResponseOutcomeTrackingTraceReadyFor`, and
+       `OpenXCommittedSafeBelowTracksFixedTraceOfResponseOutcomeTracking`
+       refine the trace-to-trace tracker with the exact remaining obligation
+       that a non-equivalent caller-visible response implies candidate
+       whole-run failure.
+     - [x] Expose the route-2 all-gas bridge for that refined frontier:
+       `openXCommittedSafeForAllGasOfResponseOutcomeTrackingFixedTrace`
+       consumes `OpenXCommittedSafeBelowTracksFixedTraceOfResponseOutcomeTracking`
+       and the high-gas replay route to produce all-gas committed safety.
+     - [x] Add the final-observation result-tracking frontier:
+       `OpenXCurrentRunningInstrCallResponseResultTrackingTraceReadyCase`,
+       `OpenXCallFamilyResponseResultTrackingTraceReadyFor`,
+       `OpenXCommittedSafeBelowTracksFixedTraceOfResponseResultTracking`, and
+       `openXCommittedSafeForAllGasOfResponseResultTrackingFixedTrace` weaken
+       the mismatch branch from "candidate must fail" to "candidate safely
+       tracks the fixed reference result", while still forcing the
+       all-forwarded child-OOG certificate for any non-equivalent
+       caller-visible response.
+     - [x] Lift the non-equivalence projection to emitted CALL-family route
+       sites with
+       `OpenXCallFamilyResponseOutcomeTrackingTraceReadyFor.outcomeTracks_of_not_committedSafe`
+       and
+       `OpenXCallFamilyResponseResultTrackingTraceReadyFor.outcomeTracks_of_not_committedSafe`.
+     - [x] Package the branch split in induction-ready disjunctive form with
+       `OpenCallResponseTracksReferenceOrAllGasOOG.committedSafe_or_allForwardedGasOutOfGas_tracks`,
+       `OpenXCurrentRunningInstrCallResponseResultTrackingTraceReadyCase.committedSafe_or_allForwardedGasOutOfGas_tracks`,
+       and
+       `OpenXCallFamilyResponseResultTrackingTraceReadyFor.committedSafe_or_allForwardedGasOutOfGas_tracks`.
+     - [ ] Prove or expose the required external-world safety premise in the
+       low-gas induction: matching CALL requests either produce strict
+       continuing-response equivalence, or the low-gas child consumes all
+       forwarded gas and the candidate whole-run outcome safely tracks the
+       fixed reference result instead of committing a mismatching observation.
+       2026-06-06 update: added the checked exact-gas classifier bridge
+       `OpenXCommittedSafeBelow.of_trace_or_failure_below`,
+       `OpenXReplayAbove.to_committedSafeForAllGas_of_trace_or_failure_below`,
+       and route-2
+       `openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceOrFailureBelow`.
+       The remaining proof can now target a pointwise statement: for every
+       gas below the generated bound, under the strict-or-all-forwarded-OOG CALL
+       response carrier, the candidate whole run either returns with the same
+       final committed observation as the fixed target result or
+       fails/reverts/OOG.
+       2026-06-06 update: corrected that exact-gas classifier to the intended
+       final-observation shape. The route-level
+       `openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceObservationOrFailureBelow`
+       now asks low-gas successes only to match
+       `XTargetCommittedObservation`; stronger gas-aware replay agreement
+       remains part of high-gas liveness, not the low-gas safety premise.
+       2026-06-06 update: added final-observation fixed-reference induction
+       constructors:
+       `OpenXOutcomeTraceSafelyTracksResult.of_trace_target_observation`,
+       `OpenXCommittedSafeBelowTracksFixedTraceResult.succ_of_trace_observation_or_failure_at`,
+       `OpenXCommittedSafeBelowTracksFixedTraceResult.of_trace_observation_or_failure_below`,
+       and strict-or-exception route lifts. The next proof brick is the actual
+       exact-gas emitted-instruction induction that supplies the pointwise
+       classifier from the CALL response carrier.
+       2026-06-06 update: added the local exact-CALL classifier bridge:
+       `openX_current_call_continue_outcome`,
+       `openX_current_gasless_call_continue_trace_observation_or_failure_of_step_checks_actual_post`,
+       and
+       `openX_current_emitted_prim_call_continue_trace_observation_or_failure_of_step_checks_actual_post`.
+       This proves the emitted CALL step preserves the final-observation-or-
+       failure classifier once the actual gas-aware post-CALL tail state has
+       the classifier. The next step is to thread this through the
+       `OpenBlockTraceResult`/`TraceReadyFor` induction and connect the CALL
+       response carrier at emitted CALL sites.
+       2026-06-06 update: named that pointwise classifier as
+       `OpenXTraceObservationOrFailure`, added constructors/projections, and
+       added named bridges
+       `OpenXCommittedSafeBelow.of_traceObservationOrFailure_below` and
+       `OpenXReplayAbove.to_committedSafeForAllGas_of_traceObservationOrFailure_below`.
+       The block induction can now target
+       `∃ candidateTrace, OpenXTraceObservationOrFailure ...` directly instead
+       of restating the long disjunction at every step.
+       2026-06-06 update: added the run-list CALL bridge for that named
+       classifier:
+       `OpenXBlockTraceRelReady.RunListRunningTraceObservationOrFailureReadyFor`,
+       `runListRunningTraceObservationOrFailureReadyFor_current_emitted_prim_call_of_step_checks`,
+       and
+       `runListRunningTraceObservationOrFailureReadyFor_current_emitted_prim_call_of_run_step_checks`.
+       The emitted CALL case now has the same ready-for-this-run-list-trace
+       shape as the existing high-gas replay proof. Remaining work is the
+       whole-block exact-gas induction, including the non-CALL prefix branch
+       that must classify low-gas prefix failure as safe or continue with the
+       tail classifier.
+       2026-06-06 update: added the non-gas exception splitter and current
+       OOG classifier:
+       `xStepException?_none_or_outOfGas_of_nonGas_checks`,
+       `xStepException?_eq_outOfGas_of_nonGas_checks_of_some`,
+       `OpenXTraceObservationOrFailure.of_current_outOfGas_exception`, and
+       `OpenXTraceObservationOrFailure.of_current_nonGas_exception`. This
+       discharges the local current-step failure branch: if non-gas checks hold
+       and `openX` stops before executing the current instruction, that
+       exact-gas run is safely classified as OOG. Remaining work is to compose
+       this with the no-CALL emitted run-list prefix/tail induction and then
+       with the CALL response carrier at block level.
+       2026-06-06 update: added the existential candidate-trace run-list
+       bridge for low-gas safety:
+       `OpenXTraceObservationOrFailure.zero_false`,
+       `openX_current_running_continue_outcome_of_openStepAfterChecks_done`,
+       `openX_runListResult_running_traceObservationOrFailure_exists_of_path_decode_checks`,
+       `OpenXRunListRunningTraceObservationOrFailureExistsReady`,
+       `RunListRunningTraceObservationOrFailureExistsReadyFor`, and emitted
+       no-CALL/CALL ready-for wrappers. This fixes the proof shape for early
+       OOG: the candidate trace may be a strict prefix of the reference trace,
+       so the exact-gas block induction should produce
+       `∃ candidateTrace, OpenXTraceObservationOrFailure ...`, not a fixed
+       `referenceTrace ++ tailTrace` classifier. Remaining work is the
+       whole-block induction that consumes these ready-for wrappers alongside
+       the strict-or-all-forwarded-OOG CALL response carrier.
+       2026-06-06 update: added the halted sibling and whole-block
+       existential classifier:
+       `openX_runListResult_halted_traceObservationOrFailure_exists_of_path_decode_checks`,
+       `OpenXTracePathDoneObservationOrFailure.running_of_fallthrough_stop_clear_return_buffers`,
+       and
+       `OpenXBlockTraceRelReady.openBlockTraceResult_traceObservationOrFailure_exists_of_ready`.
+       The block-level low-gas induction now composes running prefixes, halted
+       no-CALL run-lists, and final fallthrough `STOP` success/OOG. Remaining
+       work is to instantiate its running/halted path-ready premises from the
+       actual emitted-block readiness/call-response carrier and feed the result
+       into the all-gas safety wrapper.
+       2026-06-06 update: instantiated those running/halted path-ready
+       premises for the existing current-emitted case split via
+       `runningPathTraceObservationOrFailureExistsReady_of_current_emitted_ready_cases`,
+       `haltedPathTraceObservationOrFailureExistsReady_of_current_emitted_no_call_cases`,
+       and
+       `openBlockTraceResult_traceObservationOrFailure_exists_of_current_emitted_ready_cases`.
+       Remaining work is now the below-bound/all-gas wrapper that turns this
+       exact candidate-trace classifier into committed safety for every gas.
+       2026-06-06 update: added the same-fuel committed-safety bridge
+       `OpenXCommittedSafeBelow.of_traceObservationOrFailure_exists` and
+       `OpenXReplayAbove.to_committedSafeForAllGas_of_traceObservationOrFailure_exists`.
+       The last bridge for this lane is a synchronized induction that produces
+       high-gas `OpenXReplayAbove` and the exact low-gas classifier with the
+       same `evmFuel`, or equivalently refactors the current replay wrapper to
+       expose that shared fuel.
+       2026-06-06 update: added that synchronized induction generically:
+       `openBlockTraceResult_traceRelAbove_and_traceObservationOrFailure_exists_of_ready`,
+       `openBlockTraceResult_replayAbove_and_traceObservationOrFailure_exists_of_ready`,
+       and `openBlockTraceResult_committedSafeForAllGas_of_ready`.
+       Remaining work is now to instantiate the paired run-list readiness for
+       the current-emitted no-CALL/CALL cases and lift it into the
+       `OpenRuntime` route assumptions.
+       2026-06-06 update: instantiated the paired same-fuel readiness for the
+       current-emitted no-CALL/CALL cases:
+       `openXRunListRunningRelReady_current_emitted_no_call_of_current_path_checks_and_budget`,
+       `runListRunningReplayAndTraceObservationOrFailureExistsReadyFor_current_emitted_of_ready_case_current_path_checks`,
+       `haltedPathReplayAndTraceObservationOrFailureExistsReady_of_current_emitted_no_call_cases`,
+       and
+       `openBlockTraceResult_committedSafeForAllGas_of_current_emitted_ready_cases`.
+       The current-emitted block theorem now combines high-gas replay and
+       low-gas final-observation safety at the same `evmFuel`; remaining work
+       is the `OpenRuntime` route-assumption lift.
+       2026-06-06 07:19 CEST update: added and pinned the reusable
+       all-outcome block induction
+       `OpenXBlockTraceRelReady.openBlockTraceResult_all_outcomes_safelyTracks_of_ready`.
+       This is the universal-safety analogue of the earlier existential
+       trace-observation block induction: done states use a done continuation,
+       running steps consume a run-list all-outcome readiness premise plus the
+       tail induction hypothesis, and halted steps consume the halted readiness
+       premise. Remaining work is to instantiate the running/halted all-outcome
+       path-ready premises for the current-emitted no-CALL/CALL split and lift
+       the result through the `OpenRuntime` route assumptions.
+       2026-06-06 07:44 CEST update: added and pinned the halted no-CALL
+       all-outcomes run-list instantiation:
+       `openX_runListResult_halted_all_outcomes_safelyTracks_of_path_decode_checks`,
+       `openXRunListHaltedAllOutcomeTracksReady_current_emitted_no_call_of_current_path_checks`,
+       and
+       `runListHaltedAllOutcomeTracksReadyFor_current_emitted_no_call_of_current_path_checks`.
+       Together with the existing running no-CALL all-outcomes wrapper, the
+       no-CALL current-emitted side is covered for both running and halted
+       paths. Remaining work is the CALL-response current-emitted all-outcome
+       carrier and the `OpenRuntime` route-assumption lift.
+       2026-06-06 07:47 CEST update: added and pinned the path-level
+       current-emitted all-outcomes constructors
+       `runningPathAllOutcomeTracksReady_of_current_emitted_response_strict_cases`
+       and
+       `haltedPathAllOutcomeTracksReady_of_current_emitted_no_call_cases`.
+       The running constructor now combines no-CALL prefixes with the checked
+       strict-or-all-forwarded-gas-OOG CALL-response all-outcomes carrier. The
+       halted constructor deliberately requires an explicit
+       `OpenXResultAgrees (.halted halt) reference` premise, since a program may
+       have multiple halted results and a global halted-path-to-one-reference
+       theorem would be false. Remaining work is to derive that premise at the
+       actual block-trace route boundary and then feed these constructors into
+       the below-bound/`OpenRuntime` route-assumption lift.
+       2026-06-06 07:47 CEST update: added and pinned the direct
+       trace-local below-bound lift
+       `OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking.of_openBlockTraceResult_current_emitted_response_strict_cases`.
+       This closes the false-global-halted-reference gap by inducting over the
+       actual `OpenBlockTraceResult`: running branches recurse through
+       code-stable tails, CALL branches use the strict-or-all-forwarded-gas-OOG
+       response carrier, and halted branches use the actual theorem-level
+       `OpenXResultAgrees targetResult reference`. Remaining work is to compose
+       this with the existing committed-safety/below-bound route wrapper and
+       then into the public `OpenRuntime` assumption record.
+   - [x] Generate/classify final fallthrough and stack-bound readiness.
+     - [x] Identify that final return-buffer cleanliness is not derivable from
+       `returnDataCopyBoundary` for arbitrary CALL responses.
+     - [x] Resolve the running-completion observation boundary by weakening
+       gas-aware running agreement to allow the implicit fallthrough `STOP` to
+       clear internal return buffers.
+     - [x] Derive the final `stack.length <= 1024` fact from the checked
+       open-CALL inferred assembly stack-bound table instead of exposing a
+       caller stack-bound premise.
+     - [x] Generate final pc-at-bytecode-end for running final states from the
+       checked source-open/postamble `TargetOutcomeEndPc` carrier.
+     - [x] Carry primitive static-write exclusion through the higher-level
+       source/open-lowering bridge and generate
+       `SourceOpenTraceCurrentSharedBridgePrimitiveStaticTraceReadyFor` from the
+       accepted Yul trace; assembly `OpenTraceResult` evidence alone is too weak.
+       - [x] Add checked writable-trace carrier
+         `SourceOpenTraceCurrentSharedBridgeWritableReadyFor` and projections to
+         `SourceOpenTraceCurrentSharedBridgePrimitiveStaticReadyFor` /
+         `SourceOpenTraceCurrentSharedBridgePrimitiveStaticTraceReadyFor`.
+       - [x] Strengthen the finite response admissibility contract with checked
+         caller-frame target permission stability, including individual
+         response, resumed EVM open-call, and trace-event projections.
+       - [x] Generate the writable/static-safe trace carrier from the accepted
+         Yul run plus the right public semantic boundary, such as entry
+         permission and response caller-frame permission stability, or a more
+         general source static-write exclusion invariant.
+       - [x] Replace route-2's opaque `noCallStaticReady` assumption with the
+         source-facing entry `initialPerm` premise and generate primitive
+         static trace readiness inside the checked CALL wrapper.
+     - [x] Generate/classify the final stack-bound fact for running final
+       states on the current stack-safe CALL route; spill/16-DUP handling
+       remains a separate track.
+   - [x] Generate/classify the remaining no-RDC core replay premise:
+     route-2 has no live no-RDC/core replay field; checked no-RDC is extracted
+     from the compiler gate, and no-CALL residual/core readiness is generated
+     from the checked stack-bound table plus primitive static trace readiness.
+8. [x] Extend/audit the same abstract-response architecture across the CALL
+   family for the current ordinary-CALL route. The low-level open-call
+   representation already has `CALLCODE`, `DELEGATECALL`, and `STATICCALL`
+   kinds; the current imported-Yul `CallSafe` accepted-fragment gate admits
+   ordinary `CALL` and explicitly rejects `CALLCODE`, `DELEGATECALL`,
+   `STATICCALL`, `CREATE`, and `CREATE2`. These checked rejections are temporary
+   boundary facts for the ordinary-CALL theorem and should be removed when the
+   source bridge widens to the rest of the CALL family; `CREATE`/`CREATE2`
+   remain separate creation-semantics work.
+   - [ ] CALL-family widening plan:
+     - [ ] Replace the imported-Yul `CallSafe` ordinary-CALL-only classifier
+       with a `CallFamilySafe`/kind-parametric classifier that accepts
+       `CALL`, `CALLCODE`, `DELEGATECALL`, and `STATICCALL`, while continuing
+       to reject `CREATE`/`CREATE2` until creation semantics are added.
+       - [x] Add checked sibling classifier `Safe.CallFamilySafe` without
+         rewiring existing `CallSafe` users: it accepts `CALL`, `CALLCODE`,
+         `DELEGATECALL`, and `STATICCALL`, rejects `CREATE`/`CREATE2`, and is
+         pinned in `LayerAudit`.
+       - [x] Add checked `Safe.CallFamilySafe.program_of_coverage`, lifting the
+         widened accepted-fragment coverage gate from
+         `importedIncompleteProgram`, `createBoundaryProgram`, and
+         `objectBuiltinProgram`.
+       - [x] Bridge existing ordinary-CALL accepted programs into the widened
+         gate via generic `FeatureCoverage.Family.*_mono` and checked
+         `Safe.CallFamilySafe.program_of_callSafe`, pinned in `LayerAudit`.
+       - [x] Add checked `CallFamilySafe` lookup/scoped body/dispatcher
+         wrappers, so selected callee bodies and dispatcher no-checkpoint
+         proofs can consume the widened safety predicate without rewriting the
+         ordinary `CallSafe` path.
+       - [x] Add family-parametric finite-trace frontier names and
+         `CallFamilySafe` specializations, with checked low-fuel base cases for
+         sequence/kont frontiers and generated-loop continuation frontiers.
+       - [x] Add checked `CallSafe` specializations of the family-parametric
+         finite-trace frontiers and adapters in both directions between those
+         names and the old ordinary CALL frontier names.
+     - [x] Generalize expression/statement trace carriers so the source
+       primitive kind is threaded through the same current-shared-bridge and
+       response-admissibility path rather than rebuilding one proof per opcode.
+       - [x] Thread the primitive/user-call family through the finite-trace
+         frontier boundary and prove the low-fuel cases.
+       - [x] Re-anchor the existing ordinary CALL productive frontier as the
+         `CallSafe` specialization of the family-parametric frontier API.
+       - [x] Add checked `CallFamilySafe` primitive expression dispatchers for
+         both prelude and raw open-expression carriers.
+       - [x] Add checked `CallFamilySafe` whole-expression case dispatchers for
+         both prelude and raw open-expression carriers.
+       - [x] Lift the reserve/argument-list raw-expression helper from
+         `Safe.CallSafe.exprs` to `Safe.CallFamilySafe.exprs`, then use it to
+         close the family-safe reserve expression dispatcher.
+       - [x] Lift the productive expression/statement and loop cases from
+         `CallSafe` to the family frontier.
+     - [x] Add per-kind source/target semantic projections for the few fields
+       that are not literally ordinary `CALL`: request kind, caller/address/value
+       fields, storage-context identity, and caller-frame/static permission
+       flags. The open response relation is deliberately broad enough to admit
+       arbitrary shared-state changes, so `STATICCALL` should not require a
+       separate no-storage-change replay tower unless the semantics is later
+       tightened. Checked in `OpenExternal.CallContext.callSite` and pinned in
+       `LayerAudit` via the `OpenExternal.CallKind` request-normalization
+       aliases.
+     - [x] Reuse `OpenExternal.CallContext.callSite` and
+       `CallContextRel.callSite_eq` as the checked request-normalization point:
+       the kind-specific differences live in the request fields, while the
+       continuation consumes the same broad `CallResponse`.
+     - [x] Reuse the existing gas/replay/committed-safety tower over
+       `OpenExternal.CallKind`; split only where EVM semantics genuinely differ
+       by kind. The live CALL-family endpoint uses
+       `OpenXCallFamilyResponseGasAdmissibleReadyFor` and delegates through the
+       existing route-2 replay/committed-safety tower.
+     - [x] Remove the temporary checked rejection facts for `CALLCODE`,
+       `DELEGATECALL`, and `STATICCALL` from the public accepted-fragment audit
+       once the widened source bridge is checked. The old `CallSafe` rejection
+       pins are no longer exported from `LayerAudit`; the live
+       `CallFamilySafe` audit accepts `CALL`, `CALLCODE`, `DELEGATECALL`, and
+       `STATICCALL`, and still rejects `CREATE`/`CREATE2` pending the separate
+       creation corridor.
 9. [ ] Run the final assumption audit: public theorem grep for replay/call
    callbacks, compiler artifacts, generated layout/evidence inputs, stale
    direct let/assign CALL scaffolding, and proof holes/axioms.
+   - [x] Remove stale public gas/replay helper roots that exposed
+     `CurrentNoCallPathChecksReady`, explicit final-stack readiness, or the
+     intermediate `OpenXCallFamilyGasBudgetTraceReadyFor` carrier. These are now
+     private `OpenRuntime` proof bricks; `LayerAudit` no longer pins them as
+     public theorem surfaces.
+   - [x] Classify the live route-2 assumption package field by field.
+     - [x] Source/semantic setup fields:
+       `semantics`, `initialCodeImageRel`, `sourceRun`, `targetRuntime`, and
+       `traceAccepted`. These are source/input/run setup, not compiler-generated
+       evidence callbacks.
+     - [x] Checked compiler-success field: `checked` is the executable checked
+       compiler result tying `functionProgram`, `asm`, and `target` to
+       `program`; the route does not take a separate layout/replay certificate.
+     - [x] Entry permission field: `initialPerm` is the source-facing/static
+       context boundary used to generate primitive static trace readiness.
+     - [x] Internal-body fuel field:
+       `SourceOpenInternalUserCallBodyFuelAdequateUpTo` is classified below as
+       an explicit source-fuel/relatability resource premise for positive body
+       clocks.
+     - [x] CALL response gas field:
+       `OpenXCallFamilyResponseGasAdmissibleReadyFor` is the public
+       external response-gas/resource premise for the family route; wrappers
+       derive the trace-local
+       `OpenXCallFamilyResponseGasTraceAdmissibleReadyFor` and intermediate
+       `OpenXCallFamilyGasBudgetTraceReadyFor` internally.
+     - [x] CALL committed-response safety field:
+       `OpenXCallFamilyCommittedResponseSafetyTraceReadyFor` is no longer in
+       the base route-2 assumption package. It is now an explicit parameter only
+       on the all-gas committed-safety wrappers that consume the low-gas
+       response-tracking frontier. It is not needed for exact replay/high-gas
+       shared-response preservation.
+   - [x] Classify `SourceOpenInternalUserCallBodyFuelAdequateUpTo` for the
+     current route: zero and no-internal-body vacuity constructors are
+     generated, and positive body clocks for existing initialized callees
+     remain an explicit source-fuel/resource premise unless a future source
+     semantics theorem proves all-internal-body adequacy.
+     - [x] Add the checked vacuous-zero-bound constructor:
+       `SourceOpenInternalUserCallBodyFuelAdequateUpTo.zero_bound`.
+     - [x] Add checked no-internal-body/vacuity constructors:
+       `SourceOpenInternalUserCallBodyFuelAdequateAt.of_no_lookup`,
+       `SourceOpenInternalUserCallBodyFuelAdequateUpTo.of_no_lookup`, and
+       `SourceOpenInternalUserCallBodyFuelAdequateUpTo.of_lookup_none`.
+     - [x] Add checked access/monotonicity lemmas for the boundary:
+       `SourceOpenInternalUserCallBodyFuelAdequateUpTo.of_le` and `.mono`.
+     - [x] Locate the exact recursive CALL use site: the recursive callee-body
+       path already derives `CallSafe`/scoped/checkpoint/layout support, but it
+       still consumes body-fuel adequacy precisely to obtain
+       `SourceResultRelatable bodyDone` for an arbitrary selected initialized
+       callee body and admissible response trace.
+     - [x] Audit conclusion for the current theorem: this premise is not
+       generated by the single top-level `RecursiveBridgeSourceRun`; discharging
+       it needs either a stronger source-run adequacy theorem over all reachable
+       internal bodies or a decision to keep it as an explicit source-facing
+       fuel/relatability resource premise.
+     - [x] Add checked positive-fuel counter-boundary lemmas:
+       `SourceOpenInternalUserCallBodyFuelAdequateUpTo.one_false_of_lookup_block_nil_domain`
+       and `...one_false_of_lookup_block_nil_domain_upTo`. These show that the
+       positive-body premise is not automatically true from initialized-body
+       shape: one tick can still resolve to imported `OutOfFuel`.
+     - [x] Current-route classification: the existing
+       `RecursiveBridgeSourceRun` only proves the concrete dispatcher run avoids
+       the historical `.regular .OutOfFuel` marker. It does not generate
+       all-initialized-callee positive body adequacy; removing this field needs
+       a new stronger source-fuel/internal-body adequacy theorem.
+     - [x] Prove the zero-fuel boundary:
+       `SourceOpenInternalUserCallBodyFuelAdequateUpTo.zero_false_of_lookup_domain`
+       shows the current universal body-fuel premise is impossible at
+       `bodyFuel = 0` for any initialized function body, because
+       `YulOpen.execSeq 0` resolves to `.error .OutOfFuel` and
+       `SourceResultRelatable` rejects imported out-of-fuel errors.
+     - [x] Fix the real low-fuel split before invoking this premise: direct
+       internal-call paths can evaluate arguments and reach an internal callee
+       with zero selected body fuel, so ordinary and typed direct call wrappers
+       now case-split that clock and route `bodyFuel = 0` through the checked
+       `call_fuel_two` rejection theorem.
+     - [x] Correct `SourceOpenInternalUserCallBodyFuelAdequateUpTo` so it
+       quantifies only over positive body clocks; zero body fuel is handled by
+       the direct-call boundary instead of by the adequacy premise.
+     - [x] Settle the positive-body source for the current theorem boundary:
+       keep it as an explicit source-facing fuel/relatability resource premise,
+       because the checked one-tick counter-boundary shows it is not derivable
+       from initialized-body shape or the current single dispatcher source run.
+   - [ ] Keep exact/existential gas replay honest: `openXReplayAt` is generated
+     for every feasible concrete gas, while existential exact replay still needs
+     `gasBound < 2^256`; below-bound committed safety remains a separate
+     sufficient-gas/external-safety premise.
 
 Bottom line: the remaining work is a public integration splice, not a wholesale
 redo. We are close in the sense that the source finite-path proof, expression
@@ -2018,9 +4078,9 @@ Current closeout status:
 - [x] Add constructors for the source-facing current-instruction case from
   direct `SharedStateRel` and from `SourceStateRel` plus the current EVM
   shared-state equality.
-- [x] Add the response-admissible imported-Yul OpenX wrapper, so this route no
-  longer asks callers to provide the whole
-  `OpenXReplayTraceReadinessForCheckedTrace` bundle.
+- [x] Demote the old response-admissible and code-image imported-Yul OpenX
+  wrappers from the import-visible audit surface after the source-bridge/gas
+  route superseded them.
 - [ ] Lift the checked open CALL bridge into the final imported-Yul gas-aware
   public theorem and the EVM-facing public spine, deriving actual
   block-local current-CALL/no-CALL readiness and final fallthrough facts from

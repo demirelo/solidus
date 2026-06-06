@@ -479,6 +479,161 @@ noncomputable def program
   contract primitive userCall program.contract
 
 mutual
+  theorem expr_mono
+      {primitive primitive' : EvmYul.Operation .Yul → Prop}
+      {userCall userCall' : Name → Prop}
+      (hPrimitive : ∀ op, primitive op → primitive' op)
+      (hUserCall : ∀ functionName, userCall functionName →
+        userCall' functionName) :
+      (expr' : AstExpr) →
+      expr primitive userCall expr' →
+        expr primitive' userCall' expr'
+    | .Lit _value, _ =>
+        trivial
+    | .Var _name, _ =>
+        trivial
+    | .Call (.inl prim) args, h =>
+        ⟨hPrimitive prim h.1,
+          exprs_mono hPrimitive hUserCall args h.2⟩
+    | .Call (.inr functionName) args, h =>
+        ⟨hUserCall functionName h.1,
+          exprs_mono hPrimitive hUserCall args h.2⟩
+
+  theorem exprs_mono
+      {primitive primitive' : EvmYul.Operation .Yul → Prop}
+      {userCall userCall' : Name → Prop}
+      (hPrimitive : ∀ op, primitive op → primitive' op)
+      (hUserCall : ∀ functionName, userCall functionName →
+        userCall' functionName) :
+      (exprs' : List AstExpr) →
+      exprs primitive userCall exprs' →
+        exprs primitive' userCall' exprs'
+    | [], _ =>
+        trivial
+    | head :: rest, h =>
+        ⟨expr_mono hPrimitive hUserCall head h.1,
+          exprs_mono hPrimitive hUserCall rest h.2⟩
+
+  theorem stmt_mono
+      {primitive primitive' : EvmYul.Operation .Yul → Prop}
+      {userCall userCall' : Name → Prop}
+      (hPrimitive : ∀ op, primitive op → primitive' op)
+      (hUserCall : ∀ functionName, userCall functionName →
+        userCall' functionName) :
+      (stmt' : AstStmt) →
+      stmt primitive userCall stmt' →
+        stmt primitive' userCall' stmt'
+    | .Block body, h =>
+        stmts_mono hPrimitive hUserCall body h
+    | .Let _names none, _ =>
+        trivial
+    | .Let _names (some value), h =>
+        expr_mono hPrimitive hUserCall value h
+    | .Assign _names value, h =>
+        expr_mono hPrimitive hUserCall value h
+    | .ExprStmtCall value, h =>
+        expr_mono hPrimitive hUserCall value h
+    | .Switch scrutinee cases defaultBody, h =>
+        ⟨expr_mono hPrimitive hUserCall scrutinee h.1,
+          casesSafe_mono hPrimitive hUserCall cases h.2.1,
+          stmts_mono hPrimitive hUserCall defaultBody h.2.2⟩
+    | .For cond post body, h =>
+        ⟨expr_mono hPrimitive hUserCall cond h.1,
+          stmts_mono hPrimitive hUserCall post h.2.1,
+          stmts_mono hPrimitive hUserCall body h.2.2⟩
+    | .If cond body, h =>
+        ⟨expr_mono hPrimitive hUserCall cond h.1,
+          stmts_mono hPrimitive hUserCall body h.2⟩
+    | .Continue, _ =>
+        trivial
+    | .Break, _ =>
+        trivial
+    | .Leave, _ =>
+        trivial
+
+  theorem stmts_mono
+      {primitive primitive' : EvmYul.Operation .Yul → Prop}
+      {userCall userCall' : Name → Prop}
+      (hPrimitive : ∀ op, primitive op → primitive' op)
+      (hUserCall : ∀ functionName, userCall functionName →
+        userCall' functionName) :
+      (stmts' : List AstStmt) →
+      stmts primitive userCall stmts' →
+        stmts primitive' userCall' stmts'
+    | [], _ =>
+        trivial
+    | head :: rest, h =>
+        ⟨stmt_mono hPrimitive hUserCall head h.1,
+          stmts_mono hPrimitive hUserCall rest h.2⟩
+
+  theorem casesSafe_mono
+      {primitive primitive' : EvmYul.Operation .Yul → Prop}
+      {userCall userCall' : Name → Prop}
+      (hPrimitive : ∀ op, primitive op → primitive' op)
+      (hUserCall : ∀ functionName, userCall functionName →
+        userCall' functionName) :
+      (cases' : List (Word × List AstStmt)) →
+      casesSafe primitive userCall cases' →
+        casesSafe primitive' userCall' cases'
+    | [], _ =>
+        trivial
+    | (_value, body) :: rest, h =>
+        ⟨stmts_mono hPrimitive hUserCall body h.1,
+          casesSafe_mono hPrimitive hUserCall rest h.2⟩
+end
+
+theorem functionDefinition_mono
+    {primitive primitive' : EvmYul.Operation .Yul → Prop}
+    {userCall userCall' : Name → Prop}
+    (hPrimitive : ∀ op, primitive op → primitive' op)
+    (hUserCall : ∀ functionName, userCall functionName →
+      userCall' functionName) :
+    (fn : AstFunctionDefinition) →
+    functionDefinition primitive userCall fn →
+      functionDefinition primitive' userCall' fn
+  | .Def _params _returns body, h =>
+      stmts_mono hPrimitive hUserCall body h
+
+theorem functionEntries_mono
+    {primitive primitive' : EvmYul.Operation .Yul → Prop}
+    {userCall userCall' : Name → Prop}
+    (hPrimitive : ∀ op, primitive op → primitive' op)
+    (hUserCall : ∀ functionName, userCall functionName →
+      userCall' functionName) :
+    (entries : List (Name × AstFunctionDefinition)) →
+    functionEntries primitive userCall entries →
+      functionEntries primitive' userCall' entries
+  | [], _ =>
+      trivial
+  | (_name, fn) :: rest, h =>
+      ⟨functionDefinition_mono hPrimitive hUserCall fn h.1,
+        functionEntries_mono hPrimitive hUserCall rest h.2⟩
+
+theorem contract_mono
+    {primitive primitive' : EvmYul.Operation .Yul → Prop}
+    {userCall userCall' : Name → Prop}
+    (hPrimitive : ∀ op, primitive op → primitive' op)
+    (hUserCall : ∀ functionName, userCall functionName →
+      userCall' functionName)
+    (contract' : AstContract)
+    (hSafe : contract primitive userCall contract') :
+    contract primitive' userCall' contract' :=
+  ⟨stmt_mono hPrimitive hUserCall contract'.dispatcher hSafe.1,
+    functionEntries_mono hPrimitive hUserCall
+      (Contract.functionEntries contract') hSafe.2⟩
+
+theorem program_mono
+    {primitive primitive' : EvmYul.Operation .Yul → Prop}
+    {userCall userCall' : Name → Prop}
+    (hPrimitive : ∀ op, primitive op → primitive' op)
+    (hUserCall : ∀ functionName, userCall functionName →
+      userCall' functionName)
+    (program' : Program)
+    (hSafe : program primitive userCall program') :
+    program primitive' userCall' program' :=
+  contract_mono hPrimitive hUserCall program'.contract hSafe
+
+mutual
   theorem expr_iff_primitive_split3
       (primitive p1 p2 p3 : EvmYul.Operation .Yul → Prop)
       (userCall : Name → Prop)
@@ -902,6 +1057,9 @@ def importedIncompleteExpr : AstExpr → Prop :=
 def externalBoundaryExpr : AstExpr → Prop :=
   Family.expr externalBoundaryPrimitive Family.anyUserCall
 
+def createBoundaryExpr : AstExpr → Prop :=
+  Family.expr createBoundaryPrimitive Family.anyUserCall
+
 def externalBoundaryExceptCALLExpr : AstExpr → Prop :=
   Family.expr externalBoundaryExceptCALLPrimitive Family.anyUserCall
 
@@ -916,6 +1074,9 @@ def importedIncompleteExprs : List AstExpr → Prop :=
 
 def externalBoundaryExprs : List AstExpr → Prop :=
   Family.exprs externalBoundaryPrimitive Family.anyUserCall
+
+def createBoundaryExprs : List AstExpr → Prop :=
+  Family.exprs createBoundaryPrimitive Family.anyUserCall
 
 def externalBoundaryExceptCALLExprs : List AstExpr → Prop :=
   Family.exprs externalBoundaryExceptCALLPrimitive Family.anyUserCall
@@ -932,6 +1093,9 @@ def importedIncompleteStmt : AstStmt → Prop :=
 def externalBoundaryStmt : AstStmt → Prop :=
   Family.stmt externalBoundaryPrimitive Family.anyUserCall
 
+def createBoundaryStmt : AstStmt → Prop :=
+  Family.stmt createBoundaryPrimitive Family.anyUserCall
+
 def externalBoundaryExceptCALLStmt : AstStmt → Prop :=
   Family.stmt externalBoundaryExceptCALLPrimitive Family.anyUserCall
 
@@ -947,6 +1111,9 @@ def importedIncompleteStmts : List AstStmt → Prop :=
 def externalBoundaryStmts : List AstStmt → Prop :=
   Family.stmts externalBoundaryPrimitive Family.anyUserCall
 
+def createBoundaryStmts : List AstStmt → Prop :=
+  Family.stmts createBoundaryPrimitive Family.anyUserCall
+
 def externalBoundaryExceptCALLStmts : List AstStmt → Prop :=
   Family.stmts externalBoundaryExceptCALLPrimitive Family.anyUserCall
 
@@ -961,6 +1128,9 @@ def importedIncompleteCases : List (Word × List AstStmt) → Prop :=
 
 def externalBoundaryCases : List (Word × List AstStmt) → Prop :=
   Family.casesSafe externalBoundaryPrimitive Family.anyUserCall
+
+def createBoundaryCases : List (Word × List AstStmt) → Prop :=
+  Family.casesSafe createBoundaryPrimitive Family.anyUserCall
 
 def externalBoundaryExceptCALLCases : List (Word × List AstStmt) → Prop :=
   Family.casesSafe externalBoundaryExceptCALLPrimitive Family.anyUserCall
@@ -978,6 +1148,10 @@ def importedIncompleteFunctionDefinition :
 def externalBoundaryFunctionDefinition :
     AstFunctionDefinition → Prop :=
   Family.functionDefinition externalBoundaryPrimitive Family.anyUserCall
+
+def createBoundaryFunctionDefinition :
+    AstFunctionDefinition → Prop :=
+  Family.functionDefinition createBoundaryPrimitive Family.anyUserCall
 
 def externalBoundaryExceptCALLFunctionDefinition :
     AstFunctionDefinition → Prop :=
@@ -1000,6 +1174,10 @@ def externalBoundaryFunctionEntries :
     List (Name × AstFunctionDefinition) → Prop :=
   Family.functionEntries externalBoundaryPrimitive Family.anyUserCall
 
+def createBoundaryFunctionEntries :
+    List (Name × AstFunctionDefinition) → Prop :=
+  Family.functionEntries createBoundaryPrimitive Family.anyUserCall
+
 def externalBoundaryExceptCALLFunctionEntries :
     List (Name × AstFunctionDefinition) → Prop :=
   Family.functionEntries externalBoundaryExceptCALLPrimitive Family.anyUserCall
@@ -1019,6 +1197,10 @@ noncomputable def importedIncompleteContract :
 noncomputable def externalBoundaryContract :
     AstContract → Prop :=
   Family.contract externalBoundaryPrimitive Family.anyUserCall
+
+noncomputable def createBoundaryContract :
+    AstContract → Prop :=
+  Family.contract createBoundaryPrimitive Family.anyUserCall
 
 noncomputable def externalBoundaryExceptCALLContract :
     AstContract → Prop :=
@@ -3335,6 +3517,72 @@ theorem accepts_call :
     primitive (.System .CALL) :=
   (primitive_iff_safe_or_call (.System .CALL)).mpr (Or.inr rfl)
 
+theorem rejects_create :
+    primitive (.System .CREATE) = False := by
+  apply propext
+  constructor
+  · intro h
+    have hClass := (primitive_iff_safe_or_call (.System .CREATE)).mp h
+    exact
+      match hClass with
+      | Or.inl hSafe => nomatch hSafe
+      | Or.inr hCall => nomatch hCall
+  · intro h
+    cases h
+
+theorem rejects_callcode :
+    primitive (.System .CALLCODE) = False := by
+  apply propext
+  constructor
+  · intro h
+    have hClass := (primitive_iff_safe_or_call (.System .CALLCODE)).mp h
+    exact
+      match hClass with
+      | Or.inl hSafe => nomatch hSafe
+      | Or.inr hCall => nomatch hCall
+  · intro h
+    cases h
+
+theorem rejects_delegatecall :
+    primitive (.System .DELEGATECALL) = False := by
+  apply propext
+  constructor
+  · intro h
+    have hClass :=
+      (primitive_iff_safe_or_call (.System .DELEGATECALL)).mp h
+    exact
+      match hClass with
+      | Or.inl hSafe => nomatch hSafe
+      | Or.inr hCall => nomatch hCall
+  · intro h
+    cases h
+
+theorem rejects_create2 :
+    primitive (.System .CREATE2) = False := by
+  apply propext
+  constructor
+  · intro h
+    have hClass := (primitive_iff_safe_or_call (.System .CREATE2)).mp h
+    exact
+      match hClass with
+      | Or.inl hSafe => nomatch hSafe
+      | Or.inr hCall => nomatch hCall
+  · intro h
+    cases h
+
+theorem rejects_staticcall :
+    primitive (.System .STATICCALL) = False := by
+  apply propext
+  constructor
+  · intro h
+    have hClass := (primitive_iff_safe_or_call (.System .STATICCALL)).mp h
+    exact
+      match hClass with
+      | Or.inl hSafe => nomatch hSafe
+      | Or.inr hCall => nomatch hCall
+  · intro h
+    cases h
+
 mutual
   theorem expr_of_coverage (sourceExpr : AstExpr)
       (hImported :
@@ -3513,6 +3761,382 @@ theorem program_of_coverage (yulProgram : Program)
   exact contract_of_coverage yulProgram.contract hImported hExternal hObject
 
 end CallSafe
+
+namespace CallFamilySafe
+
+def primitive (op : EvmYul.Operation .Yul) : Prop :=
+  FeatureCoverage.importedIncompletePrimitive op ∧
+    FeatureCoverage.createBoundaryPrimitive op
+
+def userCall (functionName : Name) : Prop :=
+  FeatureCoverage.objectBuiltinUserCall functionName
+
+def expr : AstExpr → Prop :=
+  FeatureCoverage.Family.expr primitive userCall
+
+def exprs : List AstExpr → Prop :=
+  FeatureCoverage.Family.exprs primitive userCall
+
+def stmt : AstStmt → Prop :=
+  FeatureCoverage.Family.stmt primitive userCall
+
+def stmts : List AstStmt → Prop :=
+  FeatureCoverage.Family.stmts primitive userCall
+
+def casesSafe : List (Word × List AstStmt) → Prop :=
+  FeatureCoverage.Family.casesSafe primitive userCall
+
+def functionDefinition : AstFunctionDefinition → Prop :=
+  FeatureCoverage.Family.functionDefinition primitive userCall
+
+def functionEntries : List (Name × AstFunctionDefinition) → Prop :=
+  FeatureCoverage.Family.functionEntries primitive userCall
+
+noncomputable def contract : AstContract → Prop :=
+  FeatureCoverage.Family.contract primitive userCall
+
+noncomputable def program : Program → Prop :=
+  FeatureCoverage.Family.program primitive userCall
+
+theorem primitive_iff_safe_or_call_family
+    (op : EvmYul.Operation .Yul) :
+    primitive op ↔ Safe.primitive op ∨ Safe.externalCallBoundaryPrimitive op := by
+  cases op <;> simp [primitive, FeatureCoverage.importedIncompletePrimitive,
+    FeatureCoverage.createBoundaryPrimitive, Safe.createBoundaryPrimitive,
+    Safe.primitive,
+    Safe.yulImportedSemanticsIncompletePrimitive,
+    Safe.externalCallBoundaryPrimitive] <;>
+    try rename_i subop <;> cases subop <;>
+    simp [primitive, FeatureCoverage.importedIncompletePrimitive,
+      FeatureCoverage.createBoundaryPrimitive, Safe.createBoundaryPrimitive,
+      Safe.primitive,
+      Safe.yulImportedSemanticsIncompletePrimitive,
+      Safe.externalCallBoundaryPrimitive]
+
+theorem primitive_of_safe {op : EvmYul.Operation .Yul}
+    (hSafe : Safe.primitive op) :
+    primitive op :=
+  (primitive_iff_safe_or_call_family op).mpr (Or.inl hSafe)
+
+theorem primitive_of_call_family {op : EvmYul.Operation .Yul}
+    (hCall : Safe.externalCallBoundaryPrimitive op) :
+    primitive op :=
+  (primitive_iff_safe_or_call_family op).mpr (Or.inr hCall)
+
+theorem accepts_call :
+    primitive (.System .CALL) :=
+  primitive_of_call_family (by simp [Safe.externalCallBoundaryPrimitive])
+
+theorem accepts_callcode :
+    primitive (.System .CALLCODE) :=
+  primitive_of_call_family (by simp [Safe.externalCallBoundaryPrimitive])
+
+theorem accepts_delegatecall :
+    primitive (.System .DELEGATECALL) :=
+  primitive_of_call_family (by simp [Safe.externalCallBoundaryPrimitive])
+
+theorem accepts_staticcall :
+    primitive (.System .STATICCALL) :=
+  primitive_of_call_family (by simp [Safe.externalCallBoundaryPrimitive])
+
+theorem rejects_create :
+    primitive (.System .CREATE) = False := by
+  simp [primitive, FeatureCoverage.importedIncompletePrimitive,
+    FeatureCoverage.createBoundaryPrimitive,
+    Safe.yulImportedSemanticsIncompletePrimitive,
+    Safe.createBoundaryPrimitive]
+
+theorem rejects_create2 :
+    primitive (.System .CREATE2) = False := by
+  simp [primitive, FeatureCoverage.importedIncompletePrimitive,
+    FeatureCoverage.createBoundaryPrimitive,
+    Safe.yulImportedSemanticsIncompletePrimitive,
+    Safe.createBoundaryPrimitive]
+
+theorem primitive_of_callSafe {op : EvmYul.Operation .Yul}
+    (hSafe : CallSafe.primitive op) :
+    primitive op := by
+  rcases (CallSafe.primitive_iff_safe_or_call op).mp hSafe with
+    hSafePrimitive | hCall
+  · exact primitive_of_safe hSafePrimitive
+  · subst hCall
+    exact accepts_call
+
+theorem userCall_of_callSafe {functionName : Name}
+    (hSafe : CallSafe.userCall functionName) :
+    userCall functionName :=
+  hSafe
+
+theorem expr_of_callSafe (sourceExpr : AstExpr)
+    (hSafe : CallSafe.expr sourceExpr) :
+    expr sourceExpr :=
+  FeatureCoverage.Family.expr_mono
+    (primitive := CallSafe.primitive) (primitive' := primitive)
+    (userCall := CallSafe.userCall) (userCall' := userCall)
+    (fun op h => primitive_of_callSafe h)
+    (fun functionName h => userCall_of_callSafe h)
+    sourceExpr hSafe
+
+theorem exprs_of_callSafe (sourceExprs : List AstExpr)
+    (hSafe : CallSafe.exprs sourceExprs) :
+    exprs sourceExprs :=
+  FeatureCoverage.Family.exprs_mono
+    (primitive := CallSafe.primitive) (primitive' := primitive)
+    (userCall := CallSafe.userCall) (userCall' := userCall)
+    (fun op h => primitive_of_callSafe h)
+    (fun functionName h => userCall_of_callSafe h)
+    sourceExprs hSafe
+
+theorem stmt_of_callSafe (sourceStmt : AstStmt)
+    (hSafe : CallSafe.stmt sourceStmt) :
+    stmt sourceStmt :=
+  FeatureCoverage.Family.stmt_mono
+    (primitive := CallSafe.primitive) (primitive' := primitive)
+    (userCall := CallSafe.userCall) (userCall' := userCall)
+    (fun op h => primitive_of_callSafe h)
+    (fun functionName h => userCall_of_callSafe h)
+    sourceStmt hSafe
+
+theorem stmts_of_callSafe (sourceStmts : List AstStmt)
+    (hSafe : CallSafe.stmts sourceStmts) :
+    stmts sourceStmts :=
+  FeatureCoverage.Family.stmts_mono
+    (primitive := CallSafe.primitive) (primitive' := primitive)
+    (userCall := CallSafe.userCall) (userCall' := userCall)
+    (fun op h => primitive_of_callSafe h)
+    (fun functionName h => userCall_of_callSafe h)
+    sourceStmts hSafe
+
+theorem cases_of_callSafe (sourceCases : List (Word × List AstStmt))
+    (hSafe : CallSafe.casesSafe sourceCases) :
+    casesSafe sourceCases :=
+  FeatureCoverage.Family.casesSafe_mono
+    (primitive := CallSafe.primitive) (primitive' := primitive)
+    (userCall := CallSafe.userCall) (userCall' := userCall)
+    (fun op h => primitive_of_callSafe h)
+    (fun functionName h => userCall_of_callSafe h)
+    sourceCases hSafe
+
+theorem functionDefinition_of_callSafe
+    (fn : AstFunctionDefinition)
+    (hSafe : CallSafe.functionDefinition fn) :
+    functionDefinition fn :=
+  FeatureCoverage.Family.functionDefinition_mono
+    (primitive := CallSafe.primitive) (primitive' := primitive)
+    (userCall := CallSafe.userCall) (userCall' := userCall)
+    (fun op h => primitive_of_callSafe h)
+    (fun functionName h => userCall_of_callSafe h)
+    fn hSafe
+
+theorem functionEntries_of_callSafe
+    (entries : List (Name × AstFunctionDefinition))
+    (hSafe : CallSafe.functionEntries entries) :
+    functionEntries entries :=
+  FeatureCoverage.Family.functionEntries_mono
+    (primitive := CallSafe.primitive) (primitive' := primitive)
+    (userCall := CallSafe.userCall) (userCall' := userCall)
+    (fun op h => primitive_of_callSafe h)
+    (fun functionName h => userCall_of_callSafe h)
+    entries hSafe
+
+theorem contract_of_callSafe (contract' : AstContract)
+    (hSafe : CallSafe.contract contract') :
+    contract contract' :=
+  FeatureCoverage.Family.contract_mono
+    (primitive := CallSafe.primitive) (primitive' := primitive)
+    (userCall := CallSafe.userCall) (userCall' := userCall)
+    (fun op h => primitive_of_callSafe h)
+    (fun functionName h => userCall_of_callSafe h)
+    contract' hSafe
+
+theorem program_of_callSafe (yulProgram : Program)
+    (hSafe : CallSafe.program yulProgram) :
+    program yulProgram :=
+  FeatureCoverage.Family.program_mono
+    (primitive := CallSafe.primitive) (primitive' := primitive)
+    (userCall := CallSafe.userCall) (userCall' := userCall)
+    (fun op h => primitive_of_callSafe h)
+    (fun functionName h => userCall_of_callSafe h)
+    yulProgram hSafe
+
+mutual
+  theorem expr_of_coverage (sourceExpr : AstExpr)
+      (hImported :
+        FeatureCoverage.importedIncompleteExpr sourceExpr)
+      (hCreate :
+        FeatureCoverage.createBoundaryExpr sourceExpr)
+      (hObject :
+        FeatureCoverage.objectBuiltinExpr sourceExpr) :
+      expr sourceExpr := by
+    cases sourceExpr with
+    | Lit value =>
+        trivial
+    | Var name =>
+        trivial
+    | Call callee args =>
+        cases callee with
+        | inl prim =>
+            exact
+              ⟨⟨hImported.1, hCreate.1⟩,
+                exprs_of_coverage args hImported.2 hCreate.2 hObject.2⟩
+        | inr functionName =>
+            exact
+              ⟨hObject.1,
+                exprs_of_coverage args hImported.2 hCreate.2 hObject.2⟩
+
+  theorem exprs_of_coverage (sourceExprs : List AstExpr)
+      (hImported :
+        FeatureCoverage.importedIncompleteExprs sourceExprs)
+      (hCreate :
+        FeatureCoverage.createBoundaryExprs sourceExprs)
+      (hObject :
+        FeatureCoverage.objectBuiltinExprs sourceExprs) :
+      exprs sourceExprs := by
+    cases sourceExprs with
+    | nil =>
+        trivial
+    | cons head rest =>
+        exact
+          ⟨expr_of_coverage head hImported.1 hCreate.1 hObject.1,
+            exprs_of_coverage rest hImported.2 hCreate.2 hObject.2⟩
+
+  theorem stmt_of_coverage (sourceStmt : AstStmt)
+      (hImported :
+        FeatureCoverage.importedIncompleteStmt sourceStmt)
+      (hCreate :
+        FeatureCoverage.createBoundaryStmt sourceStmt)
+      (hObject :
+        FeatureCoverage.objectBuiltinStmt sourceStmt) :
+      stmt sourceStmt := by
+    cases sourceStmt with
+    | Block body =>
+        exact stmts_of_coverage body hImported hCreate hObject
+    | Let names value =>
+        cases value with
+        | none =>
+            trivial
+        | some value =>
+            exact expr_of_coverage value hImported hCreate hObject
+    | Assign names value =>
+        exact expr_of_coverage value hImported hCreate hObject
+    | ExprStmtCall value =>
+        exact expr_of_coverage value hImported hCreate hObject
+    | Switch scrutinee cases defaultBody =>
+        exact
+          ⟨expr_of_coverage scrutinee hImported.1 hCreate.1 hObject.1,
+            cases_of_coverage cases hImported.2.1 hCreate.2.1
+              hObject.2.1,
+            stmts_of_coverage defaultBody hImported.2.2 hCreate.2.2
+              hObject.2.2⟩
+    | For cond post body =>
+        exact
+          ⟨expr_of_coverage cond hImported.1 hCreate.1 hObject.1,
+            stmts_of_coverage post hImported.2.1 hCreate.2.1
+              hObject.2.1,
+            stmts_of_coverage body hImported.2.2 hCreate.2.2
+              hObject.2.2⟩
+    | If cond body =>
+        exact
+          ⟨expr_of_coverage cond hImported.1 hCreate.1 hObject.1,
+            stmts_of_coverage body hImported.2 hCreate.2 hObject.2⟩
+    | Continue =>
+        trivial
+    | Break =>
+        trivial
+    | Leave =>
+        trivial
+
+  theorem stmts_of_coverage (sourceStmts : List AstStmt)
+      (hImported :
+        FeatureCoverage.importedIncompleteStmts sourceStmts)
+      (hCreate :
+        FeatureCoverage.createBoundaryStmts sourceStmts)
+      (hObject :
+        FeatureCoverage.objectBuiltinStmts sourceStmts) :
+      stmts sourceStmts := by
+    cases sourceStmts with
+    | nil =>
+        trivial
+    | cons head rest =>
+        exact
+          ⟨stmt_of_coverage head hImported.1 hCreate.1 hObject.1,
+            stmts_of_coverage rest hImported.2 hCreate.2 hObject.2⟩
+
+  theorem cases_of_coverage (sourceCases : List (Word × List AstStmt))
+      (hImported :
+        FeatureCoverage.importedIncompleteCases sourceCases)
+      (hCreate :
+        FeatureCoverage.createBoundaryCases sourceCases)
+      (hObject :
+        FeatureCoverage.objectBuiltinCases sourceCases) :
+      casesSafe sourceCases := by
+    cases sourceCases with
+    | nil =>
+        trivial
+    | cons head rest =>
+        rcases head with ⟨value, body⟩
+        exact
+          ⟨stmts_of_coverage body hImported.1 hCreate.1 hObject.1,
+            cases_of_coverage rest hImported.2 hCreate.2 hObject.2⟩
+end
+
+theorem functionDefinition_of_coverage
+    (fn : AstFunctionDefinition)
+    (hImported :
+      FeatureCoverage.importedIncompleteFunctionDefinition fn)
+    (hCreate :
+      FeatureCoverage.createBoundaryFunctionDefinition fn)
+    (hObject :
+      FeatureCoverage.objectBuiltinFunctionDefinition fn) :
+    functionDefinition fn := by
+  cases fn with
+  | Def params returns body =>
+      exact stmts_of_coverage body hImported hCreate hObject
+
+theorem functionEntries_of_coverage
+    (entries : List (Name × AstFunctionDefinition))
+    (hImported :
+      FeatureCoverage.importedIncompleteFunctionEntries entries)
+    (hCreate :
+      FeatureCoverage.createBoundaryFunctionEntries entries)
+    (hObject :
+      FeatureCoverage.objectBuiltinFunctionEntries entries) :
+    functionEntries entries := by
+  induction entries with
+  | nil =>
+      trivial
+  | cons entry rest ih =>
+      rcases entry with ⟨name, fn⟩
+      exact
+        ⟨functionDefinition_of_coverage fn hImported.1 hCreate.1
+            hObject.1,
+          ih hImported.2 hCreate.2 hObject.2⟩
+
+theorem contract_of_coverage (contract' : AstContract)
+    (hImported :
+      FeatureCoverage.importedIncompleteContract contract')
+    (hCreate :
+      FeatureCoverage.createBoundaryContract contract')
+    (hObject :
+      FeatureCoverage.objectBuiltinContract contract') :
+    contract contract' := by
+  exact
+    ⟨stmt_of_coverage contract'.dispatcher hImported.1 hCreate.1
+        hObject.1,
+      functionEntries_of_coverage (Contract.functionEntries contract')
+        hImported.2 hCreate.2 hObject.2⟩
+
+theorem program_of_coverage (yulProgram : Program)
+    (hImported :
+      FeatureCoverage.importedIncompleteProgram yulProgram)
+    (hCreate :
+      FeatureCoverage.createBoundaryProgram yulProgram)
+    (hObject :
+      FeatureCoverage.objectBuiltinProgram yulProgram) :
+    program yulProgram := by
+  exact contract_of_coverage yulProgram.contract hImported hCreate hObject
+
+end CallFamilySafe
 
 theorem switch_default_safe_of_stmt {scrutinee : AstExpr}
     {cases : List (Word × List AstStmt)} {defaultBody : List AstStmt}
@@ -5418,6 +6042,34 @@ end Imported
 abbrev AccountMapRel :=
   EvmYul.AccountMap .Yul → EvmYul.AccountMap .EVM → Prop
 
+def AccountStorage? {τ : EvmYul.OperationType}
+    (accounts : EvmYul.AccountMap τ)
+    (address : EvmYul.AccountAddress) : Option EvmYul.Storage :=
+  (accounts.find? address).map (fun account => account.storage)
+
+def AccountTransientStorage? {τ : EvmYul.OperationType}
+    (accounts : EvmYul.AccountMap τ)
+    (address : EvmYul.AccountAddress) : Option EvmYul.Storage :=
+  (accounts.find? address).map (fun account => account.tstorage)
+
+def AccountBalance {τ : EvmYul.OperationType}
+    (accounts : EvmYul.AccountMap τ)
+    (address : EvmYul.AccountAddress) : Word :=
+  (accounts.find? address).elim (EvmYul.UInt256.ofNat 0)
+    (fun account => account.balance)
+
+def StorageImageRel {τ₁ τ₂ : EvmYul.OperationType}
+    (source : EvmYul.AccountMap τ₁) (target : EvmYul.AccountMap τ₂) :
+    Prop :=
+  ∀ address, AccountStorage? source address = AccountStorage? target address
+
+def TransientStorageImageRel {τ₁ τ₂ : EvmYul.OperationType}
+    (source : EvmYul.AccountMap τ₁) (target : EvmYul.AccountMap τ₂) :
+    Prop :=
+  ∀ address,
+    AccountTransientStorage? source address =
+      AccountTransientStorage? target address
+
 abbrev CodeImageRel :=
   AstContract → ByteArray → Prop
 
@@ -5753,9 +6405,14 @@ The relation is parameterized by the pieces that are intentionally outside the
 pure control/stack compiler proof:
 
 * `accountMapRel` relates Yul contracts/accounts to the compiled EVM account
-  image;
+  image, and its storage-image fields make persistent and transient storage
+  equality derivable from that relation;
 * `selfbalanceRel` is the same-query/same-answer contract needed by the
   `SELFBALANCE` primitive;
+* `selfdestructStorageImageRel` is the focused persistent-storage image
+  compatibility needed by `SELFDESTRUCT`; it assumes only the previous storage
+  image and the destructing account's balance agreement, not full account/world
+  equality;
 * `balanceRel` is the same-query/same-answer contract needed by
   account-addressed `BALANCE` reads;
 * `sloadRel` is the account-map/current-contract-storage contract needed by
@@ -5775,10 +6432,25 @@ pure control/stack compiler proof:
 -/
 structure StateRelConfig where
   accountMapRel : AccountMapRel
+  storageImageRel :
+    ∀ {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM},
+      accountMapRel yul evm → StorageImageRel yul evm
+  transientStorageImageRel :
+    ∀ {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM},
+      accountMapRel yul evm → TransientStorageImageRel yul evm
   selfbalanceRel :
     ∀ {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM},
       yul.executionEnv.codeOwner = evm.executionEnv.codeOwner →
         EvmYul.State.selfbalance yul = EvmYul.State.selfbalance evm
+  selfdestructStorageImageRel :
+    ∀ {source target : EvmYul.AccountAddress}
+        {createdYul createdEvm : Bool}
+        {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM},
+      StorageImageRel yul evm →
+      AccountBalance yul source = AccountBalance evm source →
+        StorageImageRel
+          (EvmYul.selfdestructAccountMap yul source target createdYul)
+          (EvmYul.selfdestructAccountMap evm source target createdEvm)
   balanceRel :
     ∀ {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
         {address : Word},
@@ -5865,6 +6537,28 @@ structure ChainStateRel (cfg : StateRelConfig)
   executionEnv : ExecutionEnvRel cfg yul.executionEnv evm.executionEnv
   blocks : yul.blocks = evm.blocks
   genesisBlockHeader : yul.genesisBlockHeader = evm.genesisBlockHeader
+
+namespace ChainStateRel
+
+theorem storageImageRel {cfg : StateRelConfig}
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    (hRel : ChainStateRel cfg yul evm) :
+    StorageImageRel yul.accountMap evm.accountMap :=
+  cfg.storageImageRel hRel.accountMap
+
+theorem transientStorageImageRel {cfg : StateRelConfig}
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    (hRel : ChainStateRel cfg yul evm) :
+    TransientStorageImageRel yul.accountMap evm.accountMap :=
+  cfg.transientStorageImageRel hRel.accountMap
+
+theorem selfbalanceRel {cfg : StateRelConfig}
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    (hRel : ChainStateRel cfg yul evm) :
+    EvmYul.State.selfbalance yul = EvmYul.State.selfbalance evm :=
+  cfg.selfbalanceRel hRel.executionEnv.codeOwner
+
+end ChainStateRel
 
 structure MachineStateRel (cfg : StateRelConfig)
     (yul evm : EvmYul.MachineState) : Prop where
@@ -6122,6 +6816,30 @@ structure SharedStateRel (cfg : StateRelConfig)
 
 namespace SharedStateRel
 
+theorem storageImageRel {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    (hShared : SharedStateRel cfg sourceShared targetShared) :
+    StorageImageRel sourceShared.toState.accountMap
+      targetShared.toState.accountMap :=
+  ChainStateRel.storageImageRel hShared.chain
+
+theorem transientStorageImageRel {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    (hShared : SharedStateRel cfg sourceShared targetShared) :
+    TransientStorageImageRel sourceShared.toState.accountMap
+      targetShared.toState.accountMap :=
+  ChainStateRel.transientStorageImageRel hShared.chain
+
+theorem selfbalanceRel {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    (hShared : SharedStateRel cfg sourceShared targetShared) :
+    EvmYul.State.selfbalance sourceShared.toState =
+      EvmYul.State.selfbalance targetShared.toState :=
+  ChainStateRel.selfbalanceRel hShared.chain
+
 theorem openExternalCallContextRel
     {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul}
@@ -6148,6 +6866,36 @@ def OpenExternalResponseRel
   ChainStateRel cfg
     (response.internalMutation.apply sourceShared.toState)
     (response.internalMutation.apply targetShared.toState)
+
+theorem OpenExternalResponseRel.storageImageRel
+    {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    {response : OpenExternal.CallResponse}
+    (hResponse :
+      OpenExternalResponseRel cfg sourceShared targetShared response) :
+    StorageImageRel
+      (response.internalMutation.apply sourceShared.toState).accountMap
+      (response.internalMutation.apply targetShared.toState).accountMap :=
+  ChainStateRel.storageImageRel
+    (show ChainStateRel cfg
+      (response.internalMutation.apply sourceShared.toState)
+      (response.internalMutation.apply targetShared.toState) from hResponse)
+
+theorem OpenExternalResponseRel.transientStorageImageRel
+    {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    {response : OpenExternal.CallResponse}
+    (hResponse :
+      OpenExternalResponseRel cfg sourceShared targetShared response) :
+    TransientStorageImageRel
+      (response.internalMutation.apply sourceShared.toState).accountMap
+      (response.internalMutation.apply targetShared.toState).accountMap :=
+  ChainStateRel.transientStorageImageRel
+    (show ChainStateRel cfg
+      (response.internalMutation.apply sourceShared.toState)
+      (response.internalMutation.apply targetShared.toState) from hResponse)
 
 /--
 Admissible external responses at one actual suspended source/target shared
@@ -6189,7 +6937,10 @@ theorem finishExternalCall {cfg : StateRelConfig}
       (site.finishShared sourceShared response)
       (site.finishShared targetShared response) := by
   rcases hShared with ⟨_hChain, hMachine⟩
-  exact ⟨hResponse, MachineStateRel.finishExternalCall hMachine⟩
+  exact
+    ⟨by
+      simpa [OpenExternal.CallSite.finishShared] using hResponse,
+      MachineStateRel.finishExternalCall hMachine⟩
 
 theorem codeBytes {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul}
@@ -7389,6 +8140,30 @@ inductive SourceStateExactRel (cfg : StateRelConfig) (layout : List Name) :
       SourceStateExactRel cfg layout (.Ok shared store) source
 
 namespace SourceStateRel
+
+theorem storageImageRel
+    {cfg : StateRelConfig} {layout : List Name}
+    {source : State} {compiler : Objects.Source.State}
+    (hRel : SourceStateRel cfg layout source compiler) :
+    ∃ shared store,
+      source = .Ok shared store ∧
+        StorageImageRel shared.toState.accountMap
+          compiler.shared.toState.accountMap := by
+  cases hRel with
+  | ok hShared _hVars =>
+      exact ⟨_, _, rfl, SharedStateRel.storageImageRel hShared⟩
+
+theorem transientStorageImageRel
+    {cfg : StateRelConfig} {layout : List Name}
+    {source : State} {compiler : Objects.Source.State}
+    (hRel : SourceStateRel cfg layout source compiler) :
+    ∃ shared store,
+      source = .Ok shared store ∧
+        TransientStorageImageRel shared.toState.accountMap
+          compiler.shared.toState.accountMap := by
+  cases hRel with
+  | ok hShared _hVars =>
+      exact ⟨_, _, rfl, SharedStateRel.transientStorageImageRel hShared⟩
 
 theorem openExternalCallContextRel
     {cfg : StateRelConfig} {layout : List Name}
@@ -12839,8 +13614,6 @@ theorem primitiveStackSoundAtArity_structured_of_safe_toBasicOp
       · cases hBasic
         exact primitiveStackSoundAtArity_of_stackSoundAt
           primitiveStackSoundAt_structured_mstore8
-      · cases hBasic
-        exact primitiveStackSoundAtArity_structured_msize
       · cases hBasic
         exact primitiveStackSoundAtArity_structured_tload
       · cases hBasic
@@ -77013,6 +77786,112 @@ theorem compile_preserves_with_source_run_of_dispatcher_source_result_block_brid
     ⟨sourceOutcome, sourceTargetFuel, targetFuel, targetOutcome,
       hReferenceRun, hSourceRunForInitial, hTargetRun, hReferenceRunBody.2,
       hWholeRel⟩
+
+theorem sourceLowered_run_of_dispatcher_source_result_block_bridge
+    {cfg : Reference.StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {functionProgram : Functions.Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceInitial : Objects.Source.State}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hToObjects :
+      program.toObjects? =
+        some { root := Objects.Object.mk "root" functionProgram [] [] })
+    (hBridge :
+      Reference.SourceBridgeFacts.SourceResultBlockRunBridge (cfg := cfg)
+        layout terminalRel revertRel prim functionProgram
+        Functions.Source.Ctx.initial sourceFuel [program.contract.dispatcher]
+        (some program.contract)
+        (.Ok
+          { shared with
+            executionEnv :=
+              { shared.executionEnv with code := program.contract } }
+          (default : EvmYul.Yul.VarStore))
+        sourceInitial functionProgram.body)
+    (hReferenceOk :
+      ∀ sourceResult sourceOutcome targetFuel,
+        EvmYul.Yul.exec sourceFuel (.Block [program.contract.dispatcher])
+            (some program.contract)
+            (.Ok
+              { shared with
+                executionEnv :=
+                  { shared.executionEnv with code := program.contract } }
+              (default : EvmYul.Yul.VarStore)) =
+          sourceResult →
+        SourceLowered.runState prim targetFuel program sourceInitial =
+          .ok sourceOutcome →
+        Reference.SourceBridgeFacts.SourceResultOutcomeRel cfg layout
+          terminalRel revertRel sourceResult sourceOutcome →
+        Reference.Imported.dispatcherRunResultOfBody program
+            (.Ok shared store) sourceResult = .ok referenceResult ∧
+          outcomeRel referenceResult sourceOutcome)
+    (hSourceInitial :
+      sourceInitial =
+        Functions.Source.Program.initialState initial.toSharedState) :
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ sourceTargetFuel,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      SourceLowered.run prim sourceTargetFuel program initial =
+        .ok sourceOutcome ∧
+      outcomeRel referenceResult sourceOutcome := by
+  rcases
+      sourceLowered_runState_of_root_source_result_block_bridge
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (program := program)
+        (functionProgram := functionProgram) (sourceFuel := sourceFuel)
+        (sourceStmts := [program.contract.dispatcher])
+        (codeOverride := some program.contract)
+        (source :=
+          .Ok
+            { shared with
+              executionEnv :=
+                { shared.executionEnv with code := program.contract } }
+            (default : EvmYul.Yul.VarStore))
+        (sourceInitial := sourceInitial) hToObjects hBridge with
+    ⟨sourceResult, sourceOutcome, sourceTargetFuel, hSource, hSourceRun,
+      hRel⟩
+  have hDispatcherExec :
+      EvmYul.Yul.exec sourceFuel
+          (.Block
+            (Reference.Imported.dispatcherBody
+              (Program.installContract program (.Ok shared store))))
+          (some program.contract)
+          (Reference.Imported.dispatcherCallState
+            (Program.installContract program (.Ok shared store))) =
+        sourceResult := by
+    simpa [Reference.Imported.dispatcherBody_installContract_ok,
+      Reference.Imported.dispatcherCallState_installContract_ok] using hSource
+  have hReferenceRunBody :
+      Reference.Imported.dispatcherRunResultOfBody program
+          (.Ok shared store) sourceResult = .ok referenceResult ∧
+        outcomeRel referenceResult sourceOutcome := by
+    exact hReferenceOk sourceResult sourceOutcome sourceTargetFuel hSource
+      hSourceRun hRel
+  have hReferenceRun :
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult := by
+    rw [Reference.Imported.runResult_succ_of_exec_dispatcher
+      sourceFuel program (.Ok shared store) hDispatcherExec]
+    exact hReferenceRunBody.1
+  have hSourceRunForInitial :
+      SourceLowered.run prim sourceTargetFuel program initial =
+        .ok sourceOutcome := by
+    simpa [SourceLowered.run, SourceLowered.runState, hToObjects,
+      Objects.Source.Program.run, Objects.Source.Program.runState,
+      Objects.Source.Object.run, Objects.Source.Object.runState,
+      Objects.Program.toFunctions, Objects.Object.toFunctions,
+      Functions.Source.Program.run, hSourceInitial] using hSourceRun
+  exact
+    ⟨sourceOutcome, sourceTargetFuel, hReferenceRun, hSourceRunForInitial,
+      hReferenceRunBody.2⟩
 
 theorem compile_preserves_with_source_run_of_dispatcher_source_result_block_bridge_liveNoInternalCallChecked
     {cfg : Reference.StateRelConfig} {layout : List Name}

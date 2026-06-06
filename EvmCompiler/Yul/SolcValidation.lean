@@ -179,6 +179,8 @@ def primitiveAvailable? (profile : DialectProfile)
   | .StackMemFlow .TSTORE
   | .StackMemFlow .MCOPY =>
       profile.evmVersion.atLeast? .cancun
+  | .StackMemFlow .MSIZE =>
+      false
   | _ => true
 
 def hasDoubleDot? : List Char → Bool

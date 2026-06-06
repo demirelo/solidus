@@ -5,7 +5,11 @@ import EvmCompiler.Yul.ArgSlots
 import EvmCompiler.Yul.PrimSemantics
 import EvmCompiler.Yul.Semantics
 import EvmCompiler.Yul.Preservation
+import EvmCompiler.Yul.ObjectModel
+import EvmCompiler.Yul.ObjectSemantics
+import EvmCompiler.Yul.ObjectPreservation
 import EvmCompiler.Yul.RecursiveBridgeSupport
+import EvmCompiler.Yul.ObjectRuntime
 import EvmCompiler.Yul.OpenExternal
 import EvmCompiler.Yul.OpenAssembly
 import EvmCompiler.Yul.OpenLowering

@@ -2020,6 +2020,130 @@ mutual
     | some body => (Block.check? returns ctx layout after body).isSome
 end
 
+structure LayoutWidthCheckResult where
+  outLayout : List Name
+  maxWidth : Nat
+
+mutual
+  def Block.widthCheck? (returns : List Name) (ctx : Ctx)
+      (layout after : List Name) : Block → Option LayoutWidthCheckResult
+    | ⟨stmts⟩ => StmtList.widthCheck? returns ctx layout after stmts
+
+  def Stmt.widthCheck? (returns : List Name) (ctx : Ctx)
+      (layout after : List Name) : Stmt → Option LayoutWidthCheckResult
+    | .block body => do
+        let bodyCtx := ctx.withProtectedLayout layout
+        let bodyResult ←
+          Block.widthCheck? returns bodyCtx layout
+            (scopedAfter layout after) body
+        some
+          { outLayout := layout
+            maxWidth := max layout.length bodyResult.maxWidth }
+    | .if_ _cond body => do
+        let bodyCtx := ctx.withProtectedLayout layout
+        let bodyResult ←
+          Block.widthCheck? returns bodyCtx layout
+            (scopedAfter layout after) body
+        some
+          { outLayout := layout
+            maxWidth := max layout.length bodyResult.maxWidth }
+    | .switch _scrutinee cases defaultBody => do
+        let branchCtx := ctx.withProtectedLayout layout
+        let caseWidth ←
+          CaseList.widthCheck? returns branchCtx layout
+            (scopedAfter layout after) cases
+        let defaultWidth ←
+          Default.widthCheck? returns branchCtx layout
+            (scopedAfter layout after) defaultBody
+        some
+          { outLayout := layout
+            maxWidth := max layout.length (max caseWidth defaultWidth) }
+    | .for_ init cond post body => do
+        let loopMentioned :=
+          NameSet.unions [Reads.expr cond, Reads.block post, Reads.block body,
+            after]
+        let postLive := Block.liveBefore ctx loopMentioned post
+        let bodyCtx := ctx.withLoop after postLive
+        let bodyLive := Block.liveBefore bodyCtx postLive body
+        let loopLive :=
+          NameSet.unions [Reads.expr cond, after, postLive, bodyLive]
+        let initAfter := NameSet.union loopLive layout
+        let initCtx := ctx.withProtectedLayout layout
+        let initResult ← Block.widthCheck? returns initCtx layout initAfter init
+        if ExprAccess.expr? 0 initResult.outLayout cond then
+          let postAfter := scopedAfter initResult.outLayout loopMentioned
+          let bodyAfter := scopedAfter initResult.outLayout postLive
+          let postCtx := ctx.withProtectedLayout initResult.outLayout
+          let bodyLoopCtx :=
+            ctx.withLoop (scopedAfter initResult.outLayout after) bodyAfter
+          let bodyCheckCtx :=
+            bodyLoopCtx.withProtectedLayout initResult.outLayout
+          let postResult ←
+            Block.widthCheck? returns postCtx initResult.outLayout postAfter
+              post
+          let bodyResult ←
+            Block.widthCheck? returns bodyCheckCtx initResult.outLayout
+              bodyAfter body
+          some
+            { outLayout := layout
+              maxWidth :=
+                max layout.length
+                  (max initResult.maxWidth
+                    (max postResult.maxWidth bodyResult.maxWidth)) }
+        else
+          none
+    | stmt =>
+        let outLayout := Stmt.regularOutLayout layout stmt
+        some
+          { outLayout := outLayout
+            maxWidth := max layout.length outLayout.length }
+
+  def StmtList.widthCheck? (returns : List Name) (ctx : Ctx)
+      (layout after : List Name) :
+      List Stmt → Option LayoutWidthCheckResult
+    | [] =>
+        if Layout.entryWindowOk? layout after then
+          let outLayout := Layout.trimDeadPrefix layout after
+          some
+            { outLayout := outLayout
+              maxWidth := max layout.length outLayout.length }
+        else
+          none
+    | stmt :: rest => do
+        let restLive := StmtList.liveBefore ctx after rest
+        let stmtLive := Stmt.liveBefore ctx restLive stmt
+        let liveLayout := Layout.trimDeadPrefix layout stmtLive
+        let (_prep, preparedLayout) ←
+          Prepare.forStmtAboveSuffix? ctx.protectedDepth returns liveLayout
+            stmtLive stmt
+        let stmtResult ←
+          Stmt.widthCheck? returns ctx preparedLayout restLive stmt
+        let restResult ←
+          StmtList.widthCheck? returns ctx stmtResult.outLayout after rest
+        some
+          { outLayout := restResult.outLayout
+            maxWidth :=
+              max layout.length
+                (max liveLayout.length
+                  (max preparedLayout.length
+                    (max stmtResult.maxWidth restResult.maxWidth))) }
+
+  def CaseList.widthCheck? (returns : List Name) (ctx : Ctx)
+      (layout after : List Name) : List (Word × Block) → Option Nat
+    | [] => some layout.length
+    | (_value, body) :: rest => do
+        let bodyResult ← Block.widthCheck? returns ctx layout after body
+        let restWidth ← CaseList.widthCheck? returns ctx layout after rest
+        some (max layout.length (max bodyResult.maxWidth restWidth))
+
+  def Default.widthCheck? (returns : List Name) (ctx : Ctx)
+      (layout after : List Name) : Option Block → Option Nat
+    | none => some layout.length
+    | some body => do
+        let bodyResult ← Block.widthCheck? returns ctx layout after body
+        some (max layout.length bodyResult.maxWidth)
+end
+
 def FunDef.check? (fn : FunDef) : Bool :=
   match
       Block.check? fn.returns { returns := fn.returns }
@@ -2034,6 +2158,374 @@ def FunList.check? : List FunDef → Bool
 def Program.check? (program : Program) : Bool :=
   FunList.check? program.functions &&
     (Block.check? [] {} [] [] program.body).isSome
+
+def FunDef.maxLiveLayoutWidth? (fn : FunDef) : Option Nat := do
+  let result ←
+    Block.widthCheck? fn.returns { returns := fn.returns }
+      (fn.returns.reverse ++ fn.params.reverse) fn.returns fn.body
+  if NamesAccess.names? 0 result.outLayout fn.returns then
+    some result.maxWidth
+  else
+    none
+
+def FunList.maxLiveLayoutWidth? : List FunDef → Option Nat
+  | [] => some 0
+  | fn :: rest => do
+      let headWidth ← FunDef.maxLiveLayoutWidth? fn
+      let tailWidth ← FunList.maxLiveLayoutWidth? rest
+      some (max headWidth tailWidth)
+
+def Program.maxLiveLayoutWidth? (program : Program) : Option Nat := do
+  let functionWidth ← FunList.maxLiveLayoutWidth? program.functions
+  let bodyResult ← Block.widthCheck? [] {} [] [] program.body
+  some (max functionWidth bodyResult.maxWidth)
+
+mutual
+  theorem Block.widthCheck?_sound {returns : List Name} {ctx : Ctx}
+      {layout after : List Name} {block : Block}
+      {result : LayoutWidthCheckResult}
+      (hCheck :
+        Block.widthCheck? returns ctx layout after block = some result) :
+      Block.check? returns ctx layout after block = some result.outLayout ∧
+        layout.length ≤ result.maxWidth ∧
+        result.outLayout.length ≤ result.maxWidth := by
+    cases block with
+    | mk stmts =>
+        exact StmtList.widthCheck?_sound hCheck
+
+  theorem Stmt.widthCheck?_sound {returns : List Name} {ctx : Ctx}
+      {layout after : List Name} {stmt : Stmt}
+      {result : LayoutWidthCheckResult}
+      (hCheck :
+        Stmt.widthCheck? returns ctx layout after stmt = some result) :
+      Stmt.check? returns ctx layout after stmt = some result.outLayout ∧
+        layout.length ≤ result.maxWidth ∧
+        result.outLayout.length ≤ result.maxWidth := by
+    cases stmt with
+    | block body =>
+        let bodyCtx := ctx.withProtectedLayout layout
+        cases hBody :
+            Block.widthCheck? returns bodyCtx layout
+              (scopedAfter layout after) body with
+        | none =>
+            simp [Stmt.widthCheck?, bodyCtx, hBody] at hCheck
+        | some bodyResult =>
+            have hBodySound := Block.widthCheck?_sound hBody
+            simp [Stmt.widthCheck?, bodyCtx, hBody] at hCheck
+            cases hCheck
+            constructor
+            · simp [Stmt.check?, bodyCtx, hBodySound.1]
+            · constructor <;> simp
+    | if_ cond body =>
+        let bodyCtx := ctx.withProtectedLayout layout
+        cases hBody :
+            Block.widthCheck? returns bodyCtx layout
+              (scopedAfter layout after) body with
+        | none =>
+            simp [Stmt.widthCheck?, bodyCtx, hBody] at hCheck
+        | some bodyResult =>
+            have hBodySound := Block.widthCheck?_sound hBody
+            simp [Stmt.widthCheck?, bodyCtx, hBody] at hCheck
+            cases hCheck
+            constructor
+            · simp [Stmt.check?, bodyCtx, hBodySound.1]
+            · constructor <;> simp
+    | switch scrutinee cases defaultBody =>
+        let branchCtx := ctx.withProtectedLayout layout
+        cases hCases :
+            CaseList.widthCheck? returns branchCtx layout
+              (scopedAfter layout after) cases with
+        | none =>
+            simp [Stmt.widthCheck?, branchCtx, hCases] at hCheck
+        | some caseWidth =>
+            cases hDefault :
+                Default.widthCheck? returns branchCtx layout
+                  (scopedAfter layout after) defaultBody with
+            | none =>
+                simp [Stmt.widthCheck?, branchCtx, hCases, hDefault] at hCheck
+            | some defaultWidth =>
+                have hCasesSound := CaseList.widthCheck?_sound hCases
+                have hDefaultSound := Default.widthCheck?_sound hDefault
+                simp [Stmt.widthCheck?, branchCtx, hCases, hDefault] at hCheck
+                cases hCheck
+                constructor
+                · simp [Stmt.check?, branchCtx, hCasesSound.1,
+                    hDefaultSound.1]
+                · constructor <;> simp
+    | for_ init cond post body =>
+        let loopMentioned :=
+          NameSet.unions [Reads.expr cond, Reads.block post, Reads.block body,
+            after]
+        let postLive := Block.liveBefore ctx loopMentioned post
+        let bodyCtx := ctx.withLoop after postLive
+        let bodyLive := Block.liveBefore bodyCtx postLive body
+        let loopLive :=
+          NameSet.unions [Reads.expr cond, after, postLive, bodyLive]
+        let initAfter := NameSet.union loopLive layout
+        let initCtx := ctx.withProtectedLayout layout
+        cases hInit :
+            Block.widthCheck? returns initCtx layout initAfter init with
+        | none =>
+            simp [Stmt.widthCheck?, loopMentioned, postLive, bodyCtx,
+              bodyLive, loopLive, initAfter, initCtx, hInit] at hCheck
+        | some initResult =>
+            cases hCond : ExprAccess.expr? 0 initResult.outLayout cond with
+            | false =>
+                simp [Stmt.widthCheck?, loopMentioned, postLive, bodyCtx,
+                  bodyLive, loopLive, initAfter, initCtx, hInit, hCond]
+                  at hCheck
+            | true =>
+                let postAfter := scopedAfter initResult.outLayout loopMentioned
+                let bodyAfter := scopedAfter initResult.outLayout postLive
+                let postCtx := ctx.withProtectedLayout initResult.outLayout
+                let bodyLoopCtx :=
+                  ctx.withLoop (scopedAfter initResult.outLayout after)
+                    bodyAfter
+                let bodyCheckCtx :=
+                  bodyLoopCtx.withProtectedLayout initResult.outLayout
+                cases hPost :
+                    Block.widthCheck? returns postCtx initResult.outLayout
+                      postAfter post with
+                | none =>
+                    simp [Stmt.widthCheck?, loopMentioned, postLive, bodyCtx,
+                      bodyLive, loopLive, initAfter, postAfter, bodyAfter,
+                      initCtx, postCtx, bodyLoopCtx, bodyCheckCtx, hInit,
+                      hCond, hPost] at hCheck
+                | some postResult =>
+                    cases hBody :
+                        Block.widthCheck? returns bodyCheckCtx
+                          initResult.outLayout bodyAfter body with
+                    | none =>
+                        simp [Stmt.widthCheck?, loopMentioned, postLive,
+                          bodyCtx, bodyLive, loopLive, initAfter, postAfter,
+                          bodyAfter, initCtx, postCtx, bodyLoopCtx,
+                          bodyCheckCtx, hInit, hCond, hPost, hBody] at hCheck
+                    | some bodyResult =>
+                        have hInitSound := Block.widthCheck?_sound hInit
+                        have hPostSound := Block.widthCheck?_sound hPost
+                        have hBodySound := Block.widthCheck?_sound hBody
+                        simp [Stmt.widthCheck?, loopMentioned, postLive,
+                          bodyCtx, bodyLive, loopLive, initAfter, postAfter,
+                          bodyAfter, initCtx, postCtx, bodyLoopCtx,
+                          bodyCheckCtx, hInit, hCond, hPost, hBody] at hCheck
+                        cases hCheck
+                        constructor
+                        · simp [Stmt.check?, loopMentioned, postLive, bodyCtx,
+                            bodyLive, loopLive, initAfter, postAfter,
+                            bodyAfter, initCtx, postCtx, bodyLoopCtx,
+                            bodyCheckCtx, hInitSound.1, hCond, hPostSound.1,
+                            hBodySound.1]
+                        · constructor <;> simp
+    | expr expr =>
+        simp [Stmt.widthCheck?, Stmt.check?, Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        simp [Stmt.check?, Stmt.regularOutLayout]
+    | let_ name value =>
+        simp [Stmt.widthCheck?, Stmt.check?, Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        simp [Stmt.check?, Stmt.regularOutLayout]
+    | assign name value =>
+        simp [Stmt.widthCheck?, Stmt.check?, Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        simp [Stmt.check?, Stmt.regularOutLayout]
+    | brk =>
+        simp [Stmt.widthCheck?, Stmt.check?, Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        simp [Stmt.check?, Stmt.regularOutLayout]
+    | cont =>
+        simp [Stmt.widthCheck?, Stmt.check?, Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        simp [Stmt.check?, Stmt.regularOutLayout]
+    | leave =>
+        simp [Stmt.widthCheck?, Stmt.check?, Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        simp [Stmt.check?, Stmt.regularOutLayout]
+    | call targets functionName args =>
+        simp [Stmt.widthCheck?, Stmt.check?, Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        simp [Stmt.check?, Stmt.regularOutLayout]
+    | terminal kind =>
+        simp [Stmt.widthCheck?, Stmt.check?, Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        simp [Stmt.check?, Stmt.regularOutLayout]
+    | terminalArgs kind args =>
+        simp [Stmt.widthCheck?, Stmt.check?, Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        simp [Stmt.check?, Stmt.regularOutLayout]
+
+  theorem StmtList.widthCheck?_sound {returns : List Name} {ctx : Ctx}
+      {layout after : List Name} {stmts : List Stmt}
+      {result : LayoutWidthCheckResult}
+      (hCheck :
+        StmtList.widthCheck? returns ctx layout after stmts = some result) :
+      StmtList.check? returns ctx layout after stmts = some result.outLayout ∧
+        layout.length ≤ result.maxWidth ∧
+        result.outLayout.length ≤ result.maxWidth := by
+    cases stmts with
+    | nil =>
+        cases hEntry : Layout.entryWindowOk? layout after with
+        | false =>
+            simp [StmtList.widthCheck?, hEntry] at hCheck
+        | true =>
+            simp [StmtList.widthCheck?, hEntry] at hCheck
+            cases hCheck
+            simp [StmtList.check?, hEntry]
+    | cons stmt rest =>
+        let restLive := StmtList.liveBefore ctx after rest
+        let stmtLive := Stmt.liveBefore ctx restLive stmt
+        let liveLayout := Layout.trimDeadPrefix layout stmtLive
+        cases hPrepare :
+            Prepare.forStmtAboveSuffix? ctx.protectedDepth returns liveLayout
+              stmtLive stmt with
+        | none =>
+            simp [StmtList.widthCheck?, restLive, stmtLive, liveLayout,
+              hPrepare] at hCheck
+        | some prepareResult =>
+            rcases prepareResult with ⟨prep, preparedLayout⟩
+            cases hStmt :
+                Stmt.widthCheck? returns ctx preparedLayout restLive stmt with
+            | none =>
+                simp [StmtList.widthCheck?, restLive, stmtLive, liveLayout,
+                  hPrepare, hStmt] at hCheck
+            | some stmtResult =>
+                cases hRest :
+                    StmtList.widthCheck? returns ctx stmtResult.outLayout after
+                      rest with
+                | none =>
+                    simp [StmtList.widthCheck?, restLive, stmtLive, liveLayout,
+                      hPrepare, hStmt, hRest] at hCheck
+                | some restResult =>
+                    have hStmtSound := Stmt.widthCheck?_sound hStmt
+                    have hRestSound := StmtList.widthCheck?_sound hRest
+                    simp [StmtList.widthCheck?, restLive, stmtLive, liveLayout,
+                      hPrepare, hStmt, hRest] at hCheck
+                    cases hCheck
+                    constructor
+                    · simp [StmtList.check?, restLive, stmtLive, liveLayout,
+                        hPrepare, hStmtSound.1, hRestSound.1]
+                    · constructor
+                      · simp
+                      · exact
+                          Nat.le_trans hRestSound.2.2 (by
+                            simp)
+
+  theorem CaseList.widthCheck?_sound {returns : List Name} {ctx : Ctx}
+      {layout after : List Name} {cases : List (Word × Block)}
+      {width : Nat}
+      (hCheck :
+        CaseList.widthCheck? returns ctx layout after cases = some width) :
+      CaseList.check? returns ctx layout after cases = true ∧
+        layout.length ≤ width := by
+    cases cases with
+    | nil =>
+        simp [CaseList.widthCheck?] at hCheck
+        cases hCheck
+        simp [CaseList.check?]
+    | cons head rest =>
+        rcases head with ⟨value, body⟩
+        cases hBody :
+            Block.widthCheck? returns ctx layout after body with
+        | none =>
+            simp [CaseList.widthCheck?, hBody] at hCheck
+        | some bodyResult =>
+            cases hRest :
+                CaseList.widthCheck? returns ctx layout after rest with
+            | none =>
+                simp [CaseList.widthCheck?, hBody, hRest] at hCheck
+            | some restWidth =>
+                have hBodySound := Block.widthCheck?_sound hBody
+                have hRestSound := CaseList.widthCheck?_sound hRest
+                simp [CaseList.widthCheck?, hBody, hRest] at hCheck
+                cases hCheck
+                constructor
+                · simp [CaseList.check?, hBodySound.1, hRestSound.1]
+                · simp
+
+  theorem Default.widthCheck?_sound {returns : List Name} {ctx : Ctx}
+      {layout after : List Name} {defaultBody : Option Block} {width : Nat}
+      (hCheck :
+        Default.widthCheck? returns ctx layout after defaultBody = some width) :
+      Default.check? returns ctx layout after defaultBody = true ∧
+        layout.length ≤ width := by
+    cases defaultBody with
+    | none =>
+        simp [Default.widthCheck?] at hCheck
+        cases hCheck
+        simp [Default.check?]
+    | some body =>
+        cases hBody :
+            Block.widthCheck? returns ctx layout after body with
+        | none =>
+            simp [Default.widthCheck?, hBody] at hCheck
+        | some bodyResult =>
+            have hBodySound := Block.widthCheck?_sound hBody
+            simp [Default.widthCheck?, hBody] at hCheck
+            cases hCheck
+            constructor
+            · simp [Default.check?, hBodySound.1]
+            · simp
+end
+
+theorem FunDef.maxLiveLayoutWidth?_check? {fn : FunDef} {width : Nat}
+    (hCheck : FunDef.maxLiveLayoutWidth? fn = some width) :
+    FunDef.check? fn = true := by
+  unfold FunDef.maxLiveLayoutWidth? at hCheck
+  cases hBlock :
+      Block.widthCheck? fn.returns { returns := fn.returns }
+        (fn.returns.reverse ++ fn.params.reverse) fn.returns fn.body with
+  | none =>
+      simp [hBlock] at hCheck
+  | some result =>
+      cases hNames : NamesAccess.names? 0 result.outLayout fn.returns with
+      | false =>
+          simp [hBlock, hNames] at hCheck
+      | true =>
+          have hSound := Block.widthCheck?_sound hBlock
+          simp [hBlock, hNames] at hCheck
+          cases hCheck
+          simp [FunDef.check?, hSound.1, hNames]
+
+theorem FunList.maxLiveLayoutWidth?_check? {functions : List FunDef}
+    {width : Nat}
+    (hCheck : FunList.maxLiveLayoutWidth? functions = some width) :
+    FunList.check? functions = true := by
+  induction functions generalizing width with
+  | nil =>
+      simp [FunList.maxLiveLayoutWidth?] at hCheck
+      simp [FunList.check?]
+  | cons fn rest ih =>
+      unfold FunList.maxLiveLayoutWidth? at hCheck
+      cases hHead : FunDef.maxLiveLayoutWidth? fn with
+      | none =>
+          simp [hHead] at hCheck
+      | some headWidth =>
+          cases hTail : FunList.maxLiveLayoutWidth? rest with
+          | none =>
+              simp [hHead, hTail] at hCheck
+          | some tailWidth =>
+              simp [hHead, hTail] at hCheck
+              cases hCheck
+              simp [FunList.check?, FunDef.maxLiveLayoutWidth?_check? hHead,
+                ih hTail]
+
+theorem Program.maxLiveLayoutWidth?_check? {program : Program} {width : Nat}
+    (hCheck : Program.maxLiveLayoutWidth? program = some width) :
+    Program.check? program = true := by
+  unfold Program.maxLiveLayoutWidth? at hCheck
+  cases hFunctions : FunList.maxLiveLayoutWidth? program.functions with
+  | none =>
+      simp [hFunctions] at hCheck
+  | some functionWidth =>
+      cases hBody : Block.widthCheck? [] {} [] [] program.body with
+      | none =>
+          simp [hFunctions, hBody] at hCheck
+      | some bodyResult =>
+          have hFunctionsSound :=
+            FunList.maxLiveLayoutWidth?_check? hFunctions
+          have hBodySound := Block.widthCheck?_sound hBody
+          simp [hFunctions, hBody] at hCheck
+          cases hCheck
+          simp [Program.check?, hFunctionsSound, hBodySound.1]
 
 mutual
   def Block.Sound (returns : List Name) (ctx : Ctx)
@@ -2126,6 +2618,700 @@ mutual
     | some body =>
         ∃ bodyLayout, Block.Sound returns ctx layout after body bodyLayout
 end
+
+mutual
+  def Block.LayoutsBoundedBy (returns : List Name) (ctx : Ctx)
+      (layout after : List Name) : Block → List Name → Nat → Prop
+    | ⟨stmts⟩, outLayout, width =>
+        StmtList.LayoutsBoundedBy returns ctx layout after stmts outLayout
+          width
+
+  def Stmt.LayoutsBoundedBy (returns : List Name) (ctx : Ctx)
+      (layout after : List Name) : Stmt → List Name → Nat → Prop
+    | .block body, outLayout, width =>
+        layout.length ≤ width ∧ outLayout.length ≤ width ∧
+          outLayout = layout ∧
+          ∃ bodyLayout,
+            Block.LayoutsBoundedBy returns (ctx.withProtectedLayout layout)
+              layout (scopedAfter layout after) body bodyLayout width
+    | .if_ _cond body, outLayout, width =>
+        layout.length ≤ width ∧ outLayout.length ≤ width ∧
+          outLayout = layout ∧
+          ∃ bodyLayout,
+            Block.LayoutsBoundedBy returns (ctx.withProtectedLayout layout)
+              layout (scopedAfter layout after) body bodyLayout width
+    | .switch _scrutinee cases defaultBody, outLayout, width =>
+        layout.length ≤ width ∧ outLayout.length ≤ width ∧
+          outLayout = layout ∧
+          CaseList.LayoutsBoundedBy returns (ctx.withProtectedLayout layout)
+            layout (scopedAfter layout after) cases width ∧
+          Default.LayoutsBoundedBy returns (ctx.withProtectedLayout layout)
+            layout (scopedAfter layout after) defaultBody width
+    | .for_ init cond post body, outLayout, width =>
+        let loopMentioned :=
+          NameSet.unions [Reads.expr cond, Reads.block post, Reads.block body,
+            after]
+        let postLive := Block.liveBefore ctx loopMentioned post
+        let bodyCtx := ctx.withLoop after postLive
+        let bodyLive := Block.liveBefore bodyCtx postLive body
+        let loopLive :=
+          NameSet.unions [Reads.expr cond, after, postLive, bodyLive]
+        let initAfter := NameSet.union loopLive layout
+        layout.length ≤ width ∧ outLayout.length ≤ width ∧
+          outLayout = layout ∧
+          ∃ loopLayout postLayout bodyLayout,
+            let postAfter := scopedAfter loopLayout loopMentioned
+            let bodyAfter := scopedAfter loopLayout postLive
+            let postCtx := ctx.withProtectedLayout loopLayout
+            let bodyLoopCtx :=
+              ctx.withLoop (scopedAfter loopLayout after) bodyAfter
+            let bodyCheckCtx :=
+              bodyLoopCtx.withProtectedLayout loopLayout
+            Block.LayoutsBoundedBy returns (ctx.withProtectedLayout layout)
+              layout initAfter init loopLayout width ∧
+            Block.LayoutsBoundedBy returns postCtx loopLayout postAfter post
+              postLayout width ∧
+            Block.LayoutsBoundedBy returns bodyCheckCtx loopLayout bodyAfter
+              body bodyLayout width
+    | stmt, outLayout, width =>
+        layout.length ≤ width ∧ outLayout.length ≤ width ∧
+          outLayout = Stmt.regularOutLayout layout stmt
+
+  def StmtList.LayoutsBoundedBy (returns : List Name) (ctx : Ctx)
+      (layout after : List Name) : List Stmt → List Name → Nat → Prop
+    | [], outLayout, width =>
+        layout.length ≤ width ∧ outLayout.length ≤ width ∧
+          outLayout = Layout.trimDeadPrefix layout after
+    | stmt :: rest, outLayout, width =>
+        let restLive := StmtList.liveBefore ctx after rest
+        let stmtLive := Stmt.liveBefore ctx restLive stmt
+        let liveLayout := Layout.trimDeadPrefix layout stmtLive
+        layout.length ≤ width ∧ liveLayout.length ≤ width ∧
+          ∃ prep preparedLayout nextLayout,
+            Prepare.forStmtAboveSuffix? ctx.protectedDepth returns liveLayout
+              stmtLive stmt =
+              some (prep, preparedLayout) ∧
+            preparedLayout.length ≤ width ∧
+            Stmt.LayoutsBoundedBy returns ctx preparedLayout restLive stmt
+              nextLayout width ∧
+            StmtList.LayoutsBoundedBy returns ctx nextLayout after rest
+              outLayout width
+
+  def CaseList.LayoutsBoundedBy (returns : List Name) (ctx : Ctx)
+      (layout after : List Name) : List (Word × Block) → Nat → Prop
+    | [], width => layout.length ≤ width
+    | (_value, body) :: rest, width =>
+        layout.length ≤ width ∧
+          (∃ bodyLayout,
+            Block.LayoutsBoundedBy returns ctx layout after body bodyLayout
+              width) ∧
+          CaseList.LayoutsBoundedBy returns ctx layout after rest width
+
+  def Default.LayoutsBoundedBy (returns : List Name) (ctx : Ctx)
+      (layout after : List Name) : Option Block → Nat → Prop
+    | none, width => layout.length ≤ width
+    | some body, width =>
+        layout.length ≤ width ∧
+          ∃ bodyLayout,
+            Block.LayoutsBoundedBy returns ctx layout after body bodyLayout
+              width
+  end
+
+theorem StmtList.layoutsBoundedBy_layout_length_le
+    {returns : List Name} {ctx : Ctx} {layout after : List Name}
+    {stmts : List Stmt} {outLayout : List Name} {width : Nat}
+    (hBound :
+      StmtList.LayoutsBoundedBy returns ctx layout after stmts outLayout
+        width) :
+    layout.length ≤ width := by
+  cases stmts <;>
+    simpa [StmtList.LayoutsBoundedBy] using hBound.1
+
+theorem Block.layoutsBoundedBy_layout_length_le
+    {returns : List Name} {ctx : Ctx} {layout after : List Name}
+    {block : Block} {outLayout : List Name} {width : Nat}
+    (hBound :
+      Block.LayoutsBoundedBy returns ctx layout after block outLayout
+        width) :
+    layout.length ≤ width := by
+  cases block with
+  | mk stmts =>
+      exact
+        StmtList.layoutsBoundedBy_layout_length_le
+          (stmts := stmts) hBound
+
+theorem Stmt.layoutsBoundedBy_layout_length_le
+    {returns : List Name} {ctx : Ctx} {layout after : List Name}
+    {stmt : Stmt} {outLayout : List Name} {width : Nat}
+    (hBound :
+      Stmt.LayoutsBoundedBy returns ctx layout after stmt outLayout width) :
+    layout.length ≤ width := by
+  cases stmt <;>
+    simp [Stmt.LayoutsBoundedBy] at hBound ⊢ <;>
+    exact hBound.1
+
+theorem CaseList.layoutsBoundedBy_layout_length_le
+    {returns : List Name} {ctx : Ctx} {layout after : List Name}
+    {cases : List (Word × Block)} {width : Nat}
+    (hBound : CaseList.LayoutsBoundedBy returns ctx layout after cases width) :
+    layout.length ≤ width := by
+  cases cases with
+  | nil =>
+      simpa [CaseList.LayoutsBoundedBy] using hBound
+  | cons head rest =>
+      simpa [CaseList.LayoutsBoundedBy] using hBound.1
+
+theorem Default.layoutsBoundedBy_layout_length_le
+    {returns : List Name} {ctx : Ctx} {layout after : List Name}
+    {defaultBody : Option Block} {width : Nat}
+    (hBound :
+      Default.LayoutsBoundedBy returns ctx layout after defaultBody width) :
+    layout.length ≤ width := by
+  cases defaultBody with
+  | none =>
+      simpa [Default.LayoutsBoundedBy] using hBound
+  | some body =>
+      simpa [Default.LayoutsBoundedBy] using hBound.1
+
+  mutual
+    def Block.syntaxSize : Block → Nat
+      | ⟨stmts⟩ => StmtList.syntaxSize stmts + 1
+
+    def Stmt.syntaxSize : Stmt → Nat
+      | .block body => Block.syntaxSize body + 1
+      | .if_ _cond body => Block.syntaxSize body + 1
+      | .switch _scrutinee cases defaultBody =>
+          CaseList.syntaxSize cases + Default.syntaxSize defaultBody + 1
+      | .for_ init _cond post body =>
+          Block.syntaxSize init + Block.syntaxSize post +
+            Block.syntaxSize body + 1
+      | _stmt => 1
+
+    def StmtList.syntaxSize : List Stmt → Nat
+      | [] => 0
+      | stmt :: rest => Stmt.syntaxSize stmt + StmtList.syntaxSize rest + 1
+
+    def CaseList.syntaxSize : List (Word × Block) → Nat
+      | [] => 0
+      | (_value, body) :: rest =>
+          Block.syntaxSize body + CaseList.syntaxSize rest + 1
+
+    def Default.syntaxSize : Option Block → Nat
+      | none => 0
+      | some body => Block.syntaxSize body + 1
+  end
+
+  set_option maxHeartbeats 800000
+  mutual
+  theorem Block.widthCheck?_layoutsBoundedBy {returns : List Name} :
+      ∀ {ctx : Ctx} {layout after : List Name} {block : Block}
+        {result : LayoutWidthCheckResult} {width : Nat},
+        Block.widthCheck? returns ctx layout after block = some result →
+        result.maxWidth ≤ width →
+        Block.LayoutsBoundedBy returns ctx layout after block result.outLayout
+          width
+    | ctx, layout, after, ⟨stmts⟩, result, width, hCheck, hWidth =>
+        StmtList.widthCheck?_layoutsBoundedBy hCheck hWidth
+    termination_by ctx layout after block result width hCheck hWidth =>
+      Block.syntaxSize block
+    decreasing_by
+      all_goals simp_wf
+      all_goals try simp [Block.syntaxSize, Stmt.syntaxSize,
+        StmtList.syntaxSize, CaseList.syntaxSize, Default.syntaxSize]
+      all_goals omega
+
+    theorem Stmt.widthCheck?_layoutsBoundedBy {returns : List Name} :
+      ∀ {ctx : Ctx} {layout after : List Name} {stmt : Stmt}
+        {result : LayoutWidthCheckResult} {width : Nat},
+        Stmt.widthCheck? returns ctx layout after stmt = some result →
+        result.maxWidth ≤ width →
+        Stmt.LayoutsBoundedBy returns ctx layout after stmt result.outLayout
+          width
+    | ctx, layout, after, .block body, result, width, hCheck, hWidth => by
+        let bodyCtx := ctx.withProtectedLayout layout
+        cases hBody :
+            Block.widthCheck? returns bodyCtx layout
+              (scopedAfter layout after) body with
+        | none =>
+            simp [Stmt.widthCheck?, bodyCtx, hBody] at hCheck
+        | some bodyResult =>
+            simp [Stmt.widthCheck?, bodyCtx, hBody] at hCheck
+            cases hCheck
+            have hLayout : layout.length ≤ width :=
+              Nat.le_trans (Nat.le_max_left _ _) hWidth
+            have hBodyWidth : bodyResult.maxWidth ≤ width :=
+              Nat.le_trans (Nat.le_max_right _ _) hWidth
+            exact
+              ⟨hLayout, hLayout, rfl,
+                ⟨bodyResult.outLayout,
+                  Block.widthCheck?_layoutsBoundedBy hBody hBodyWidth⟩⟩
+    | ctx, layout, after, .if_ cond body, result, width, hCheck, hWidth => by
+        let bodyCtx := ctx.withProtectedLayout layout
+        cases hBody :
+            Block.widthCheck? returns bodyCtx layout
+              (scopedAfter layout after) body with
+        | none =>
+            simp [Stmt.widthCheck?, bodyCtx, hBody] at hCheck
+        | some bodyResult =>
+            simp [Stmt.widthCheck?, bodyCtx, hBody] at hCheck
+            cases hCheck
+            have hLayout : layout.length ≤ width :=
+              Nat.le_trans (Nat.le_max_left _ _) hWidth
+            have hBodyWidth : bodyResult.maxWidth ≤ width :=
+              Nat.le_trans (Nat.le_max_right _ _) hWidth
+            exact
+              ⟨hLayout, hLayout, rfl,
+                ⟨bodyResult.outLayout,
+                  Block.widthCheck?_layoutsBoundedBy hBody hBodyWidth⟩⟩
+    | ctx, layout, after, .switch scrutinee cases defaultBody, result, width,
+        hCheck, hWidth => by
+        let branchCtx := ctx.withProtectedLayout layout
+        cases hCases :
+            CaseList.widthCheck? returns branchCtx layout
+              (scopedAfter layout after) cases with
+        | none =>
+            simp [Stmt.widthCheck?, branchCtx, hCases] at hCheck
+        | some caseWidth =>
+            cases hDefault :
+                Default.widthCheck? returns branchCtx layout
+                  (scopedAfter layout after) defaultBody with
+            | none =>
+                simp [Stmt.widthCheck?, branchCtx, hCases, hDefault] at hCheck
+            | some defaultWidth =>
+                simp [Stmt.widthCheck?, branchCtx, hCases, hDefault] at hCheck
+                cases hCheck
+                have hLayout : layout.length ≤ width :=
+                  Nat.le_trans (Nat.le_max_left _ _) hWidth
+                have hCaseWidth : caseWidth ≤ width :=
+                  Nat.le_trans
+                    (Nat.le_trans (Nat.le_max_left _ _)
+                      (Nat.le_max_right layout.length
+                        (max caseWidth defaultWidth)))
+                    hWidth
+                have hDefaultWidth : defaultWidth ≤ width :=
+                  Nat.le_trans
+                    (Nat.le_trans (Nat.le_max_right _ _)
+                      (Nat.le_max_right layout.length
+                        (max caseWidth defaultWidth)))
+                    hWidth
+                exact
+                  ⟨hLayout, hLayout, rfl,
+                    CaseList.widthCheck?_layoutsBoundedBy hCases hCaseWidth,
+                    Default.widthCheck?_layoutsBoundedBy hDefault
+                      hDefaultWidth⟩
+    | ctx, layout, after, .for_ init cond post body, result, width, hCheck,
+        hWidth => by
+        let loopMentioned :=
+          NameSet.unions [Reads.expr cond, Reads.block post, Reads.block body,
+            after]
+        let postLive := Block.liveBefore ctx loopMentioned post
+        let bodyCtx := ctx.withLoop after postLive
+        let bodyLive := Block.liveBefore bodyCtx postLive body
+        let loopLive :=
+          NameSet.unions [Reads.expr cond, after, postLive, bodyLive]
+        let initAfter := NameSet.union loopLive layout
+        let initCtx := ctx.withProtectedLayout layout
+        cases hInit :
+            Block.widthCheck? returns initCtx layout initAfter init with
+        | none =>
+            simp [Stmt.widthCheck?, loopMentioned, postLive, bodyCtx,
+              bodyLive, loopLive, initAfter, initCtx, hInit] at hCheck
+        | some initResult =>
+            cases hCond : ExprAccess.expr? 0 initResult.outLayout cond with
+            | false =>
+                simp [Stmt.widthCheck?, loopMentioned, postLive, bodyCtx,
+                  bodyLive, loopLive, initAfter, initCtx, hInit, hCond]
+                  at hCheck
+            | true =>
+                let postAfter := scopedAfter initResult.outLayout loopMentioned
+                let bodyAfter := scopedAfter initResult.outLayout postLive
+                let postCtx := ctx.withProtectedLayout initResult.outLayout
+                let bodyLoopCtx :=
+                  ctx.withLoop (scopedAfter initResult.outLayout after)
+                    bodyAfter
+                let bodyCheckCtx :=
+                  bodyLoopCtx.withProtectedLayout initResult.outLayout
+                cases hPost :
+                    Block.widthCheck? returns postCtx initResult.outLayout
+                      postAfter post with
+                | none =>
+                    simp [Stmt.widthCheck?, loopMentioned, postLive, bodyCtx,
+                      bodyLive, loopLive, initAfter, postAfter, bodyAfter,
+                      initCtx, postCtx, bodyLoopCtx, bodyCheckCtx, hInit,
+                      hCond, hPost] at hCheck
+                | some postResult =>
+                    cases hBody :
+                        Block.widthCheck? returns bodyCheckCtx
+                          initResult.outLayout bodyAfter body with
+                    | none =>
+                        simp [Stmt.widthCheck?, loopMentioned, postLive,
+                          bodyCtx, bodyLive, loopLive, initAfter, postAfter,
+                          bodyAfter, initCtx, postCtx, bodyLoopCtx,
+                          bodyCheckCtx, hInit, hCond, hPost, hBody] at hCheck
+                    | some bodyResult =>
+                        simp [Stmt.widthCheck?, loopMentioned, postLive,
+                          bodyCtx, bodyLive, loopLive, initAfter, postAfter,
+                          bodyAfter, initCtx, postCtx, bodyLoopCtx,
+                          bodyCheckCtx, hInit, hCond, hPost, hBody] at hCheck
+                        cases hCheck
+                        have hLayout : layout.length ≤ width :=
+                          Nat.le_trans (Nat.le_max_left _ _) hWidth
+                        have hInitWidth : initResult.maxWidth ≤ width :=
+                          Nat.le_trans
+                            (Nat.le_trans (Nat.le_max_left _ _)
+                              (Nat.le_max_right layout.length
+                                (max initResult.maxWidth
+                                  (max postResult.maxWidth
+                                    bodyResult.maxWidth))))
+                            hWidth
+                        have hPostWidth : postResult.maxWidth ≤ width :=
+                          Nat.le_trans
+                            (Nat.le_trans
+                              (Nat.le_trans (Nat.le_max_left _ _)
+                                (Nat.le_max_right initResult.maxWidth
+                                  (max postResult.maxWidth
+                                    bodyResult.maxWidth)))
+                              (Nat.le_max_right layout.length
+                                (max initResult.maxWidth
+                                  (max postResult.maxWidth
+                                    bodyResult.maxWidth))))
+                            hWidth
+                        have hBodyWidth : bodyResult.maxWidth ≤ width :=
+                          Nat.le_trans
+                            (Nat.le_trans
+                              (Nat.le_trans (Nat.le_max_right _ _)
+                                (Nat.le_max_right initResult.maxWidth
+                                  (max postResult.maxWidth
+                                    bodyResult.maxWidth)))
+                              (Nat.le_max_right layout.length
+                                (max initResult.maxWidth
+                                  (max postResult.maxWidth
+                                    bodyResult.maxWidth))))
+                            hWidth
+                        exact
+                          ⟨hLayout, hLayout, rfl, initResult.outLayout,
+                            postResult.outLayout, bodyResult.outLayout,
+                            Block.widthCheck?_layoutsBoundedBy hInit
+                              hInitWidth,
+                            Block.widthCheck?_layoutsBoundedBy hPost
+                              hPostWidth,
+                            Block.widthCheck?_layoutsBoundedBy hBody
+                              hBodyWidth⟩
+    | ctx, layout, after, .expr expr, result, width, hCheck, hWidth => by
+        simp [Stmt.widthCheck?, Stmt.LayoutsBoundedBy,
+          Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        exact
+          ⟨by simpa using hWidth, by simpa using hWidth, rfl⟩
+    | ctx, layout, after, .let_ name value, result, width, hCheck, hWidth => by
+        simp [Stmt.widthCheck?, Stmt.LayoutsBoundedBy,
+          Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        have hOut : (name :: layout).length ≤ width := by
+          simpa using hWidth
+        have hIn : layout.length ≤ width :=
+          Nat.le_trans (Nat.le_succ layout.length) hOut
+        exact ⟨hIn, hOut, rfl⟩
+    | ctx, layout, after, .assign name value, result, width, hCheck,
+        hWidth => by
+        simp [Stmt.widthCheck?, Stmt.LayoutsBoundedBy,
+          Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        exact
+          ⟨by simpa using hWidth, by simpa using hWidth, rfl⟩
+    | ctx, layout, after, .brk, result, width, hCheck, hWidth => by
+        simp [Stmt.widthCheck?, Stmt.LayoutsBoundedBy,
+          Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        exact
+          ⟨by simpa using hWidth, by simpa using hWidth, rfl⟩
+    | ctx, layout, after, .cont, result, width, hCheck, hWidth => by
+        simp [Stmt.widthCheck?, Stmt.LayoutsBoundedBy,
+          Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        exact
+          ⟨by simpa using hWidth, by simpa using hWidth, rfl⟩
+    | ctx, layout, after, .leave, result, width, hCheck, hWidth => by
+        simp [Stmt.widthCheck?, Stmt.LayoutsBoundedBy,
+          Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        exact
+          ⟨by simpa using hWidth, by simpa using hWidth, rfl⟩
+    | ctx, layout, after, .call targets functionName args, result, width,
+        hCheck, hWidth => by
+        simp [Stmt.widthCheck?, Stmt.LayoutsBoundedBy,
+          Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        exact
+          ⟨by simpa using hWidth, by simpa using hWidth, rfl⟩
+    | ctx, layout, after, .terminal kind, result, width, hCheck, hWidth => by
+        simp [Stmt.widthCheck?, Stmt.LayoutsBoundedBy,
+          Stmt.regularOutLayout] at hCheck
+        cases hCheck
+        exact
+          ⟨by simpa using hWidth, by simpa using hWidth, rfl⟩
+    | ctx, layout, after, .terminalArgs kind args, result, width, hCheck,
+        hWidth => by
+          simp [Stmt.widthCheck?, Stmt.LayoutsBoundedBy,
+            Stmt.regularOutLayout] at hCheck
+          cases hCheck
+          exact
+            ⟨by simpa using hWidth, by simpa using hWidth, rfl⟩
+    termination_by ctx layout after stmt result width hCheck hWidth =>
+      Stmt.syntaxSize stmt
+    decreasing_by
+      all_goals simp_wf
+      all_goals try simp [Block.syntaxSize, Stmt.syntaxSize,
+        StmtList.syntaxSize, CaseList.syntaxSize, Default.syntaxSize]
+      all_goals omega
+
+    theorem StmtList.widthCheck?_layoutsBoundedBy {returns : List Name} :
+      ∀ {ctx : Ctx} {layout after : List Name} {stmts : List Stmt}
+        {result : LayoutWidthCheckResult} {width : Nat},
+        StmtList.widthCheck? returns ctx layout after stmts = some result →
+        result.maxWidth ≤ width →
+        StmtList.LayoutsBoundedBy returns ctx layout after stmts
+          result.outLayout width
+    | ctx, layout, after, [], result, width, hCheck, hWidth => by
+        cases hEntry : Layout.entryWindowOk? layout after with
+        | false =>
+            simp [StmtList.widthCheck?, hEntry] at hCheck
+        | true =>
+            simp [StmtList.widthCheck?, hEntry] at hCheck
+            cases hCheck
+            exact
+              ⟨Nat.le_trans (Nat.le_max_left _ _) hWidth,
+                Nat.le_trans (Nat.le_max_right _ _) hWidth, rfl⟩
+    | ctx, layout, after, stmt :: rest, result, width, hCheck, hWidth => by
+        let restLive := StmtList.liveBefore ctx after rest
+        let stmtLive := Stmt.liveBefore ctx restLive stmt
+        let liveLayout := Layout.trimDeadPrefix layout stmtLive
+        cases hPrepare :
+            Prepare.forStmtAboveSuffix? ctx.protectedDepth returns liveLayout
+              stmtLive stmt with
+        | none =>
+            simp [StmtList.widthCheck?, restLive, stmtLive, liveLayout,
+              hPrepare] at hCheck
+        | some prepareResult =>
+            rcases prepareResult with ⟨prep, preparedLayout⟩
+            cases hStmt :
+                Stmt.widthCheck? returns ctx preparedLayout restLive stmt with
+            | none =>
+                simp [StmtList.widthCheck?, restLive, stmtLive, liveLayout,
+                  hPrepare, hStmt] at hCheck
+            | some stmtResult =>
+                cases hRest :
+                    StmtList.widthCheck? returns ctx stmtResult.outLayout after
+                      rest with
+                | none =>
+                    simp [StmtList.widthCheck?, restLive, stmtLive, liveLayout,
+                      hPrepare, hStmt, hRest] at hCheck
+                | some restResult =>
+                    simp [StmtList.widthCheck?, restLive, stmtLive, liveLayout,
+                      hPrepare, hStmt, hRest] at hCheck
+                    cases hCheck
+                    have hLayout : layout.length ≤ width :=
+                      Nat.le_trans (Nat.le_max_left _ _) hWidth
+                    have hLive : liveLayout.length ≤ width :=
+                      Nat.le_trans
+                        (Nat.le_trans (Nat.le_max_left _ _)
+                          (Nat.le_max_right layout.length
+                            (max liveLayout.length
+                              (max preparedLayout.length
+                                (max stmtResult.maxWidth
+                                  restResult.maxWidth)))))
+                        hWidth
+                    have hPrepared : preparedLayout.length ≤ width :=
+                      Nat.le_trans
+                        (Nat.le_trans
+                          (Nat.le_trans (Nat.le_max_left _ _)
+                            (Nat.le_max_right liveLayout.length
+                              (max preparedLayout.length
+                                (max stmtResult.maxWidth
+                                  restResult.maxWidth))))
+                          (Nat.le_max_right layout.length
+                            (max liveLayout.length
+                              (max preparedLayout.length
+                                (max stmtResult.maxWidth
+                                  restResult.maxWidth)))))
+                        hWidth
+                    have hStmtWidth : stmtResult.maxWidth ≤ width :=
+                      Nat.le_trans
+                        (Nat.le_trans
+                          (Nat.le_trans
+                            (Nat.le_trans (Nat.le_max_left _ _)
+                              (Nat.le_max_right preparedLayout.length
+                                (max stmtResult.maxWidth
+                                  restResult.maxWidth)))
+                            (Nat.le_max_right liveLayout.length
+                              (max preparedLayout.length
+                                (max stmtResult.maxWidth
+                                  restResult.maxWidth))))
+                          (Nat.le_max_right layout.length
+                            (max liveLayout.length
+                              (max preparedLayout.length
+                                (max stmtResult.maxWidth
+                                  restResult.maxWidth)))))
+                        hWidth
+                    have hRestWidth : restResult.maxWidth ≤ width :=
+                      Nat.le_trans
+                        (Nat.le_trans
+                          (Nat.le_trans
+                            (Nat.le_trans (Nat.le_max_right _ _)
+                              (Nat.le_max_right preparedLayout.length
+                                (max stmtResult.maxWidth
+                                  restResult.maxWidth)))
+                            (Nat.le_max_right liveLayout.length
+                              (max preparedLayout.length
+                                (max stmtResult.maxWidth
+                                  restResult.maxWidth))))
+                          (Nat.le_max_right layout.length
+                            (max liveLayout.length
+                              (max preparedLayout.length
+                                (max stmtResult.maxWidth
+                                  restResult.maxWidth)))))
+                        hWidth
+                    exact
+                      ⟨hLayout, hLive, prep, preparedLayout,
+                        stmtResult.outLayout, hPrepare, hPrepared,
+                        Stmt.widthCheck?_layoutsBoundedBy hStmt hStmtWidth,
+                          StmtList.widthCheck?_layoutsBoundedBy
+                            (returns := returns) (ctx := ctx)
+                            (layout := stmtResult.outLayout)
+                            (after := after) (stmts := rest)
+                            (result := restResult) (width := width)
+                            hRest hRestWidth⟩
+    termination_by ctx layout after stmts result width hCheck hWidth =>
+      StmtList.syntaxSize stmts
+    decreasing_by
+      all_goals simp_wf
+      all_goals try simp [Block.syntaxSize, Stmt.syntaxSize,
+        StmtList.syntaxSize, CaseList.syntaxSize, Default.syntaxSize]
+      all_goals omega
+
+    theorem CaseList.widthCheck?_layoutsBoundedBy {returns : List Name} :
+      ∀ {ctx : Ctx} {layout after : List Name}
+        {cases : List (Word × Block)} {checkedWidth width : Nat},
+        CaseList.widthCheck? returns ctx layout after cases =
+          some checkedWidth →
+        checkedWidth ≤ width →
+        CaseList.LayoutsBoundedBy returns ctx layout after cases width
+    | ctx, layout, after, [], checkedWidth, width, hCheck, hWidth => by
+        simp [CaseList.widthCheck?] at hCheck
+        cases hCheck
+        exact hWidth
+    | ctx, layout, after, (value, body) :: rest, checkedWidth, width, hCheck,
+        hWidth => by
+        cases hBody :
+            Block.widthCheck? returns ctx layout after body with
+        | none =>
+            simp [CaseList.widthCheck?, hBody] at hCheck
+        | some bodyResult =>
+            cases hRest :
+                CaseList.widthCheck? returns ctx layout after rest with
+            | none =>
+                simp [CaseList.widthCheck?, hBody, hRest] at hCheck
+              | some restWidth =>
+                  simp [CaseList.widthCheck?, hBody, hRest] at hCheck
+                  cases hCheck
+                  have hLayout : layout.length ≤ width :=
+                    Nat.le_trans (Nat.le_max_left _ _) hWidth
+                  have hBodyWidth : bodyResult.maxWidth ≤ width := by
+                    exact
+                      Nat.le_trans
+                        (Nat.le_trans (Nat.le_max_left _ _)
+                          (Nat.le_max_right layout.length
+                            (max bodyResult.maxWidth restWidth)))
+                        hWidth
+                  have hRestWidth : restWidth ≤ width := by
+                    exact
+                      Nat.le_trans
+                        (Nat.le_trans (Nat.le_max_right _ _)
+                          (Nat.le_max_right layout.length
+                            (max bodyResult.maxWidth restWidth)))
+                        hWidth
+                  exact
+                    ⟨hLayout,
+                      ⟨bodyResult.outLayout,
+                        Block.widthCheck?_layoutsBoundedBy hBody hBodyWidth⟩,
+                      CaseList.widthCheck?_layoutsBoundedBy hRest hRestWidth⟩
+    termination_by ctx layout after cases checkedWidth width hCheck hWidth =>
+      CaseList.syntaxSize cases
+    decreasing_by
+      all_goals simp_wf
+      all_goals try simp [Block.syntaxSize, Stmt.syntaxSize,
+        StmtList.syntaxSize, CaseList.syntaxSize, Default.syntaxSize]
+      all_goals omega
+
+    theorem Default.widthCheck?_layoutsBoundedBy {returns : List Name} :
+      ∀ {ctx : Ctx} {layout after : List Name} {defaultBody : Option Block}
+        {checkedWidth width : Nat},
+        Default.widthCheck? returns ctx layout after defaultBody =
+          some checkedWidth →
+        checkedWidth ≤ width →
+        Default.LayoutsBoundedBy returns ctx layout after defaultBody width
+    | ctx, layout, after, none, checkedWidth, width, hCheck, hWidth => by
+        simp [Default.widthCheck?] at hCheck
+        cases hCheck
+        exact hWidth
+    | ctx, layout, after, some body, checkedWidth, width, hCheck, hWidth => by
+          cases hBody :
+              Block.widthCheck? returns ctx layout after body with
+          | none =>
+              simp [Default.widthCheck?, hBody] at hCheck
+          | some bodyResult =>
+              simp [Default.widthCheck?, hBody] at hCheck
+              cases hCheck
+              have hLayout : layout.length ≤ width :=
+                Nat.le_trans (Nat.le_max_left _ _) hWidth
+              have hBodyWidth : bodyResult.maxWidth ≤ width :=
+                Nat.le_trans (Nat.le_max_right _ _) hWidth
+              exact
+                ⟨hLayout, bodyResult.outLayout,
+                  Block.widthCheck?_layoutsBoundedBy hBody hBodyWidth⟩
+    termination_by ctx layout after defaultBody checkedWidth width hCheck hWidth =>
+      Default.syntaxSize defaultBody
+    decreasing_by
+      all_goals simp_wf
+      all_goals try simp [Block.syntaxSize, Stmt.syntaxSize,
+        StmtList.syntaxSize, CaseList.syntaxSize, Default.syntaxSize]
+      all_goals omega
+  end
+
+theorem Block.widthCheck?_layoutsBoundedBy_self {returns : List Name}
+    {ctx : Ctx} {layout after : List Name} {block : Block}
+    {result : LayoutWidthCheckResult}
+    (hCheck :
+      Block.widthCheck? returns ctx layout after block = some result) :
+    Block.LayoutsBoundedBy returns ctx layout after block result.outLayout
+      result.maxWidth :=
+  Block.widthCheck?_layoutsBoundedBy hCheck (Nat.le_refl _)
+
+theorem Program.maxLiveLayoutWidth?_body_layoutsBoundedBy
+    {program : Program} {width : Nat}
+    (hCheck : Program.maxLiveLayoutWidth? program = some width) :
+    ∃ bodyResult functionWidth,
+      FunList.maxLiveLayoutWidth? program.functions = some functionWidth ∧
+        Block.widthCheck? [] {} [] [] program.body = some bodyResult ∧
+        bodyResult.maxWidth ≤ width ∧
+        Block.LayoutsBoundedBy [] {} [] [] program.body bodyResult.outLayout
+          width := by
+  unfold Program.maxLiveLayoutWidth? at hCheck
+  cases hFunctions : FunList.maxLiveLayoutWidth? program.functions with
+  | none =>
+      simp [hFunctions] at hCheck
+  | some functionWidth =>
+      cases hBody : Block.widthCheck? [] {} [] [] program.body with
+      | none =>
+          simp [hFunctions, hBody] at hCheck
+      | some bodyResult =>
+          simp [hFunctions, hBody] at hCheck
+          cases hCheck
+          have hBodyWidth : bodyResult.maxWidth ≤ max functionWidth bodyResult.maxWidth :=
+            Nat.le_max_right functionWidth bodyResult.maxWidth
+          exact
+            ⟨bodyResult, functionWidth, rfl, rfl, hBodyWidth,
+              Block.widthCheck?_layoutsBoundedBy hBody hBodyWidth⟩
 
 mutual
   theorem Block.check?_sound {returns : List Name} {ctx : Ctx}

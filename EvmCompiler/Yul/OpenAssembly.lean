@@ -17,6 +17,8 @@ namespace EvmCompiler
 namespace Yul
 namespace OpenAssembly
 
+attribute [local simp] OpenExternal.OpenResult.bind_call
+
 abbrev EVMState := EvmYul.EVM.State
 abbrev EVMException := EvmYul.EVM.ExecutionException
 
@@ -61,7 +63,7 @@ def openStep (op : Assembly.PrimOp) (state : EVMState) :
   | some kind =>
       match OpenExternal.CallKind.evmOpenCall? state kind with
       | some call => evmCallResult call
-      | none => .done (op.step state)
+      | none => .done (.error EvmYul.EVM.ExecutionException.StackUnderflow)
   | none => .done (op.step state)
 
 theorem openStep_of_not_callKind
@@ -84,7 +86,8 @@ theorem openStep_of_callKind_no_call
     {kind : OpenExternal.CallKind}
     (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind)
     (hCall : OpenExternal.CallKind.evmOpenCall? state kind = none) :
-    openStep op state = .done (op.step state) := by
+    openStep op state =
+      .done (.error EvmYul.EVM.ExecutionException.StackUnderflow) := by
   simp [openStep, hKind, hCall]
 
 theorem openStep_resolves_closed_of_not_callKind
@@ -95,14 +98,14 @@ theorem openStep_resolves_closed_of_not_callKind
   rw [openStep_of_not_callKind hKind, hStep]
   exact OpenExternal.OpenResultResolves.done
 
-theorem openStep_resolves_closed_of_callKind_no_call
-    {op : Assembly.PrimOp} {state state' : EVMState}
+theorem openStep_resolves_error_of_callKind_no_call
+    {op : Assembly.PrimOp} {state : EVMState}
     {kind : OpenExternal.CallKind}
     (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind)
-    (hCall : OpenExternal.CallKind.evmOpenCall? state kind = none)
-    (hStep : op.step state = .ok state') :
-    OpenExternal.OpenResultResolves (openStep op state) [] (.ok state') := by
-  rw [openStep_of_callKind_no_call hKind hCall, hStep]
+    (hCall : OpenExternal.CallKind.evmOpenCall? state kind = none) :
+    OpenExternal.OpenResultResolves (openStep op state) []
+      (.error EvmYul.EVM.ExecutionException.StackUnderflow) := by
+  rw [openStep_of_callKind_no_call hKind hCall]
   exact OpenExternal.OpenResultResolves.done
 
 theorem openStep_resolves_call
@@ -173,7 +176,7 @@ def openStepInstr (instr : Assembly.TargetInstr) (state : EVMState) :
       | some kind =>
           match OpenExternal.CallKind.evmOpenCall? state kind with
           | some call => evmInstructionCallResult call
-          | none => .done (Assembly.Target.stepInstr instr state)
+          | none => .done (.error EvmYul.EVM.ExecutionException.StackUnderflow)
       | none => .done (Assembly.Target.stepInstr instr state)
   | _ => .done (Assembly.Target.stepInstr instr state)
 
@@ -197,7 +200,7 @@ theorem openStepInstr_of_prim_callKind_no_call
     (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind)
     (hCall : OpenExternal.CallKind.evmOpenCall? state kind = none) :
     openStepInstr (.prim op) state =
-      .done (Assembly.Target.stepInstr (.prim op) state) := by
+      .done (.error EvmYul.EVM.ExecutionException.StackUnderflow) := by
   simp [openStepInstr, hKind, hCall]
 
 theorem openStepInstr_of_prim_call
@@ -218,15 +221,15 @@ theorem openStepInstr_resolves_closed_of_prim_not_callKind
   rw [openStepInstr_of_prim_not_callKind hKind, hStep]
   exact OpenExternal.OpenResultResolves.done
 
-theorem openStepInstr_resolves_closed_of_prim_callKind_no_call
-    {op : Assembly.PrimOp} {state state' : EVMState}
+theorem openStepInstr_resolves_error_of_prim_callKind_no_call
+    {op : Assembly.PrimOp} {state : EVMState}
     {kind : OpenExternal.CallKind}
     (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind)
-    (hCall : OpenExternal.CallKind.evmOpenCall? state kind = none)
-    (hStep : Assembly.Target.stepInstr (.prim op) state = .ok state') :
+    (hCall : OpenExternal.CallKind.evmOpenCall? state kind = none) :
     OpenExternal.OpenResultResolves
-      (openStepInstr (.prim op) state) [] (.ok state') := by
-  rw [openStepInstr_of_prim_callKind_no_call hKind hCall, hStep]
+      (openStepInstr (.prim op) state) []
+      (.error EvmYul.EVM.ExecutionException.StackUnderflow) := by
+  rw [openStepInstr_of_prim_callKind_no_call hKind hCall]
   exact OpenExternal.OpenResultResolves.done
 
 theorem openStepInstr_resolves_prim_call
@@ -311,7 +314,7 @@ theorem openStepInstrResult_resolves_closed_of_openStepInstr_done
             simpa [stepResultAfter, hKind] using hStep
         | some kind =>
             simpa [stepResultAfter, hKind] using hStep
-      simpa [OpenExternal.OpenResult.bind, hResult] using
+      simpa [hResult] using
         (OpenExternal.OpenResultResolves.done :
           OpenExternal.OpenResultResolves
             ((.done (.ok result)) :
@@ -328,6 +331,42 @@ theorem openStepInstrResult_resolves_closed_of_no_callCreate
   exact
     openStepInstrResult_resolves_closed_of_openStepInstr_done
       (openStepInstr_of_no_callCreate hNo) hStep
+
+theorem openStepInstrResult_resolves_closed_inv_of_no_callCreate
+    {instr : Assembly.TargetInstr} {state : EVMState}
+    {trace : OpenExternal.OpenTrace} {result : Assembly.StepResult}
+    (hNo : instrUsesCallCreate instr = false)
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (openStepInstrResult instr state) trace (.ok result)) :
+    trace = [] ∧
+      Assembly.Target.stepInstrResult instr state = .ok result := by
+  have hOpen := openStepInstr_of_no_callCreate (state := state) hNo
+  unfold openStepInstrResult at hResolve
+  rw [hOpen] at hResolve
+  cases hStep : Assembly.Target.stepInstr instr state with
+  | error err =>
+      rw [hStep] at hResolve
+      change
+        OpenExternal.OpenResultResolves
+          ((.done (.error err)) :
+            OpenExternal.OpenResult EVMException Assembly.StepResult)
+          trace (.ok result) at hResolve
+      cases hResolve
+  | ok state' =>
+      rw [hStep] at hResolve
+      change
+        OpenExternal.OpenResultResolves
+          ((.done (.ok (stepResultAfter instr state'))) :
+            OpenExternal.OpenResult EVMException Assembly.StepResult)
+          trace (.ok result) at hResolve
+      cases hResolve
+      exact
+        ⟨rfl,
+          by
+            unfold Assembly.Target.stepInstrResult stepResultAfter
+            rw [hStep]
+            cases instr.haltKind? <;> rfl⟩
 
 theorem openStepInstrResult_resolves_prim_call
     {op : Assembly.PrimOp} {state : EVMState}
@@ -346,7 +385,7 @@ theorem openStepInstrResult_resolves_prim_call
     simpa [Assembly.TargetInstr.haltKind?] using
       prim_haltKind?_none_of_callKind hKind
   refine OpenExternal.OpenResultResolves.call ?_
-  simpa [OpenExternal.OpenResult.bind, stepResultAfter, hHalt] using
+  simpa [stepResultAfter, hHalt] using
     (OpenExternal.OpenResultResolves.done :
       OpenExternal.OpenResultResolves
         (.done
@@ -449,6 +488,68 @@ theorem openRunListResult_resolves_closed_of_no_callCreate
     openRunListResult_resolves_closed_of_forall_no_callCreate
       (all_false_of_codeUsesCallCreate_false hCode) hRun
 
+theorem openRunListResult_resolves_closed_inv_of_forall_no_callCreate :
+    ∀ {code : List Assembly.TargetInstr} {state : EVMState}
+      {trace : OpenExternal.OpenTrace} {result : Assembly.StepResult},
+      (∀ instr ∈ code, instrUsesCallCreate instr = false) →
+      OpenExternal.OpenResultResolves (openRunListResult code state)
+        trace (.ok result) →
+      trace = [] ∧ Assembly.Target.runListResult code state = .ok result := by
+  intro code
+  induction code with
+  | nil =>
+      intro state trace result _hNo hResolve
+      simp [openRunListResult_nil] at hResolve
+      cases hResolve
+      exact ⟨rfl, rfl⟩
+  | cons instr rest ih =>
+      intro state trace result hNo hResolve
+      have hInstrNo : instrUsesCallCreate instr = false :=
+        hNo instr (by simp)
+      have hRestNo :
+          ∀ restInstr ∈ rest, instrUsesCallCreate restInstr = false := by
+        intro restInstr hMem
+        exact hNo restInstr (by simp [hMem])
+      rw [openRunListResult_cons] at hResolve
+      rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+        hError | hOk
+      · rcases hError with ⟨err, _hStepErr, hResult⟩
+        cases hResult
+      · rcases hOk with
+          ⟨left, right, stepResult, hTrace, hStep, hRest⟩
+        have hStepClosed :=
+          openStepInstrResult_resolves_closed_inv_of_no_callCreate
+            hInstrNo hStep
+        rcases hStepClosed with ⟨hLeft, hStepTarget⟩
+        subst left
+        cases stepResult with
+        | running mid =>
+            have hRestClosed := ih hRestNo hRest
+            rcases hRestClosed with ⟨hRight, hRunRest⟩
+            subst right
+            constructor
+            · simpa using hTrace
+            · rw [Assembly.Target.runListResult, hStepTarget]
+              exact hRunRest
+        | halted halt =>
+            simp at hRest
+            cases hRest
+            constructor
+            · simpa using hTrace
+            · rw [Assembly.Target.runListResult, hStepTarget]
+              rfl
+
+theorem openRunListResult_resolves_closed_inv_of_no_callCreate
+    {code : List Assembly.TargetInstr} {state : EVMState}
+    {trace : OpenExternal.OpenTrace} {result : Assembly.StepResult}
+    (hCode : codeUsesCallCreate code = false)
+    (hResolve :
+      OpenExternal.OpenResultResolves (openRunListResult code state)
+        trace (.ok result)) :
+    trace = [] ∧ Assembly.Target.runListResult code state = .ok result :=
+  openRunListResult_resolves_closed_inv_of_forall_no_callCreate
+    (all_false_of_codeUsesCallCreate_false hCode) hResolve
+
 theorem openRunListResult_single_prim_call
     {op : Assembly.PrimOp} {state : EVMState}
     {kind : OpenExternal.CallKind}
@@ -492,6 +593,104 @@ theorem openRunListResult_emitInstr_prim_call
   simp [Assembly.emitInstr?] at hEmit
   subst emitted
   simpa using openRunListResult_single_prim_call hKind hCall response
+
+universe u v
+
+theorem openResultResolves_done_inv
+    {ε : Type u} {α : Type v}
+    {result result' : Except ε α} {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        ((.done result) : OpenExternal.OpenResult ε α) trace result') :
+    trace = [] ∧ result = result' := by
+  cases hResolve
+  exact ⟨rfl, rfl⟩
+
+theorem openStepInstrResult_resolves_halted_haltKind?_some
+    {instr : Assembly.TargetInstr} {state : EVMState}
+    {trace : OpenExternal.OpenTrace} {halt : Assembly.Halt}
+    (hResolve :
+      OpenExternal.OpenResultResolves (openStepInstrResult instr state)
+        trace (.ok (.halted halt))) :
+    ∃ kind : Assembly.HaltKind, instr.haltKind? = some kind := by
+  unfold openStepInstrResult at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with hErr | hOk
+  · rcases hErr with ⟨err, _hStepErr, hResult⟩
+    cases hResult
+  · rcases hOk with
+      ⟨left, right, stateAfter, _hTrace, _hStep, hNext⟩
+    change
+      OpenExternal.OpenResultResolves
+        ((.done (.ok (stepResultAfter instr stateAfter))) :
+          OpenExternal.OpenResult EVMException Assembly.StepResult)
+        right (.ok (.halted halt)) at hNext
+    rcases openResultResolves_done_inv hNext with ⟨_hRight, hStepAfterOk⟩
+    injection hStepAfterOk with hStepAfter
+    unfold stepResultAfter at hStepAfter
+    cases hKind : instr.haltKind? with
+    | none =>
+        simp [hKind] at hStepAfter
+    | some kind =>
+        exact ⟨kind, rfl⟩
+
+theorem openRunListResult_emitInstr_halted_no_callCreate
+    {program : Assembly.Program} {pc : Nat} {instr : Assembly.Instr}
+    {emitted : List Assembly.LocatedTarget} {state : EVMState}
+    {trace : OpenExternal.OpenTrace} {halt : Assembly.Halt}
+    (hEmit : Assembly.emitInstr? program pc instr = some emitted)
+    (hRun :
+      OpenExternal.OpenResultResolves
+        (openRunListResult (emitted.map Assembly.LocatedTarget.instr) state)
+        trace (.ok (.halted halt))) :
+    Assembly.Instr.usesCallCreate instr = false := by
+  cases instr with
+  | label name =>
+      simp [Assembly.Instr.usesCallCreate]
+  | prim op =>
+      simp [Assembly.emitInstr?] at hEmit
+      subst emitted
+      change
+        OpenExternal.OpenResultResolves
+          (openRunListResult [Assembly.TargetInstr.prim op] state)
+          trace (.ok (.halted halt)) at hRun
+      rw [openRunListResult_cons] at hRun
+      rcases OpenExternal.OpenResultResolves.bind_inv hRun with hErr | hOk
+      · rcases hErr with ⟨err, _hStepErr, hResult⟩
+        cases hResult
+      · rcases hOk with
+          ⟨left, right, stepResult, _hTrace, hStep, hRest⟩
+        cases stepResult with
+        | running mid =>
+            change
+              OpenExternal.OpenResultResolves
+                ((.done (.ok (Assembly.StepResult.running mid))) :
+                  OpenExternal.OpenResult EVMException Assembly.StepResult)
+                right (.ok (.halted halt)) at hRest
+            rcases openResultResolves_done_inv hRest with ⟨_hRight, hStepResult⟩
+            cases hStepResult
+        | halted halt' =>
+            rcases
+                openStepInstrResult_resolves_halted_haltKind?_some hStep with
+              ⟨kind, hKind⟩
+            cases op <;>
+              simp [Assembly.Instr.usesCallCreate,
+                Assembly.PrimOp.isCallCreate,
+                Assembly.TargetInstr.haltKind?,
+                Assembly.PrimOp.haltKind?] at hKind ⊢
+  | push value =>
+      simp [Assembly.Instr.usesCallCreate]
+  | jump target =>
+      cases hDest : Assembly.Program.labelPc program target with
+      | none =>
+          simp [Assembly.emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [Assembly.Instr.usesCallCreate]
+  | jumpi target =>
+      cases hDest : Assembly.Program.labelPc program target with
+      | none =>
+          simp [Assembly.emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [Assembly.Instr.usesCallCreate]
 
 def openStep (target : Assembly.TargetProgram) (state : EVMState) :
     OpenExternal.OpenResult EVMException EVMState :=
@@ -650,7 +849,7 @@ theorem openStepAtResult_resolves_closed_of_openStepAt_done
             simpa [stepResultAfter, hKind] using hStep
         | some kind =>
             simpa [stepResultAfter, hKind] using hStep
-      simpa [OpenExternal.OpenResult.bind, hResult] using
+      simpa [hResult] using
         (OpenExternal.OpenResultResolves.done :
           OpenExternal.OpenResultResolves
             ((.done (.ok result)) :
@@ -697,17 +896,17 @@ theorem openStepAtResult_resolves_closed_inv_of_openStepAt_done
   rw [hOpen] at hStep
   cases hRaw : Assembly.Source.stepAt program pc instr state with
   | error err =>
-      simp [OpenExternal.OpenResult.bind, hRaw] at hStep
+      simp [hRaw] at hStep
       cases hStep
   | ok state' =>
       cases hKind : instr.haltKind? with
       | none =>
-          simp [OpenExternal.OpenResult.bind, hRaw, stepResultAfter, hKind]
+          simp [hRaw, stepResultAfter, hKind]
             at hStep
           cases hStep
           exact ⟨rfl, by simp [Assembly.Source.stepAtResult, hRaw, hKind]⟩
       | some kind =>
-          simp [OpenExternal.OpenResult.bind, hRaw, stepResultAfter, hKind]
+          simp [hRaw, stepResultAfter, hKind]
             at hStep
           cases hStep
           exact ⟨rfl, by simp [Assembly.Source.stepAtResult, hRaw, hKind]⟩
@@ -1686,6 +1885,35 @@ theorem resolves
       exact openRunNResult_resolves_step_running hStep ih
   | stepHalted hStep =>
       exact openRunNResult_resolves_step_halted hStep
+
+theorem of_resolves
+    {program : Assembly.Program} {fuel : Nat} {state : EVMState}
+    {trace : OpenExternal.OpenTrace} {result : Assembly.StepResult}
+    (hResolve :
+      OpenExternal.OpenResultResolves (openRunNResult program fuel state)
+        trace (.ok result)) :
+    OpenTraceResult program fuel state trace result := by
+  induction fuel generalizing state trace result with
+  | zero =>
+      simp [openRunNResult] at hResolve
+      cases hResolve
+      exact OpenTraceResult.done state
+  | succ fuel ih =>
+      rw [openRunNResult_succ] at hResolve
+      rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+        hError | hOk
+      · rcases hError with ⟨err, _hStep, hResult⟩
+        cases hResult
+      · rcases hOk with
+          ⟨headTrace, tailTrace, stepResult, hTrace, hStep, hRest⟩
+        cases stepResult with
+        | running mid =>
+            subst trace
+            exact OpenTraceResult.stepRunning hStep (ih hRest)
+        | halted halt =>
+            cases hRest
+            subst trace
+            simpa using OpenTraceResult.stepHalted hStep
 
 theorem current_prim_call_continue
     {program : Assembly.Program} {state : EVMState}

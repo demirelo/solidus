@@ -78,6 +78,61 @@ theorem CallKind.toYulOperation_eq_ofYulOperation?
   cases kind <;> rfl
 
 /--
+The contract-creation operations tracked as open interactions.
+
+These are separate from `CallKind`: creation has an initcode request and an
+address-producing response rather than a callee call frame plus return-copy
+window.
+-/
+inductive CreateKind where
+  | create
+  | create2
+  deriving DecidableEq, Repr
+
+def CreateKind.toYulOperation : CreateKind → EvmYul.Operation .Yul
+  | .create => .System .CREATE
+  | .create2 => .System .CREATE2
+
+def CreateKind.toEVMOperation : CreateKind → EvmYul.Operation .EVM
+  | .create => .CREATE
+  | .create2 => .CREATE2
+
+def CreateKind.ofYulOperation? : EvmYul.Operation .Yul → Option CreateKind
+  | .System .CREATE => some .create
+  | .System .CREATE2 => some .create2
+  | _ => none
+
+def CreateKind.ofEVMOperation? : EvmYul.Operation .EVM → Option CreateKind
+  | .CREATE => some .create
+  | .CREATE2 => some .create2
+  | _ => none
+
+@[simp] theorem CreateKind.ofYulOperation?_toYulOperation
+    (kind : CreateKind) :
+    CreateKind.ofYulOperation? kind.toYulOperation = some kind := by
+  cases kind <;> rfl
+
+set_option linter.unusedSimpArgs false in
+theorem CreateKind.toYulOperation_eq_ofYulOperation?
+    {yulOp : EvmYul.Operation .Yul} {kind : CreateKind}
+    (hKind : CreateKind.ofYulOperation? yulOp = some kind) :
+    yulOp = kind.toYulOperation := by
+  cases kind <;> cases yulOp <;>
+    simp [CreateKind.ofYulOperation?, CreateKind.toYulOperation] at hKind
+  all_goals
+    try rename_i subop
+    try cases subop <;>
+      simp [CreateKind.ofYulOperation?, CreateKind.toYulOperation] at hKind
+  all_goals
+    cases hKind
+    rfl
+
+@[simp] theorem CreateKind.ofEVMOperation?_toEVMOperation
+    (kind : CreateKind) :
+    CreateKind.ofEVMOperation? kind.toEVMOperation = some kind := by
+  cases kind <;> rfl
+
+/--
 The request that is visible to the external environment.
 
 `recipient` is the account whose balance/call frame is targeted, while
@@ -118,6 +173,26 @@ structure CallSite where
   returnWindow : ReturnWindow
 
 /--
+The request that is visible for contract creation.
+
+The request records the initcode bytes computed from caller memory. Concrete
+address derivation, nonce updates, code installation, and child initcode
+execution are intentionally represented by the response/world mutation rather
+than interpreted here.
+-/
+structure CreateRequest where
+  kind : CreateKind
+  creator : Address
+  value : Word
+  initCode : ByteArray
+  salt : Option Word
+  permission : Bool
+
+/-- A complete open creation site. -/
+structure CreateSite where
+  request : CreateRequest
+
+/--
 The syntactic operand bundle shared by Yul call arguments and EVM stack
 operands. `valueArg` is meaningful for `CALL`/`CALLCODE`; for
 `DELEGATECALL`/`STATICCALL` the semantic transfer and apparent value are
@@ -142,6 +217,17 @@ def returnWindow (operands : CallOperands) : ReturnWindow where
   outSize := operands.outSize
 
 end CallOperands
+
+/--
+The syntactic operand bundle shared by Yul creation arguments and EVM stack
+operands. `saltArg` is ignored for `CREATE` and becomes the request salt for
+`CREATE2`.
+-/
+structure CreateOperands where
+  value : Word
+  initOffset : Word
+  initSize : Word
+  saltArg : Word
 
 /--
 The caller-local state needed to form a CALL-family request.
@@ -244,6 +330,25 @@ def callSite (context : CallContext τ)
         permission := context.effectivePermission kind }
     returnWindow := window }
 
+def initCode (context : CallContext τ) (operands : CreateOperands) :
+    ByteArray :=
+  context.machine.memory.readWithPadding
+    operands.initOffset.toNat operands.initSize.toNat
+
+def createSalt : CreateKind → CreateOperands → Option Word
+  | .create, _operands => none
+  | .create2, operands => some operands.saltArg
+
+def createSite (context : CallContext τ)
+    (kind : CreateKind) (operands : CreateOperands) : CreateSite :=
+  { request :=
+      { kind := kind
+        creator := context.codeOwner
+        value := operands.value
+        initCode := context.initCode operands
+        salt := createSalt kind operands
+        permission := context.permission } }
+
 end CallContext
 
 /--
@@ -271,6 +376,16 @@ theorem callSite_eq {source : CallContext .Yul}
       CallContext.transferValue, CallContext.apparentValue,
       CallContext.effectivePermission, CallContext.calldata, hRel.memory,
       hRel.codeOwner, hRel.sourceAddress, hRel.weiValue, hRel.permission]
+
+theorem createSite_eq {source : CallContext .Yul}
+    {target : CallContext .EVM}
+    (hRel : CallContextRel source target)
+    (kind : CreateKind) (operands : CreateOperands) :
+    source.createSite kind operands = target.createSite kind operands := by
+  cases kind <;>
+    simp [CallContext.createSite, CallContext.initCode,
+      CallContext.createSalt, hRel.memory, hRel.codeOwner,
+      hRel.permission]
 
 end CallContextRel
 
@@ -720,6 +835,244 @@ theorem callSite_eq_of_args
 
 end CallKind
 
+namespace CreateKind
+
+def inputArity : CreateKind → Nat
+  | .create => 3
+  | .create2 => 4
+
+def toBasicOp : CreateKind → Structured.BasicOp
+  | .create => .create
+  | .create2 => .create2
+
+def ofBasicOp? : Structured.BasicOp → Option CreateKind
+  | .create => some .create
+  | .create2 => some .create2
+  | _ => none
+
+@[simp] theorem ofBasicOp?_toBasicOp (kind : CreateKind) :
+    ofBasicOp? kind.toBasicOp = some kind := by
+  cases kind <;> rfl
+
+@[simp] theorem inputs_toBasicOp (kind : CreateKind) :
+    Expressions.Structured.BasicOp.inputs kind.toBasicOp =
+      kind.inputArity := by
+  cases kind <;> rfl
+
+@[simp] theorem outputs_toBasicOp (kind : CreateKind) :
+    Expressions.Structured.BasicOp.outputs kind.toBasicOp = 1 := by
+  cases kind <;> rfl
+
+@[simp] theorem toBasicOp?_toYulOperation (kind : CreateKind) :
+    Prim.toBasicOp? kind.toYulOperation = some kind.toBasicOp := by
+  cases kind <;> rfl
+
+set_option linter.unusedSimpArgs false in
+theorem toBasicOp_eq_ofYulOperation?
+    {yulOp : EvmYul.Operation .Yul} {kind : CreateKind}
+    {op : Structured.BasicOp}
+    (hKind : CreateKind.ofYulOperation? yulOp = some kind)
+    (hBasic : Prim.toBasicOp? yulOp = some op) :
+    op = kind.toBasicOp := by
+  cases kind <;> cases yulOp <;>
+    simp [CreateKind.ofYulOperation?, Prim.toBasicOp?,
+      CreateKind.toBasicOp] at hKind hBasic
+  all_goals
+    try rename_i subop
+    try cases subop <;>
+      simp [CreateKind.ofYulOperation?, Prim.toBasicOp?,
+        CreateKind.toBasicOp] at hKind hBasic
+  all_goals
+    cases hKind
+    cases hBasic
+    rfl
+
+theorem inputArity_eq_inputs_ofYulOperation?
+    {yulOp : EvmYul.Operation .Yul} {kind : CreateKind}
+    {op : Structured.BasicOp}
+    (hKind : CreateKind.ofYulOperation? yulOp = some kind)
+    (hBasic : Prim.toBasicOp? yulOp = some op) :
+    Expressions.Structured.BasicOp.inputs op = kind.inputArity := by
+  have hOp : op = kind.toBasicOp :=
+    toBasicOp_eq_ofYulOperation? hKind hBasic
+  subst op
+  simp
+
+@[simp] theorem terminal?_toYulOperation (kind : CreateKind) :
+    Prim.terminal? kind.toYulOperation = none := by
+  cases kind <;> rfl
+
+def canonicalOperands : CreateKind → CreateOperands → CreateOperands
+  | .create, operands =>
+      { operands with saltArg := EvmYul.UInt256.ofNat 0 }
+  | .create2, operands => operands
+
+def args : CreateKind → CreateOperands → List Word
+  | .create, operands =>
+      [operands.value, operands.initOffset, operands.initSize]
+  | .create2, operands =>
+      [operands.value, operands.initOffset, operands.initSize,
+        operands.saltArg]
+
+@[simp] theorem args_length (kind : CreateKind) (operands : CreateOperands) :
+    (kind.args operands).length = kind.inputArity := by
+  cases kind <;> rfl
+
+def yulOperands? : CreateKind → List Word → Option CreateOperands
+  | .create, value :: initOffset :: initSize :: _ =>
+      some
+        { value := value
+          initOffset := initOffset
+          initSize := initSize
+          saltArg := EvmYul.UInt256.ofNat 0 }
+  | .create2, value :: initOffset :: initSize :: salt :: _ =>
+      some
+        { value := value
+          initOffset := initOffset
+          initSize := initSize
+          saltArg := salt }
+  | _, _ => none
+
+def evmOperands? : CreateKind → Stack → Option (Stack × CreateOperands)
+  | .create, stack =>
+      match stack.pop3 with
+      | some ⟨rest, value, initOffset, initSize⟩ =>
+          some
+            (rest,
+              { value := value
+                initOffset := initOffset
+                initSize := initSize
+                saltArg := EvmYul.UInt256.ofNat 0 })
+      | none => none
+  | .create2, stack =>
+      match stack.pop4 with
+      | some ⟨rest, value, initOffset, initSize, salt⟩ =>
+          some
+            (rest,
+              { value := value
+                initOffset := initOffset
+                initSize := initSize
+                saltArg := salt })
+      | none => none
+
+@[simp] theorem yulOperands?_args
+    (kind : CreateKind) (operands : CreateOperands) (suffix : List Word) :
+    kind.yulOperands? (kind.args operands ++ suffix) =
+      some (kind.canonicalOperands operands) := by
+  cases kind <;> rfl
+
+@[simp] theorem yulOperands?_exact_args
+    (kind : CreateKind) (operands : CreateOperands) :
+    kind.yulOperands? (kind.args operands) =
+      some (kind.canonicalOperands operands) := by
+  simpa using yulOperands?_args kind operands []
+
+@[simp] theorem evmOperands?_args
+    (kind : CreateKind) (operands : CreateOperands) (stackRest : Stack) :
+    kind.evmOperands? (kind.args operands ++ stackRest) =
+      some (stackRest, kind.canonicalOperands operands) := by
+  cases kind <;> rfl
+
+def yulCreateSite?
+    (state : EvmYul.Yul.State) (kind : CreateKind) (args : List Word) :
+    Option CreateSite :=
+  match kind.yulOperands? args with
+  | some operands =>
+      some ((CallContext.ofYulState state).createSite kind operands)
+  | none => none
+
+def evmCreateSite?
+    (state : EvmYul.EVM.State) (kind : CreateKind) :
+    Option (Stack × CreateSite) :=
+  match kind.evmOperands? state.stack with
+  | some (rest, operands) =>
+      some (rest, (CallContext.ofEVMState state).createSite kind operands)
+  | none => none
+
+/--
+Creation site observed by the stack-free primitive semantics.
+
+The primitive source tower receives values in source order. Its structured
+backend runs the EVM primitive on `values.reverse`, so a creation primitive site
+is extracted from that reconstructed stack and accepted only at exact arity.
+-/
+def primitiveCreateSite?
+    (shared : EvmYul.SharedState .EVM)
+    (kind : CreateKind) (values : List Word) : Option CreateSite :=
+  match kind.evmOperands? values.reverse with
+  | some ([], operands) =>
+      some ((CallContext.ofEVMSharedState shared).createSite kind operands)
+  | _ => none
+
+@[simp] theorem primitiveCreateSite?_args_reverse
+    (shared : EvmYul.SharedState .EVM)
+    (kind : CreateKind) (operands : CreateOperands) :
+    primitiveCreateSite? shared kind (kind.args operands).reverse =
+      some
+        ((CallContext.ofEVMSharedState shared).createSite kind
+          (kind.canonicalOperands operands)) := by
+  cases kind <;> rfl
+
+theorem createSite_eq_of_yul_evm_operands
+    {yulState : EvmYul.Yul.State} {evmState : EvmYul.EVM.State}
+    {kind : CreateKind} {args : List Word} {stackRest : Stack}
+    {operands : CreateOperands}
+    (hRel :
+      CallContextRel
+        (CallContext.ofYulState yulState)
+        (CallContext.ofEVMState evmState))
+    (hYul : kind.yulOperands? args = some operands)
+    (hEVM : kind.evmOperands? evmState.stack = some (stackRest, operands)) :
+    kind.yulCreateSite? yulState args =
+      some ((CallContext.ofEVMState evmState).createSite kind operands) ∧
+    kind.evmCreateSite? evmState =
+      some (stackRest,
+        (CallContext.ofEVMState evmState).createSite kind operands) := by
+  constructor
+  · simp [yulCreateSite?, hYul,
+      CallContextRel.createSite_eq hRel kind operands]
+  · simp [evmCreateSite?, hEVM]
+
+theorem createSite_eq_of_args
+    {yulState : EvmYul.Yul.State} {evmState : EvmYul.EVM.State}
+    (hRel :
+      CallContextRel
+        (CallContext.ofYulState yulState)
+        (CallContext.ofEVMState evmState))
+    (kind : CreateKind) (operands : CreateOperands) (stackRest : Stack) :
+    kind.yulCreateSite? yulState (kind.args operands) =
+      some
+        ((CallContext.ofEVMState evmState).createSite kind
+          (kind.canonicalOperands operands)) ∧
+    kind.evmCreateSite?
+        ({ evmState with stack := kind.args operands ++ stackRest }
+          : EvmYul.EVM.State) =
+      some
+        (stackRest,
+          (CallContext.ofEVMState evmState).createSite kind
+            (kind.canonicalOperands operands)) := by
+  have hRel' :
+      CallContextRel
+        (CallContext.ofYulState yulState)
+        (CallContext.ofEVMState
+          ({ evmState with stack := kind.args operands ++ stackRest }
+            : EvmYul.EVM.State)) := by
+    simpa [CallContext.ofEVMState] using hRel
+  have hSites :=
+    createSite_eq_of_yul_evm_operands
+      (yulState := yulState)
+      (evmState :=
+        ({ evmState with stack := kind.args operands ++ stackRest }
+          : EvmYul.EVM.State))
+      (kind := kind)
+      (args := kind.args operands)
+      (stackRest := stackRest)
+      (operands := kind.canonicalOperands operands)
+      hRel' (by simp) (by simp)
+  simpa [CallContext.ofEVMState] using hSites
+
+end CreateKind
+
 /--
 An abstract mutation of contract-visible internal state while the caller frame is
 suspended at an external call.
@@ -762,10 +1115,40 @@ structure CallResponse where
 
 namespace CallResponse
 
+def failureZero : CallResponse where
+  success := false
+  returnedGas := EvmYul.UInt256.ofNat 0
+  returnData := ByteArray.empty
+  internalMutation := ReentrantStateMutation.identity
+
 def statusWord (response : CallResponse) : Word :=
   if response.success then EvmYul.UInt256.ofNat 1 else EvmYul.UInt256.ofNat 0
 
 end CallResponse
+
+/--
+An arbitrary external-creation response.
+
+The address word may be zero for failed creation. Concrete nonce/address
+derivation, initcode execution, code installation, and account-map effects are
+left to a later adequacy theorem; here they are represented by the opaque
+internal mutation plus the address/returndata observed by the caller.
+-/
+structure CreateResponse where
+  address : Word
+  returnedGas : Word
+  returnData : ByteArray
+  internalMutation : ReentrantStateMutation
+
+namespace CreateResponse
+
+def failureZero : CreateResponse where
+  address := EvmYul.UInt256.ofNat 0
+  returnedGas := EvmYul.UInt256.ofNat 0
+  returnData := ByteArray.empty
+  internalMutation := ReentrantStateMutation.identity
+
+end CreateResponse
 
 /--
 The caller-local memory update induced by a response. This is shared by the Yul
@@ -806,6 +1189,44 @@ def finishYulState
 end CallSite
 
 /--
+Creation updates the return-data buffer but has no caller-provided output-copy
+window. Passing zero offsets/sizes records that distinction while reusing the
+same machine primitive as CALL.
+-/
+def CreateSite.finishMachine
+    (_site : CreateSite) (machine : EvmYul.MachineState)
+    (returnData : ByteArray) : EvmYul.MachineState :=
+  machine.finishExternalCall returnData
+    (EvmYul.UInt256.ofNat 0) (EvmYul.UInt256.ofNat 0)
+    (EvmYul.UInt256.ofNat 0) (EvmYul.UInt256.ofNat 0)
+
+namespace CreateSite
+
+def finishShared {τ : EvmYul.OperationType}
+    (site : CreateSite) (shared : EvmYul.SharedState τ)
+    (response : CreateResponse) : EvmYul.SharedState τ :=
+  { shared with
+    toState := response.internalMutation.apply shared.toState
+    toMachineState :=
+      site.finishMachine shared.toMachineState response.returnData }
+
+def finishYulState
+    (site : CreateSite) (state : EvmYul.Yul.State)
+    (response : CreateResponse) : EvmYul.Yul.State :=
+  state.setSharedState
+    (site.finishShared state.toSharedState response)
+
+@[simp] theorem finishYulState_ok
+    (site : CreateSite) (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore) (response : CreateResponse) :
+    site.finishYulState (.Ok shared store) response =
+      .Ok (site.finishShared shared response) store := by
+  simp [finishYulState, EvmYul.Yul.State.setSharedState,
+    EvmYul.Yul.State.toSharedState]
+
+end CreateSite
+
+/--
 An open external call: a visible request plus a continuation for every possible
 response.
 
@@ -817,6 +1238,14 @@ structure OpenCall (State : Type v) where
   resume : CallResponse → State
 
 /--
+An open external creation: a visible creation request plus a continuation for
+every possible response.
+-/
+structure OpenCreate (State : Type v) where
+  site : CreateSite
+  resume : CreateResponse → State
+
+/--
 Generic open result for interpreters that may suspend at an external call.
 
 `YulOpenResult` below predates this generic carrier and is kept as the imported
@@ -826,6 +1255,7 @@ directly and relate to Yul through `YulOpenResult.toOpenResult`.
 inductive OpenResult (ε : Type u) (α : Type v) : Type (max u v) where
   | done : Except ε α → OpenResult ε α
   | call : OpenCall (OpenResult ε α) → OpenResult ε α
+  | create : OpenCreate (OpenResult ε α) → OpenResult ε α
 
 namespace OpenResult
 
@@ -846,6 +1276,41 @@ def bind {ε : Type u} {α : Type v} {β : Type w}
         { site := externalCall.site
           resume := fun response =>
             bind (externalCall.resume response) next }
+  | .create externalCreate =>
+      .create
+        { site := externalCreate.site
+          resume := fun response =>
+            bind (externalCreate.resume response) next }
+
+@[simp] theorem bind_done_ok {ε : Type u} {α : Type v} {β : Type w}
+    (value : α) (next : α → OpenResult ε β) :
+    bind (.done (.ok value)) next = next value :=
+  rfl
+
+@[simp] theorem bind_done_error {ε : Type u} {α : Type v} {β : Type w}
+    (err : ε) (next : α → OpenResult ε β) :
+    bind (.done (.error err)) next = (.done (.error err) : OpenResult ε β) :=
+  rfl
+
+theorem bind_call {ε : Type u} {α : Type v} {β : Type w}
+    (externalCall : OpenCall (OpenResult ε α))
+    (next : α → OpenResult ε β) :
+    bind (.call externalCall) next =
+      .call
+        { site := externalCall.site
+          resume := fun response =>
+            bind (externalCall.resume response) next } :=
+  rfl
+
+theorem bind_create {ε : Type u} {α : Type v} {β : Type w}
+    (externalCreate : OpenCreate (OpenResult ε α))
+    (next : α → OpenResult ε β) :
+    bind (.create externalCreate) next =
+      .create
+        { site := externalCreate.site
+          resume := fun response =>
+            bind (externalCreate.resume response) next } :=
+  rfl
 
 def map {ε : Type u} {α : Type v} {β : Type w}
     (f : α → β) (result : OpenResult ε α) : OpenResult ε β :=
@@ -865,15 +1330,30 @@ theorem bind_congr_next {ε : Type u} {α : Type v} {β : Type w}
         ∀ {next next' : α → OpenResult ε β},
           (∀ value, next value = next' value) →
             bind (.call externalCall) next = bind (.call externalCall) next')
-      (done := by
+      (motive_3 := fun externalCreate =>
+        ∀ {next next' : α → OpenResult ε β},
+          (∀ value, next value = next' value) →
+            bind (.create externalCreate) next =
+              bind (.create externalCreate) next')
+      (by
         intro result next next' hNext
-        cases result <;> simp [bind, hNext])
-      (call := by
+        cases result <;> simp [hNext])
+      (by
         intro _ hCall next next' hNext
         exact hCall hNext)
-      (mk := by
+      (by
+        intro _ hCreate next next' hNext
+        exact hCreate hNext)
+      (by
         intro _ _ ih next next' hNext
-        simp [bind]
+        rw [bind_call, bind_call]
+        congr
+        funext response
+        exact ih response hNext)
+      (by
+        intro _ _ ih next next' hNext
+        rw [bind_create, bind_create]
+        congr
         funext response
         exact ih response hNext)
       result) hNext
@@ -1059,6 +1539,132 @@ theorem yulPrimitiveEvalValuesOpenCall?_resume_ok
 
 end CallKind
 
+namespace CreateKind
+
+def yulOpenCreate?
+    (state : EvmYul.Yul.State) (kind : CreateKind)
+    (args : List Word) :
+    Option (OpenCreate (EvmYul.Yul.State × List Word)) :=
+  match kind.yulCreateSite? state args with
+  | some site =>
+      some
+        { site := site
+          resume := fun response =>
+            (site.finishYulState state response, [response.address]) }
+  | none => none
+
+def primitiveSharedOpenCreate?
+    (shared : EvmYul.SharedState .EVM)
+    (kind : CreateKind) (values : List Word) :
+    Option (OpenCreate (EvmYul.SharedState .EVM × List Word)) :=
+  match primitiveCreateSite? shared kind values with
+  | some site =>
+      some
+        { site := site
+          resume := fun response =>
+            (site.finishShared shared response, [response.address]) }
+  | none => none
+
+def evmOpenCreate?
+    (state : EvmYul.EVM.State) (kind : CreateKind) :
+    Option (OpenCreate EvmYul.EVM.State) :=
+  match kind.evmCreateSite? state with
+  | some (rest, site) =>
+      some
+        { site := site
+          resume := fun response =>
+            { state with
+              toSharedState :=
+                site.finishShared state.toSharedState response
+              stack := response.address :: rest } }
+  | none => none
+
+theorem yulOpenCreate?_resume_ok_store
+    {kind : CreateKind} {args : List Word}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {create : OpenCreate (EvmYul.Yul.State × List Word)}
+    (hCreate : yulOpenCreate? (.Ok shared store) kind args = some create)
+    (response : CreateResponse) :
+    ∃ sharedAfter,
+      (create.resume response).1 = .Ok sharedAfter store := by
+  unfold yulOpenCreate? at hCreate
+  cases hSite : kind.yulCreateSite? (.Ok shared store) args with
+  | none =>
+      simp [hSite] at hCreate
+  | some site =>
+      simp [hSite] at hCreate
+      cases hCreate
+      exact ⟨site.finishShared shared response, by simp⟩
+
+theorem yulOpenCreate?_resume_ok
+    {kind : CreateKind} {args : List Word}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {create : OpenCreate (EvmYul.Yul.State × List Word)}
+    (hCreate : yulOpenCreate? (.Ok shared store) kind args = some create)
+    (response : CreateResponse) :
+    ∃ sharedAfter,
+      create.resume response =
+        (.Ok sharedAfter store, [response.address]) := by
+  unfold yulOpenCreate? at hCreate
+  cases hSite : kind.yulCreateSite? (.Ok shared store) args with
+  | none =>
+      simp [hSite] at hCreate
+  | some site =>
+      simp [hSite] at hCreate
+      cases hCreate
+      exact ⟨site.finishShared shared response, by simp⟩
+
+def yulPrimitiveEvalValuesOpenCreate?
+    (state : EvmYul.Yul.State) (prim : EvmYul.Operation .Yul)
+    (args : List Word) :
+    Option
+      (OpenCreate
+        (Except EvmYul.Yul.Exception
+          (EvmYul.Yul.State × List Word))) :=
+  match CreateKind.ofYulOperation? prim with
+  | some kind =>
+      match yulOpenCreate? state kind args with
+      | some sourceCreate =>
+          some
+            { site := sourceCreate.site
+              resume := fun response => .ok (sourceCreate.resume response) }
+      | none => none
+  | none => none
+
+theorem yulPrimitiveEvalValuesOpenCreate?_resume_ok
+    {prim : EvmYul.Operation .Yul} {args : List Word}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {create :
+      OpenCreate
+        (Except EvmYul.Yul.Exception
+          (EvmYul.Yul.State × List Word))}
+    (hCreate :
+      yulPrimitiveEvalValuesOpenCreate? (.Ok shared store) prim args =
+        some create)
+    (response : CreateResponse) :
+    ∃ sharedAfter,
+      create.resume response =
+        .ok (.Ok sharedAfter store, [response.address]) := by
+  unfold yulPrimitiveEvalValuesOpenCreate? at hCreate
+  cases hKind : CreateKind.ofYulOperation? prim with
+  | none =>
+      simp [hKind] at hCreate
+  | some kind =>
+      cases hOpen : yulOpenCreate? (.Ok shared store) kind args with
+      | none =>
+          simp [hKind, hOpen] at hCreate
+      | some sourceCreate =>
+          simp [hKind, hOpen] at hCreate
+          cases hCreate
+          rcases yulOpenCreate?_resume_ok hOpen response with
+            ⟨sharedAfter, hResume⟩
+          exact ⟨sharedAfter, by simp [hResume]⟩
+
+end CreateKind
+
 /--
 Result of evaluating imported Yul while leaving external CALL-family
 interactions open.
@@ -1071,6 +1677,7 @@ interpreted here.
 inductive YulOpenResult (α : Type u) where
   | done : Except EvmYul.Yul.Exception α → YulOpenResult α
   | call : OpenCall (YulOpenResult α) → YulOpenResult α
+  | create : OpenCreate (YulOpenResult α) → YulOpenResult α
 
 namespace YulOpenResult
 
@@ -1090,6 +1697,42 @@ def bind {α : Type u} {β : Type v} (result : YulOpenResult α)
         { site := externalCall.site
           resume := fun response =>
             bind (externalCall.resume response) next }
+  | .create externalCreate =>
+      .create
+        { site := externalCreate.site
+          resume := fun response =>
+            bind (externalCreate.resume response) next }
+
+@[simp] theorem bind_done_ok {α : Type u} {β : Type v}
+    (value : α) (next : α → YulOpenResult β) :
+    bind (.done (.ok value)) next = next value :=
+  rfl
+
+@[simp] theorem bind_done_error {α : Type u} {β : Type v}
+    (err : EvmYul.Yul.Exception) (next : α → YulOpenResult β) :
+    bind (.done (.error err)) next =
+      (.done (.error err) : YulOpenResult β) :=
+  rfl
+
+theorem bind_call {α : Type u} {β : Type v}
+    (externalCall : OpenCall (YulOpenResult α))
+    (next : α → YulOpenResult β) :
+    bind (.call externalCall) next =
+      .call
+        { site := externalCall.site
+          resume := fun response =>
+            bind (externalCall.resume response) next } :=
+  rfl
+
+theorem bind_create {α : Type u} {β : Type v}
+    (externalCreate : OpenCreate (YulOpenResult α))
+    (next : α → YulOpenResult β) :
+    bind (.create externalCreate) next =
+      .create
+        { site := externalCreate.site
+          resume := fun response =>
+            bind (externalCreate.resume response) next } :=
+  rfl
 
 def map {α : Type u} {β : Type v}
     (f : α → β) (result : YulOpenResult α) : YulOpenResult β :=
@@ -1101,6 +1744,12 @@ def liftExceptCall {α : Type u}
   site := call.site
   resume := fun response => .done (call.resume response)
 
+def liftExceptCreate {α : Type u}
+    (create : OpenCreate (Except EvmYul.Yul.Exception α)) :
+    OpenCreate (YulOpenResult α) where
+  site := create.site
+  resume := fun response => .done (create.resume response)
+
 def toOpenResult {α : Type u} :
     YulOpenResult α → OpenResult EvmYul.Yul.Exception α
   | .done result => .done result
@@ -1109,6 +1758,34 @@ def toOpenResult {α : Type u} :
         { site := externalCall.site
           resume := fun response =>
             toOpenResult (externalCall.resume response) }
+  | .create externalCreate =>
+      .create
+        { site := externalCreate.site
+          resume := fun response =>
+            toOpenResult (externalCreate.resume response) }
+
+@[simp] theorem toOpenResult_done {α : Type u}
+    (result : Except EvmYul.Yul.Exception α) :
+    toOpenResult (.done result) = .done result :=
+  rfl
+
+theorem toOpenResult_call {α : Type u}
+    (externalCall : OpenCall (YulOpenResult α)) :
+    toOpenResult (.call externalCall) =
+      .call
+        { site := externalCall.site
+          resume := fun response =>
+            toOpenResult (externalCall.resume response) } :=
+  rfl
+
+theorem toOpenResult_create {α : Type u}
+    (externalCreate : OpenCreate (YulOpenResult α)) :
+    toOpenResult (.create externalCreate) =
+      .create
+        { site := externalCreate.site
+          resume := fun response =>
+            toOpenResult (externalCreate.resume response) } :=
+  rfl
 
 theorem toOpenResult_bind {α : Type u} {β : Type v}
     (result : YulOpenResult α) (next : α → YulOpenResult β) :
@@ -1127,15 +1804,32 @@ theorem toOpenResult_bind {α : Type u} {β : Type v}
           toOpenResult (bind (.call externalCall) next) =
             OpenResult.bind (toOpenResult (.call externalCall)) (fun value =>
               toOpenResult (next value)))
-      (done := by
+      (motive_3 := fun externalCreate =>
+        ∀ next : α → YulOpenResult β,
+          toOpenResult (bind (.create externalCreate) next) =
+            OpenResult.bind (toOpenResult (.create externalCreate))
+              (fun value => toOpenResult (next value)))
+      (by
         intro result next
         cases result <;> rfl)
-      (call := by
+      (by
         intro _ hCall next
         exact hCall next)
-      (mk := by
+      (by
+        intro _ hCreate next
+        exact hCreate next)
+      (by
         intro _ _ ih next
-        simp [bind, toOpenResult, OpenResult.bind]
+        rw [bind_call, toOpenResult_call, toOpenResult_call,
+          OpenResult.bind_call]
+        congr
+        funext response
+        exact ih response next)
+      (by
+        intro _ _ ih next
+        rw [bind_create, toOpenResult_create, toOpenResult_create,
+          OpenResult.bind_create]
+        congr
         funext response
         exact ih response next)
       result) next
@@ -1145,6 +1839,13 @@ theorem toOpenResult_bind {α : Type u} {β : Type v}
     (response : CallResponse) :
     (liftExceptCall call).resume response =
       .done (call.resume response) :=
+  rfl
+
+@[simp] theorem liftExceptCreate_resume {α : Type u}
+    (create : OpenCreate (Except EvmYul.Yul.Exception α))
+    (response : CreateResponse) :
+    (liftExceptCreate create).resume response =
+      .done (create.resume response) :=
   rfl
 
 end YulOpenResult
@@ -1242,7 +1943,13 @@ def evalValues (fuel : Nat) (expr : Expr)
                   pair.1 prim pair.2 with
               | some call =>
                   .call (YulOpenResult.liftExceptCall call)
-              | none => .done (EvmYul.Yul.primCall fuel' pair.1 prim pair.2)
+              | none =>
+                  match CreateKind.yulPrimitiveEvalValuesOpenCreate?
+                      pair.1 prim pair.2 with
+                  | some create =>
+                      .create (YulOpenResult.liftExceptCreate create)
+                  | none =>
+                      .done (EvmYul.Yul.primCall fuel' pair.1 prim pair.2)
       | .Call (.inr functionName) args =>
           YulOpenResult.bind
             (reverseResult (evalArgs fuel' args.reverse codeOverride state))
@@ -1272,8 +1979,16 @@ def execPrimCall (fuel : Nat) (prim : EvmYul.Operation .Yul)
           fun result =>
             .done (EvmYul.Yul.multifill' vars (.ok result))
     | none =>
-        .done (EvmYul.Yul.multifill' vars
-          (EvmYul.Yul.primCall fuel pair.1 prim pair.2))
+        match CreateKind.yulPrimitiveEvalValuesOpenCreate?
+            pair.1 prim pair.2 with
+        | some create =>
+            YulOpenResult.bind
+              (.create (YulOpenResult.liftExceptCreate create))
+              fun result =>
+                .done (EvmYul.Yul.multifill' vars (.ok result))
+        | none =>
+            .done (EvmYul.Yul.multifill' vars
+              (EvmYul.Yul.primCall fuel pair.1 prim pair.2))
 
 def execCall (fuel : Nat) (functionName : EvmYul.Yul.Ast.YulFunctionName)
     (vars : List EvmYul.Identifier) (codeOverride : Option Contract)
@@ -1533,10 +2248,10 @@ theorem evalValues_prim_call_suspends_of_evalArgs_done
       CallKind.yulPrimitiveEvalValuesOpenCall?
           stateAfterArgs prim rawValues.reverse =
         some call) :
-    evalValues fuel.succ (.Call (.inl prim) args) codeOverride state =
+  evalValues fuel.succ (.Call (.inl prim) args) codeOverride state =
       .call (YulOpenResult.liftExceptCall call) := by
-  simp [evalValues, reverseResult, YulOpenResult.map, YulOpenResult.bind,
-    YulOpenResult.ok, YulOpenResult.liftExceptCall, hArgs, hCall]
+  simp [evalValues, reverseResult, YulOpenResult.map, YulOpenResult.ok,
+    YulOpenResult.liftExceptCall, hArgs, hCall]
 
 theorem evalValues_prim_call_closed_of_evalArgs_done_no_open
     {fuel : Nat} {prim : EvmYul.Operation .Yul} {args : List Expr}
@@ -1548,12 +2263,39 @@ theorem evalValues_prim_call_closed_of_evalArgs_done_no_open
     (hCall :
       CallKind.yulPrimitiveEvalValuesOpenCall?
           stateAfterArgs prim rawValues.reverse =
+        none)
+    (hCreate :
+      CreateKind.yulPrimitiveEvalValuesOpenCreate?
+          stateAfterArgs prim rawValues.reverse =
         none) :
-    evalValues fuel.succ (.Call (.inl prim) args) codeOverride state =
+  evalValues fuel.succ (.Call (.inl prim) args) codeOverride state =
       .done
         (EvmYul.Yul.primCall fuel stateAfterArgs prim rawValues.reverse) := by
-  simp [evalValues, reverseResult, YulOpenResult.map, YulOpenResult.bind,
-    YulOpenResult.ok, hArgs, hCall]
+  simp [evalValues, reverseResult, YulOpenResult.map, YulOpenResult.ok,
+    hArgs, hCall, hCreate]
+
+theorem evalValues_prim_create_suspends_of_evalArgs_done
+    {fuel : Nat} {prim : EvmYul.Operation .Yul} {args : List Expr}
+    {codeOverride : Option Contract} {state stateAfterArgs : State}
+    {rawValues : List Word}
+    {create :
+      OpenCreate
+        (Except EvmYul.Yul.Exception (State × List Word))}
+    (hArgs :
+      evalArgs fuel args.reverse codeOverride state =
+        .done (.ok (stateAfterArgs, rawValues)))
+    (hCall :
+      CallKind.yulPrimitiveEvalValuesOpenCall?
+          stateAfterArgs prim rawValues.reverse =
+        none)
+    (hCreate :
+      CreateKind.yulPrimitiveEvalValuesOpenCreate?
+          stateAfterArgs prim rawValues.reverse =
+        some create) :
+  evalValues fuel.succ (.Call (.inl prim) args) codeOverride state =
+      .create (YulOpenResult.liftExceptCreate create) := by
+  simp [evalValues, reverseResult, YulOpenResult.map, YulOpenResult.ok,
+    YulOpenResult.liftExceptCreate, hArgs, hCall, hCreate]
 
 
 end YulOpen
@@ -1660,6 +2402,38 @@ theorem trans
 end OpenCallRel
 
 /--
+The theorem shape for the open creation boundary.
+
+Both sides must issue the same `CreateSite`; then every shared creation
+response is fed to both continuations and the resulting states remain related.
+-/
+structure OpenCreateRel
+    {SourceState : Type v} {TargetState : Type w}
+    (responseRel : CreateResponse → Prop)
+    (stateRel : SourceState → TargetState → Prop)
+    (source : OpenCreate SourceState)
+    (target : OpenCreate TargetState) : Prop where
+  sameSite : source.site = target.site
+  preservesAllResponses :
+    ∀ response, responseRel response →
+      stateRel (source.resume response) (target.resume response)
+
+namespace OpenCreateRel
+
+theorem preserves_response
+    {SourceState : Type v} {TargetState : Type w}
+    {responseRel : CreateResponse → Prop}
+    {stateRel : SourceState → TargetState → Prop}
+    {source : OpenCreate SourceState}
+    {target : OpenCreate TargetState}
+    (hRel : OpenCreateRel responseRel stateRel source target)
+    (response : CreateResponse) (hResponse : responseRel response) :
+    stateRel (source.resume response) (target.resume response) :=
+  hRel.preservesAllResponses response hResponse
+
+end OpenCreateRel
+
+/--
 Pointwise relation between two open results.
 
 The `call` branch is intentionally visible: a proof cannot relate suspended
@@ -1689,6 +2463,15 @@ inductive OpenResultRel
           (sourceCall.resume response) (targetCall.resume response)) →
       OpenResultRel callResponseRel doneRel
         (.call sourceCall) (.call targetCall)
+  | create
+      {sourceCreate : OpenCreate (OpenResult ε₁ α)}
+      {targetCreate : OpenCreate (OpenResult ε₂ β)} :
+      sourceCreate.site = targetCreate.site →
+      (∀ response,
+        OpenResultRel callResponseRel doneRel
+          (sourceCreate.resume response) (targetCreate.resume response)) →
+      OpenResultRel callResponseRel doneRel
+        (.create sourceCreate) (.create targetCreate)
 
 namespace OpenResultRel
 
@@ -1736,12 +2519,44 @@ theorem bind
       cases sourceDone <;> cases targetDone <;>
         exact hDone hDoneRel
   | call hSite _hResume ih =>
-      simp [OpenResult.bind]
+      rw [OpenResult.bind_call, OpenResult.bind_call]
       exact OpenResultRel.call hSite (by
         intro response hResponse
         exact ih response (hCallResponse hResponse))
+  | create hSite _hResume ih =>
+      rw [OpenResult.bind_create, OpenResult.bind_create]
+      exact OpenResultRel.create hSite (by
+        intro response
+        exact ih response)
 
 end OpenResultRel
+
+namespace CreateSite
+
+/--
+Legacy call-trace fields are retained on `OpenEvent` so the existing CALL proof
+surface does not need a simultaneous whole-repo rewrite. Creation events carry
+their real `CreateSite` in `OpenEvent.create?`; this deterministic sentinel is
+only the inert filler for the legacy call-shaped fields.
+-/
+def callTraceSentinel (site : CreateSite) : CallSite :=
+  { request :=
+      { kind := .call
+        requestedGas := EvmYul.UInt256.ofNat 0
+        caller := site.request.creator
+        recipient := site.request.creator
+        codeAddress := site.request.creator
+        transferValue := site.request.value
+        apparentValue := site.request.value
+        calldata := site.request.initCode
+        permission := site.request.permission }
+    returnWindow :=
+      { inOffset := EvmYul.UInt256.ofNat 0
+        inSize := EvmYul.UInt256.ofNat 0
+        outOffset := EvmYul.UInt256.ofNat 0
+        outSize := EvmYul.UInt256.ofNat 0 } }
+
+end CreateSite
 
 /--
 One externally observable interaction in a finite open-execution trace.
@@ -1753,6 +2568,33 @@ request and resumes from the same arbitrary response.
 structure OpenEvent where
   site : CallSite
   response : CallResponse
+  create? : Option (CreateSite × CreateResponse) := none
+
+namespace OpenEvent
+
+def call (site : CallSite) (response : CallResponse) : OpenEvent :=
+  { site := site
+    response := response }
+
+def create (site : CreateSite) (response : CreateResponse) : OpenEvent :=
+  { site := site.callTraceSentinel
+    response := CallResponse.failureZero
+    create? := some (site, response) }
+
+@[simp] theorem call_create? (site : CallSite) (response : CallResponse) :
+    (OpenEvent.call site response).create? = none :=
+  rfl
+
+@[simp] theorem call_eq_mk (site : CallSite) (response : CallResponse) :
+    OpenEvent.call site response = { site := site, response := response } :=
+  rfl
+
+@[simp] theorem create_create? (site : CreateSite)
+    (response : CreateResponse) :
+    (OpenEvent.create site response).create? = some (site, response) :=
+  rfl
+
+end OpenEvent
 
 abbrev OpenTrace : Type :=
   List OpenEvent
@@ -1769,7 +2611,10 @@ stating exactly which opaque mutations are admissible.
 -/
 def ResponsesSatisfy
     (responseRel : CallResponse → Prop) (trace : OpenTrace) : Prop :=
-  ∀ event, event ∈ trace → responseRel event.response
+  ∀ event, event ∈ trace →
+    match event.create? with
+    | none => responseRel event.response
+    | some _ => True
 
 theorem append
     {responseRel : CallResponse → Prop} {left right : OpenTrace}
@@ -1816,7 +2661,14 @@ inductive OpenResultResolves
       {result : Except ε α} :
       OpenResultResolves (call.resume response) trace result →
       OpenResultResolves (.call call)
-        ({ site := call.site, response := response } :: trace) result
+        (OpenEvent.call call.site response :: trace) result
+  | create
+      {create : OpenCreate (OpenResult ε α)}
+      {response : CreateResponse} {trace : OpenTrace}
+      {result : Except ε α} :
+      OpenResultResolves (create.resume response) trace result →
+      OpenResultResolves (.create create)
+        (OpenEvent.create create.site response :: trace) result
 
 namespace OpenResultResolves
 
@@ -1832,9 +2684,11 @@ theorem bind_ok
   induction hSource generalizing value right with
   | done =>
       cases hSourceDone
-      simpa [OpenResult.bind] using hNext
+      simpa using hNext
   | @call call response trace sourceDone hTail ih =>
       exact OpenResultResolves.call (ih hNext hSourceDone)
+  | @create create response trace sourceDone hTail ih =>
+      exact OpenResultResolves.create (ih hNext hSourceDone)
 
 theorem bind_error
     {ε : Type u} {α : Type v} {β : Type w}
@@ -1849,6 +2703,8 @@ theorem bind_error
       exact OpenResultResolves.done
   | @call call response trace sourceDone hTail ih =>
       exact OpenResultResolves.call (ih hSourceDone)
+  | @create create response trace sourceDone hTail ih =>
+      exact OpenResultResolves.create (ih hSourceDone)
 
 /--
 Invert resolution through `OpenResult.bind`.
@@ -1892,24 +2748,32 @@ theorem bind_inv
           OpenResultResolves
             (OpenResult.bind (.call sourceCall) next) trace result →
               Split (.call sourceCall) trace result)
-      (done := by
+      (motive_3 := fun sourceCreate =>
+        ∀ {trace result},
+          OpenResultResolves
+            (OpenResult.bind (.create sourceCreate) next) trace result →
+              Split (.create sourceCreate) trace result)
+      (by
         intro sourceDone trace result hResolve
         cases sourceDone with
         | ok value =>
             exact
               Or.inr
                 ⟨[], trace, value, by simp, OpenResultResolves.done,
-                  by simpa [OpenResult.bind] using hResolve⟩
+                  by simpa using hResolve⟩
         | error err =>
             have hDone :
                 OpenResultResolves (.done (.error err)) trace result := by
-              simpa [OpenResult.bind] using hResolve
+              simpa using hResolve
             cases hDone
             exact Or.inl ⟨err, OpenResultResolves.done, rfl⟩)
-      (call := by
+      (by
         intro sourceCall hCall trace result hResolve
         exact hCall hResolve)
-      (mk := by
+      (by
+        intro sourceCreate hCreate trace result hResolve
+        exact hCreate hResolve)
+      (by
         intro site resume ih trace result hResolve
         have hCall :
             OpenResultResolves
@@ -1918,7 +2782,7 @@ theorem bind_inv
                   resume := fun response =>
                     OpenResult.bind (resume response) next })
               trace result := by
-          simpa [OpenResult.bind] using hResolve
+          simpa [OpenResult.bind_call] using hResolve
         cases hCall with
         | @call _ response tail result hTail =>
             rcases ih response hTail with hError | hOk
@@ -1930,9 +2794,33 @@ theorem bind_inv
                 ⟨left, right, value, hTrace, hPrefix, hSuffix⟩
               exact
                 Or.inr
-                  ⟨{ site := site, response := response } :: left,
+                  ⟨OpenEvent.call site response :: left,
                     right, value, by simp [hTrace],
                     OpenResultResolves.call hPrefix, hSuffix⟩)
+      (by
+        intro site resume ih trace result hResolve
+        have hCreate :
+            OpenResultResolves
+              (.create
+                { site := site
+                  resume := fun response =>
+                    OpenResult.bind (resume response) next })
+              trace result := by
+          simpa [OpenResult.bind_create] using hResolve
+        cases hCreate with
+        | @create _ response tail result hTail =>
+            rcases ih response hTail with hError | hOk
+            · rcases hError with ⟨err, hPrefix, hResult⟩
+              exact
+                Or.inl
+                  ⟨err, OpenResultResolves.create hPrefix, hResult⟩
+            · rcases hOk with
+                ⟨left, right, value, hTrace, hPrefix, hSuffix⟩
+              exact
+                Or.inr
+                  ⟨OpenEvent.create site response :: left,
+                    right, value, by simp [hTrace],
+                    OpenResultResolves.create hPrefix, hSuffix⟩)
       source) hResolve
 
 /--
@@ -2035,6 +2923,55 @@ theorem deterministic
       cases hRight with
       | @call _ _ _ _ hTail' =>
           exact ih hTail'
+  | @create create response trace left hTail ih =>
+      cases hRight with
+      | @create _ _ _ _ hTail' =>
+          exact ih hTail'
+
+theorem exists_trace {ε : Type u} {α : Type v} :
+    ∀ source : OpenResult ε α,
+      ∃ trace : OpenTrace,
+      ∃ outcome : Except ε α,
+        OpenResultResolves source trace outcome := by
+  intro source
+  exact
+    OpenResult.rec
+      (motive_1 := fun source =>
+        ∃ trace : OpenTrace,
+        ∃ outcome : Except ε α,
+          OpenResultResolves source trace outcome)
+      (motive_2 := fun call =>
+        ∃ trace : OpenTrace,
+        ∃ outcome : Except ε α,
+          OpenResultResolves (.call call) trace outcome)
+      (motive_3 := fun create =>
+        ∃ trace : OpenTrace,
+        ∃ outcome : Except ε α,
+          OpenResultResolves (.create create) trace outcome)
+      (by
+        intro outcome
+        exact ⟨[], outcome, OpenResultResolves.done⟩)
+      (by
+        intro _call hCall
+        exact hCall)
+      (by
+        intro _create hCreate
+        exact hCreate)
+      (by
+        intro site resume ih
+        rcases ih CallResponse.failureZero with
+          ⟨trace, outcome, hTail⟩
+        exact
+          ⟨OpenEvent.call site CallResponse.failureZero :: trace,
+            outcome, OpenResultResolves.call hTail⟩)
+      (by
+        intro site resume ih
+        rcases ih CreateResponse.failureZero with
+          ⟨trace, outcome, hTail⟩
+        exact
+          ⟨OpenEvent.create site CreateResponse.failureZero :: trace,
+            outcome, OpenResultResolves.create hTail⟩)
+      source
 
 /-- Invert one recorded request from a suspended open computation. -/
 theorem call_inv
@@ -2044,10 +2981,24 @@ theorem call_inv
     (hResolve :
       OpenResultResolves (.call call) (event :: trace) result) :
     ∃ response,
-      event = { site := call.site, response := response } ∧
+      event = OpenEvent.call call.site response ∧
         OpenResultResolves (call.resume response) trace result := by
   cases hResolve with
   | call hTail =>
+      exact ⟨_, rfl, hTail⟩
+
+/-- Invert one recorded creation request from a suspended open computation. -/
+theorem create_inv
+    {ε : Type u} {α : Type v}
+    {create : OpenCreate (OpenResult ε α)}
+    {event : OpenEvent} {trace : OpenTrace} {result : Except ε α}
+    (hResolve :
+      OpenResultResolves (.create create) (event :: trace) result) :
+    ∃ response,
+      event = OpenEvent.create create.site response ∧
+        OpenResultResolves (create.resume response) trace result := by
+  cases hResolve with
+  | create hTail =>
       exact ⟨_, rfl, hTail⟩
 
 end OpenResultResolves
@@ -2080,8 +3031,18 @@ inductive OpenResultPathRel
       OpenResultPathRel callResponseRel doneRel trace
         (sourceCall.resume response) (targetCall.resume response) →
       OpenResultPathRel callResponseRel doneRel
-        ({ site := sourceCall.site, response := response } :: trace)
+        (OpenEvent.call sourceCall.site response :: trace)
         (.call sourceCall) (.call targetCall)
+  | create
+      {sourceCreate : OpenCreate (OpenResult ε₁ α)}
+      {targetCreate : OpenCreate (OpenResult ε₂ β)}
+      {response : CreateResponse} {trace : OpenTrace} :
+      sourceCreate.site = targetCreate.site →
+      OpenResultPathRel callResponseRel doneRel trace
+        (sourceCreate.resume response) (targetCreate.resume response) →
+      OpenResultPathRel callResponseRel doneRel
+        (OpenEvent.create sourceCreate.site response :: trace)
+        (.create sourceCreate) (.create targetCreate)
 
 namespace OpenResultPathRel
 
@@ -2109,6 +3070,10 @@ theorem resolves
       rcases ih with ⟨sourceDone, targetDone, hSource, hTarget, hDone⟩
       refine ⟨sourceDone, targetDone, OpenResultResolves.call hSource, ?_, hDone⟩
       simpa [hSite] using (OpenResultResolves.call hTarget)
+  | @create sourceCreate targetCreate response trace hSite _hTail ih =>
+      rcases ih with ⟨sourceDone, targetDone, hSource, hTarget, hDone⟩
+      refine ⟨sourceDone, targetDone, OpenResultResolves.create hSource, ?_, hDone⟩
+      simpa [hSite] using (OpenResultResolves.create hTarget)
 
 /--
 Rebuild a paired path from two resolutions over the same recorded events.
@@ -2152,10 +3117,58 @@ theorem of_resolves_of_responsesSatisfy
             (targetCall := targetCall) hSite
           · exact
               hResponses
-                { site := sourceCall.site, response := response } (by simp)
+                (OpenEvent.call sourceCall.site response) (by simp)
           · exact ih hTargetTail (by
               intro event hMem
               exact hResponses event (List.mem_cons_of_mem _ hMem)) hDone
+      | create targetCreate =>
+          rcases OpenResultResolves.create_inv hTarget with
+            ⟨targetResponse, hEvent, _hTargetTail⟩
+          have hImpossible :
+              none =
+                some (targetCreate.site, targetResponse) :=
+            congrArg OpenEvent.create? hEvent
+          simp at hImpossible
+  | @create sourceCreate response trace sourceDone hSource ih =>
+      cases target with
+      | done targetDone =>
+          cases hTarget
+      | call targetCall =>
+          rcases OpenResultResolves.call_inv hTarget with
+            ⟨targetResponse, hEvent, _hTargetTail⟩
+          have hImpossible :
+              some (sourceCreate.site, response) = none :=
+            congrArg OpenEvent.create? hEvent
+          simp at hImpossible
+      | create targetCreate =>
+          rcases OpenResultResolves.create_inv hTarget with
+            ⟨targetResponse, hEvent, hTargetTail⟩
+          have hSite : sourceCreate.site = targetCreate.site := by
+            have hSome :
+                some (sourceCreate.site, response) =
+                  some (targetCreate.site, targetResponse) :=
+              congrArg OpenEvent.create? hEvent
+            have hPair :
+                (sourceCreate.site, response) =
+                  (targetCreate.site, targetResponse) := by
+              injection hSome with hPair
+            exact congrArg Prod.fst hPair
+          have hResponse : response = targetResponse := by
+            have hSome :
+                some (sourceCreate.site, response) =
+                  some (targetCreate.site, targetResponse) :=
+              congrArg OpenEvent.create? hEvent
+            have hPair :
+                (sourceCreate.site, response) =
+                  (targetCreate.site, targetResponse) := by
+              injection hSome with hPair
+            exact congrArg Prod.snd hPair
+          subst targetResponse
+          apply OpenResultPathRel.create (sourceCreate := sourceCreate)
+            (targetCreate := targetCreate) hSite
+          exact ih hTargetTail (by
+            intro event hMem
+            exact hResponses event (List.mem_cons_of_mem _ hMem)) hDone
 
 /--
 Compose one related finite path through a pair of continuations.
@@ -2210,11 +3223,11 @@ theorem bind
   induction hRel with
   | @done sourceDone targetDone hDoneRel =>
       cases sourceDone <;> cases targetDone <;>
-        simpa [OpenResult.bind] using hDone hDoneRel
+        simpa using hDone hDoneRel
   | @call sourceCall targetCall response trace hSite hResponse _hTail ih =>
       rcases ih with ⟨tailTrace, hTail⟩
       refine ⟨tailTrace, ?_⟩
-      simpa [OpenResult.bind] using
+      simpa [OpenResult.bind_call] using
         (OpenResultPathRel.call
           (sourceCall :=
             { site := sourceCall.site
@@ -2225,6 +3238,20 @@ theorem bind
               resume := fun response =>
                 OpenResult.bind (targetCall.resume response) targetNext })
           hSite (hCallResponse hResponse) hTail)
+  | @create sourceCreate targetCreate response trace hSite _hTail ih =>
+      rcases ih with ⟨tailTrace, hTail⟩
+      refine ⟨tailTrace, ?_⟩
+      simpa [OpenResult.bind_create] using
+        (OpenResultPathRel.create
+          (sourceCreate :=
+            { site := sourceCreate.site
+              resume := fun response =>
+                OpenResult.bind (sourceCreate.resume response) sourceNext })
+          (targetCreate :=
+            { site := targetCreate.site
+              resume := fun response =>
+                OpenResult.bind (targetCreate.resume response) targetNext })
+          hSite hTail)
 
 /--
 Compose one selected successful prefix path with the continuation reached at
@@ -2276,7 +3303,7 @@ theorem bind_selected_ok
   | @done sourceDone targetDone hDone =>
       cases hSource
       cases hTarget
-      simpa [OpenResult.bind] using hNext
+      simpa using hNext
   | @call sourceCall targetCall response trace hSite hResponse _hTail ih =>
       rcases OpenResultResolves.call_inv hSource with
         ⟨sourceResponse, hSourceEvent, hSourceTail⟩
@@ -2288,7 +3315,7 @@ theorem bind_selected_ok
       have hTargetResponse : response = targetResponse :=
         congrArg OpenEvent.response hTargetEvent
       subst targetResponse
-      simpa [OpenResult.bind] using
+      simpa [OpenResult.bind_call] using
         (OpenResultPathRel.call
           (sourceCall :=
             { site := sourceCall.site
@@ -2301,6 +3328,47 @@ theorem bind_selected_ok
                 OpenResult.bind (targetCall.resume response)
                   targetNext })
           hSite (hCallResponse hResponse)
+          (ih hSourceTail hTargetTail hNext))
+  | @create sourceCreate targetCreate response trace hSite _hTail ih =>
+      rcases OpenResultResolves.create_inv hSource with
+        ⟨sourceResponse, hSourceEvent, hSourceTail⟩
+      have hSourceResponse : response = sourceResponse := by
+        have hSome :
+            some (sourceCreate.site, response) =
+              some (sourceCreate.site, sourceResponse) :=
+          congrArg OpenEvent.create? hSourceEvent
+        have hPair :
+            (sourceCreate.site, response) =
+              (sourceCreate.site, sourceResponse) := by
+          injection hSome with hPair
+        exact congrArg Prod.snd hPair
+      subst sourceResponse
+      rcases OpenResultResolves.create_inv hTarget with
+        ⟨targetResponse, hTargetEvent, hTargetTail⟩
+      have hTargetResponse : response = targetResponse := by
+        have hSome :
+            some (sourceCreate.site, response) =
+              some (targetCreate.site, targetResponse) :=
+          congrArg OpenEvent.create? hTargetEvent
+        have hPair :
+            (sourceCreate.site, response) =
+              (targetCreate.site, targetResponse) := by
+          injection hSome with hPair
+        exact congrArg Prod.snd hPair
+      subst targetResponse
+      simpa [OpenResult.bind_create] using
+        (OpenResultPathRel.create
+          (sourceCreate :=
+            { site := sourceCreate.site
+              resume := fun response =>
+                OpenResult.bind (sourceCreate.resume response)
+                  sourceNext })
+          (targetCreate :=
+            { site := targetCreate.site
+              resume := fun response =>
+                OpenResult.bind (targetCreate.resume response)
+                  targetNext })
+          hSite
           (ih hSourceTail hTargetTail hNext))
 
 /--
@@ -2354,9 +3422,9 @@ theorem bind_nil
   induction hRel with
   | @done sourceDone targetDone hDoneRel =>
       cases sourceDone <;> cases targetDone <;>
-        simpa [OpenResult.bind] using hDone hDoneRel
+        simpa using hDone hDoneRel
   | @call sourceCall targetCall response trace hSite hResponse _hTail ih =>
-      simpa [OpenResult.bind] using
+      simpa [OpenResult.bind_call] using
         (OpenResultPathRel.call
           (sourceCall :=
             { site := sourceCall.site
@@ -2367,6 +3435,18 @@ theorem bind_nil
               resume := fun response =>
                 OpenResult.bind (targetCall.resume response) targetNext })
           hSite (hCallResponse hResponse) ih)
+  | @create sourceCreate targetCreate response trace hSite _hTail ih =>
+      simpa [OpenResult.bind_create] using
+        (OpenResultPathRel.create
+          (sourceCreate :=
+            { site := sourceCreate.site
+              resume := fun response =>
+                OpenResult.bind (sourceCreate.resume response) sourceNext })
+          (targetCreate :=
+            { site := targetCreate.site
+              resume := fun response =>
+                OpenResult.bind (targetCreate.resume response) targetNext })
+          hSite ih)
 
 end OpenResultPathRel
 
@@ -2409,12 +3489,19 @@ theorem path_of_resolves_of_responsesSatisfy_map
       | call hSite hResume =>
           have hResponse : responseRel response :=
             hResponses
-              { site := sourceCall.site, response := response } (by simp)
+              (OpenEvent.call sourceCall.site response) (by simp)
           apply OpenResultPathRel.call hSite
           · exact hCallResponse hResponse
           · apply ih (hRel := hResume response (hCallResponse hResponse))
             intro event hMem
             exact hResponses event (List.mem_cons_of_mem _ hMem)
+  | @create sourceCreate response trace sourceDone hTail ih =>
+      cases hRel with
+      | create hSite hResume =>
+          apply OpenResultPathRel.create hSite
+          apply ih (hRel := hResume response)
+          intro event hMem
+          exact hResponses event (List.mem_cons_of_mem _ hMem)
 
 /--
 Project a tree-shaped open-result relation whose response relation depends only
@@ -2451,6 +3538,12 @@ concerns; this relation records the open external effect and the local stack
 result needed by expression lowering.
 -/
 def PrimitiveEVMResultRel (baseStack : Stack) :
+    EvmYul.SharedState .EVM × List Word → EvmYul.EVM.State → Prop :=
+  fun primitiveResult evmResult =>
+    evmResult.toSharedState = primitiveResult.1 ∧
+      evmResult.stack = primitiveResult.2.reverse ++ baseStack
+
+def PrimitiveEVMCreateResultRel (baseStack : Stack) :
     EvmYul.SharedState .EVM × List Word → EvmYul.EVM.State → Prop :=
   fun primitiveResult evmResult =>
     evmResult.toSharedState = primitiveResult.1 ∧
@@ -2500,6 +3593,69 @@ theorem primitiveSharedOpenCallRel_evmOpenCall_of_args
       simp [primitiveCall, evmCall, PrimitiveEVMResultRel]
 
 end CallKind
+
+namespace CreateKind
+
+@[simp] theorem evmOpenCreate?_args
+    (state : EvmYul.EVM.State)
+    (kind : CreateKind) (operands : CreateOperands) (baseStack : Stack) :
+    evmOpenCreate?
+        ({ state with stack := kind.args operands ++ baseStack }
+          : EvmYul.EVM.State) kind =
+      some
+        { site :=
+            (CallContext.ofEVMState state).createSite kind
+              (kind.canonicalOperands operands)
+          resume := fun response =>
+            { state with
+              toSharedState :=
+                ((CallContext.ofEVMState state).createSite kind
+                    (kind.canonicalOperands operands)).finishShared
+                  state.toSharedState response
+              stack := response.address :: baseStack } } := by
+  cases kind <;> rfl
+
+theorem primitiveOpenCreateRel_evmOpenCreate
+    (state : EvmYul.EVM.State) (shared : EvmYul.SharedState .EVM)
+    (hShared : state.toSharedState = shared)
+    (kind : CreateKind) (operands : CreateOperands) (baseStack : Stack) :
+    ∃ primitiveCreate :
+        OpenCreate (EvmYul.SharedState .EVM × List Word),
+    ∃ evmCreate : OpenCreate EvmYul.EVM.State,
+      primitiveSharedOpenCreate? shared kind
+          (kind.args operands).reverse =
+        some primitiveCreate ∧
+      evmOpenCreate?
+          ({ state with stack := kind.args operands ++ baseStack }
+            : EvmYul.EVM.State) kind =
+        some evmCreate ∧
+      OpenCreateRel (fun _ => True) (PrimitiveEVMCreateResultRel baseStack)
+        primitiveCreate evmCreate := by
+  subst shared
+  let site :=
+    (CallContext.ofEVMState state).createSite kind
+      (kind.canonicalOperands operands)
+  let primitiveCreate :
+      OpenCreate (EvmYul.SharedState .EVM × List Word) :=
+    { site := site
+      resume := fun response =>
+        (site.finishShared state.toSharedState response,
+          [response.address]) }
+  let evmCreate : OpenCreate EvmYul.EVM.State :=
+    { site := site
+      resume := fun response =>
+        { state with
+          toSharedState := site.finishShared state.toSharedState response
+          stack := response.address :: baseStack } }
+  refine ⟨primitiveCreate, evmCreate, ?_, ?_, ?_⟩
+  · cases kind <;> rfl
+  · cases kind <;> rfl
+  · constructor
+    · rfl
+    · intro response _hResponse
+      simp [primitiveCreate, evmCreate, PrimitiveEVMCreateResultRel]
+
+end CreateKind
 
 end OpenExternal
 

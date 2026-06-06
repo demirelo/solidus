@@ -25,6 +25,84 @@ noncomputable def compileLiveNoInternalCallChecked?
   let obj ← program.toObjects?
   Objects.Source.Program.compileLiveNoInternalCallChecked? obj
 
+noncomputable def compileCheckedWithConservativeSpillSourceOwned?
+    (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
+    (program : Program) : Option Assembly.Program := do
+  let obj ← program.toObjects?
+  Objects.Source.Program.compileCheckedWithConservativeSpillSourceOwned?
+    range obj
+
+noncomputable def compileCheckedWithAdaptiveSpillSourceOwned?
+    (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
+    (program : Program) : Option Assembly.Program := do
+  let obj ← program.toObjects?
+  Objects.Source.Program.compileCheckedWithAdaptiveSpillSourceOwned?
+    range obj
+
+noncomputable def compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?
+    (maxWords : Nat) (program : Program) :
+    Option (Locals.SourceLowering.StateRel.SpillScratch.ScratchRange ×
+      Assembly.Program) := do
+  let obj ← program.toObjects?
+  Objects.Source.Program.compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?
+    maxWords obj
+
+noncomputable def compileStackGuardedSourceOwned?
+    (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
+    (program : Program) : Option Assembly.Program :=
+  match compileLiveNoInternalCallChecked? program with
+  | some asm => some asm
+  | none => compileCheckedWithAdaptiveSpillSourceOwned? range program
+
+def StackGuardedSourceOwnedProgramOutcomeRel
+    (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
+    (initial : EVMState)
+    (source : Objects.Source.Outcome) (target : Assembly.StepResult) : Prop :=
+  SourceLowered.WholeProgramOutcomeRel source target ∨
+    Locals.Source.Program.AdaptiveSpillProgramOutcomeRel range initial source
+      target
+
+def StackGuardedSourceOwnedObservableOutcomeRel
+    (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
+    (source : Objects.Source.Outcome) (target : Assembly.StepResult) : Prop :=
+  SourceLowered.WholeProgramOutcomeRel source target ∨
+    Locals.Source.Program.AdaptiveSpillObservableOutcomeRel range source target
+
+/--
+Scratch policy for the source-owned stack-guarded compiler.
+
+The exact live-layout branch does not use private scratch memory.  The adaptive
+fallback branch does, so the caller must prove the declared scratch range is
+ready only when live-layout compilation fails.
+-/
+abbrev StackGuardedSourceOwnedFallbackScratchReady
+    (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
+    (program : Program) (initial : EVMState) : Prop :=
+  compileLiveNoInternalCallChecked? program = none →
+    Locals.SourceLowering.StateRel.SpillScratch.PrivateScratchBoundary.scratchCheck?
+        initial.toMachineState range [] [] [] =
+      true
+
+theorem StackGuardedSourceOwnedFallbackScratchReady.of_liveLayout
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {initial : EVMState} {asm : Assembly.Program}
+    (hLiveLayout :
+      compileLiveNoInternalCallChecked? program = some asm) :
+    StackGuardedSourceOwnedFallbackScratchReady range program initial := by
+  intro hFallback
+  simp [hLiveLayout] at hFallback
+
+theorem StackGuardedSourceOwnedFallbackScratchReady.of_scratchCheck
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {initial : EVMState}
+    (hScratch :
+      Locals.SourceLowering.StateRel.SpillScratch.PrivateScratchBoundary.scratchCheck?
+          initial.toMachineState range [] [] [] =
+        true) :
+    StackGuardedSourceOwnedFallbackScratchReady range program initial := by
+  intro _hFallback
+  exact hScratch
+
 noncomputable def compileSolcChecked? (program : Program) :
     Option Assembly.Program :=
   if SolcValidation.ProgramOk? program then
@@ -69,6 +147,256 @@ theorem compileLiveNoInternalCallChecked?_eq_some
   | some obj =>
       simp [hObj] at hCompile
       exact ⟨obj, rfl, hCompile⟩
+
+theorem compileCheckedWithConservativeSpillSourceOwned?_eq_some
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithConservativeSpillSourceOwned? range program =
+        some asm) :
+    ∃ obj : Objects.Program,
+      program.toObjects? = some obj ∧
+        Objects.Source.Program.compileCheckedWithConservativeSpillSourceOwned?
+            range obj =
+          some asm := by
+  unfold compileCheckedWithConservativeSpillSourceOwned? at hCompile
+  cases hObj : program.toObjects? with
+  | none =>
+      simp [hObj] at hCompile
+  | some obj =>
+      simp [hObj] at hCompile
+      exact ⟨obj, rfl, hCompile⟩
+
+theorem compileCheckedWithConservativeSpillSourceOwned?_of_toObjects_compileBlockOpen?
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {obj : Objects.Program}
+    {plan : Locals.SourceLowering.StateRel.SpillScratch.SpillPlan}
+    {asm : Assembly.Program}
+    (hObj : program.toObjects? = some obj)
+    (hOwnedCheck :
+      Functions.SourceLowering.SourceToLocals.Block.sourceOwned? []
+          obj.toFunctions.body =
+        true)
+    (hPlan :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.compileBlockOpen?
+          range [] [] [] obj.toFunctions.toLocals.body =
+        some plan)
+    (hCompile :
+      Expressions.Program.compileChecked?
+          (Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.toExpressionsProgram
+            plan) =
+        some asm) :
+    compileCheckedWithConservativeSpillSourceOwned? range program =
+      some asm := by
+  unfold compileCheckedWithConservativeSpillSourceOwned?
+  simp [hObj,
+    Objects.Source.Program.compileCheckedWithConservativeSpillSourceOwned?_of_compileBlockOpen?
+      hOwnedCheck hPlan hCompile]
+
+theorem compileCheckedWithConservativeSpillSourceOwned?_of_toObjects_compileBlockOpen?_bounds
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {obj : Objects.Program}
+    {plan : Locals.SourceLowering.StateRel.SpillScratch.SpillPlan}
+    (hObj : program.toObjects? = some obj)
+    (hOwnedCheck :
+      Functions.SourceLowering.SourceToLocals.Block.sourceOwned? []
+          obj.toFunctions.body =
+        true)
+    (hPlan :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.compileBlockOpen?
+          range [] [] [] obj.toFunctions.toLocals.body =
+        some plan)
+    (hBounds :
+      Structured.Preservation.ProcedurePreservation.CompilationBounds
+        (Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.toExpressionsProgram
+          plan).toStructured) :
+    compileCheckedWithConservativeSpillSourceOwned? range program =
+      some
+        (Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.toExpressionsProgram
+          plan).compile := by
+  unfold compileCheckedWithConservativeSpillSourceOwned?
+  simp [hObj,
+    Objects.Source.Program.compileCheckedWithConservativeSpillSourceOwned?_of_compileBlockOpen?_bounds
+      hOwnedCheck hPlan hBounds]
+
+theorem compileCheckedWithConservativeSpillSourceOwned?_of_toObjects_scopedFallback_bounds
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {obj : Objects.Program}
+    {plan : Locals.SourceLowering.StateRel.SpillScratch.SpillPlan}
+    (hObj : program.toObjects? = some obj)
+    (hOwnedCheck :
+      Functions.SourceLowering.SourceToLocals.Block.sourceOwned? []
+          obj.toFunctions.body =
+        true)
+    (hPlan :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.compileBlockOpenWithConservativeScopedSpill?
+          range [] [] [] obj.toFunctions.toLocals.body =
+        some plan)
+    (hBounds :
+      Structured.Preservation.ProcedurePreservation.CompilationBounds
+        (Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.toExpressionsProgram
+          plan).toStructured) :
+    compileCheckedWithConservativeSpillSourceOwned? range program =
+      some
+        (Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.toExpressionsProgram
+          plan).compile := by
+  unfold compileCheckedWithConservativeSpillSourceOwned?
+  simp [hObj,
+    Objects.Source.Program.compileCheckedWithConservativeSpillSourceOwned?_of_scopedFallback_bounds
+      hOwnedCheck hPlan hBounds]
+
+theorem compileCheckedWithAdaptiveSpillSourceOwned?_eq_some
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithAdaptiveSpillSourceOwned? range program =
+        some asm) :
+    ∃ obj : Objects.Program,
+      program.toObjects? = some obj ∧
+        Objects.Source.Program.compileCheckedWithAdaptiveSpillSourceOwned?
+            range obj =
+          some asm := by
+  unfold compileCheckedWithAdaptiveSpillSourceOwned? at hCompile
+  cases hObj : program.toObjects? with
+  | none =>
+      simp [hObj] at hCompile
+  | some obj =>
+      simp [hObj] at hCompile
+      exact ⟨obj, rfl, hCompile⟩
+
+theorem compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_eq_some
+    {maxWords : Nat} {program : Program}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?
+          maxWords program =
+        some (range, asm)) :
+    ∃ obj : Objects.Program,
+      program.toObjects? = some obj ∧
+        Objects.Source.Program.compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?
+            maxWords obj =
+          some (range, asm) := by
+  unfold compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned? at hCompile
+  cases hObj : program.toObjects? with
+  | none =>
+      simp [hObj] at hCompile
+  | some obj =>
+      simp [hObj] at hCompile
+      exact ⟨obj, rfl, hCompile⟩
+
+theorem compileStackGuardedSourceOwned?_of_liveLayout
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    (hLive : compileLiveNoInternalCallChecked? program = some asm) :
+    compileStackGuardedSourceOwned? range program = some asm := by
+  simp [compileStackGuardedSourceOwned?, hLive]
+
+theorem compileStackGuardedSourceOwned?_of_adaptiveFallback
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    (hLive : compileLiveNoInternalCallChecked? program = none)
+    (hAdaptive :
+      compileCheckedWithAdaptiveSpillSourceOwned? range program = some asm) :
+    compileStackGuardedSourceOwned? range program = some asm := by
+  simp [compileStackGuardedSourceOwned?, hLive, hAdaptive]
+
+theorem compileStackGuardedSourceOwned?_eq_some
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    (hCompile :
+      compileStackGuardedSourceOwned? range program = some asm) :
+    compileLiveNoInternalCallChecked? program = some asm ∨
+      compileLiveNoInternalCallChecked? program = none ∧
+        compileCheckedWithAdaptiveSpillSourceOwned? range program =
+          some asm := by
+  unfold compileStackGuardedSourceOwned? at hCompile
+  cases hLive : compileLiveNoInternalCallChecked? program with
+  | none =>
+      simp [hLive] at hCompile
+      exact Or.inr ⟨rfl, hCompile⟩
+  | some liveAsm =>
+      simp [hLive] at hCompile
+      cases hCompile
+      exact Or.inl rfl
+
+theorem compileCheckedWithAdaptiveSpillSourceOwned?_of_toObjects_compileBlockOpen?
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {obj : Objects.Program}
+    {plan : Locals.SourceLowering.StateRel.SpillScratch.SpillPlan}
+    {asm : Assembly.Program}
+    (hObj : program.toObjects? = some obj)
+    (hOwnedCheck :
+      Functions.SourceLowering.SourceToLocals.Block.sourceOwned? []
+          obj.toFunctions.body =
+        true)
+    (hPlan :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.compileBlockOpen?
+          range [] [] [] obj.toFunctions.toLocals.body =
+        some plan)
+    (hCompile :
+      Expressions.Program.compileChecked?
+          (Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.toExpressionsProgram
+            plan) =
+        some asm) :
+    compileCheckedWithAdaptiveSpillSourceOwned? range program =
+      some asm := by
+  unfold compileCheckedWithAdaptiveSpillSourceOwned?
+  simp [hObj,
+    Objects.Source.Program.compileCheckedWithAdaptiveSpillSourceOwned?_of_compileBlockOpen?
+      hOwnedCheck hPlan hCompile]
+
+theorem compileCheckedWithAdaptiveSpillSourceOwned?_of_toObjects_compileBlockOpen?_bounds
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {obj : Objects.Program}
+    {plan : Locals.SourceLowering.StateRel.SpillScratch.SpillPlan}
+    (hObj : program.toObjects? = some obj)
+    (hOwnedCheck :
+      Functions.SourceLowering.SourceToLocals.Block.sourceOwned? []
+          obj.toFunctions.body =
+        true)
+    (hPlan :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.compileBlockOpen?
+          range [] [] [] obj.toFunctions.toLocals.body =
+        some plan)
+    (hBounds :
+      Structured.Preservation.ProcedurePreservation.CompilationBounds
+        (Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.toExpressionsProgram
+          plan).toStructured) :
+    compileCheckedWithAdaptiveSpillSourceOwned? range program =
+      some
+        (Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.toExpressionsProgram
+          plan).compile := by
+  unfold compileCheckedWithAdaptiveSpillSourceOwned?
+  simp [hObj,
+    Objects.Source.Program.compileCheckedWithAdaptiveSpillSourceOwned?_of_compileBlockOpen?_bounds
+      hOwnedCheck hPlan hBounds]
+
+theorem compileCheckedWithAdaptiveSpillSourceOwned?_of_toObjects_adaptiveFallback_bounds
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {obj : Objects.Program}
+    {plan : Locals.SourceLowering.StateRel.SpillScratch.SpillPlan}
+    (hObj : program.toObjects? = some obj)
+    (hOwnedCheck :
+      Functions.SourceLowering.SourceToLocals.Block.sourceOwned? []
+          obj.toFunctions.body =
+        true)
+    (hPlan :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.compileBlockOpenWithAdaptiveSpill?
+          range [] [] [] obj.toFunctions.toLocals.body =
+        some plan)
+    (hBounds :
+      Structured.Preservation.ProcedurePreservation.CompilationBounds
+        (Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.toExpressionsProgram
+          plan).toStructured) :
+    compileCheckedWithAdaptiveSpillSourceOwned? range program =
+      some
+        (Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.toExpressionsProgram
+          plan).compile := by
+  unfold compileCheckedWithAdaptiveSpillSourceOwned?
+  simp [hObj,
+    Objects.Source.Program.compileCheckedWithAdaptiveSpillSourceOwned?_of_adaptiveFallback_bounds
+      hOwnedCheck hPlan hBounds]
 
 theorem accepted_of_sourceAccepted_compileChecked? {program : Program}
     {asm : Assembly.Program}
@@ -141,6 +469,68 @@ theorem compileLiveNoInternalCallChecked?_noCallCreate_of_loweredFunctions
     Objects.Source.Program.compileLiveNoInternalCallChecked?_noCallCreate
       (program := obj) (asm := asm)
       (hLoweredFunctionsNoCall obj hObj) hObjCompile
+
+theorem compileCheckedWithAdaptiveSpillSourceOwned?_noCallCreate
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithAdaptiveSpillSourceOwned? range program =
+        some asm) :
+    Assembly.Program.usesCallCreate asm = false := by
+  rcases compileCheckedWithAdaptiveSpillSourceOwned?_eq_some hCompile with
+    ⟨obj, _hObj, hObjCompile⟩
+  exact
+    Objects.Source.Program.compileCheckedWithAdaptiveSpillSourceOwned?_noCallCreate
+      hObjCompile
+
+theorem compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_noCallCreate
+    {maxWords : Nat} {program : Program}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?
+          maxWords program =
+        some (range, asm)) :
+    Assembly.Program.usesCallCreate asm = false := by
+  rcases
+      compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_eq_some
+        hCompile with
+    ⟨obj, _hObj, hObjCompile⟩
+  exact
+    Objects.Source.Program.compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_noCallCreate
+      hObjCompile
+
+theorem compileCheckedWithConservativeSpillSourceOwned?_noCallCreate
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithConservativeSpillSourceOwned? range program =
+        some asm) :
+    Assembly.Program.usesCallCreate asm = false := by
+  rcases compileCheckedWithConservativeSpillSourceOwned?_eq_some
+      hCompile with
+    ⟨obj, _hObj, hObjCompile⟩
+  exact
+    Objects.Source.Program.compileCheckedWithConservativeSpillSourceOwned?_noCallCreate
+      hObjCompile
+
+theorem compileStackGuardedSourceOwned?_noCallCreate
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    (hLoweredFunctionsNoCall :
+      ∀ obj : Objects.Program,
+        program.toObjects? = some obj →
+          obj.toFunctions.usesCallCreate = false)
+    (hCompile : compileStackGuardedSourceOwned? range program = some asm) :
+    Assembly.Program.usesCallCreate asm = false := by
+  cases compileStackGuardedSourceOwned?_eq_some hCompile with
+  | inl hLive =>
+      exact
+        compileLiveNoInternalCallChecked?_noCallCreate_of_loweredFunctions
+          hLoweredFunctionsNoCall hLive
+  | inr hFallback =>
+      exact
+        compileCheckedWithAdaptiveSpillSourceOwned?_noCallCreate hFallback.2
 
 theorem compile_preserves {program : Program} {lower : Expressions.Program}
     {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
@@ -504,6 +894,283 @@ theorem compile_live_noInternalCall_source_preserves_checked_endPc_anyFuel
       (fuel := fuel) (initial := initial)
       (sourceOutcome := sourceOutcome) hCompile hSourceAccepted hInitialPc
       hInitialStack hRunSucc
+
+theorem compileCheckedWithConservativeSpillSourceOwned?_source_preserves
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hCompile :
+      compileCheckedWithConservativeSpillSourceOwned? range program =
+        some asm)
+    (hBoundary :
+      Locals.SourceLowering.StateRel.SpillScratch.PrivateScratchBoundary.scratchCheck?
+          initial.toMachineState range [] [] [] =
+        true)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun :
+      SourceLowered.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.ConservativeSpillProgramOutcomeRel range initial
+        sourceOutcome targetOutcome := by
+  rcases compileCheckedWithConservativeSpillSourceOwned?_eq_some
+      hCompile with
+    ⟨obj, hObj, hObjCompile⟩
+  have hObjRun :
+      Objects.Source.Program.run Locals.Source.PrimitiveSemantics.structured
+          fuel obj initial =
+        .ok sourceOutcome := by
+    simpa [SourceLowered.run, hObj] using hRun
+  exact
+    Objects.Source.Program.compileCheckedWithConservativeSpillSourceOwned?_preserves
+      hSpec hWordBytes hObjCompile hBoundary hInitialPc hObjRun
+
+theorem compileCheckedWithConservativeSpillSourceOwned?_source_observations
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hCompile :
+      compileCheckedWithConservativeSpillSourceOwned? range program =
+        some asm)
+    (hBoundary :
+      Locals.SourceLowering.StateRel.SpillScratch.PrivateScratchBoundary.scratchCheck?
+          initial.toMachineState range [] [] [] =
+        true)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun :
+      SourceLowered.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.ConservativeSpillObservableOutcomeRel range
+        sourceOutcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases compileCheckedWithConservativeSpillSourceOwned?_eq_some
+      hCompile with
+    ⟨obj, hObj, hObjCompile⟩
+  have hObjRun :
+      Objects.Source.Program.run Locals.Source.PrimitiveSemantics.structured
+          fuel obj initial =
+        .ok sourceOutcome := by
+    simpa [SourceLowered.run, hObj] using hRun
+  exact
+    Objects.Source.Program.compileCheckedWithConservativeSpillSourceOwned?_observations
+      hSpec hWordBytes hObjCompile hBoundary hInitialPc hObjRun
+
+theorem compileCheckedWithAdaptiveSpillSourceOwned?_source_preserves
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hCompile :
+      compileCheckedWithAdaptiveSpillSourceOwned? range program =
+        some asm)
+    (hBoundary :
+      Locals.SourceLowering.StateRel.SpillScratch.PrivateScratchBoundary.scratchCheck?
+          initial.toMachineState range [] [] [] =
+        true)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun :
+      SourceLowered.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.AdaptiveSpillProgramOutcomeRel range initial
+        sourceOutcome targetOutcome := by
+  rcases compileCheckedWithAdaptiveSpillSourceOwned?_eq_some hCompile with
+    ⟨obj, hObj, hObjCompile⟩
+  have hObjRun :
+      Objects.Source.Program.run Locals.Source.PrimitiveSemantics.structured
+          fuel obj initial =
+        .ok sourceOutcome := by
+    simpa [SourceLowered.run, hObj] using hRun
+  exact
+    Objects.Source.Program.compileCheckedWithAdaptiveSpillSourceOwned?_preserves
+      hSpec hWordBytes hObjCompile hBoundary hInitialPc hObjRun
+
+theorem compileCheckedWithAdaptiveSpillSourceOwned?_source_observations
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hCompile :
+      compileCheckedWithAdaptiveSpillSourceOwned? range program =
+        some asm)
+    (hBoundary :
+      Locals.SourceLowering.StateRel.SpillScratch.PrivateScratchBoundary.scratchCheck?
+          initial.toMachineState range [] [] [] =
+        true)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun :
+      SourceLowered.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.AdaptiveSpillObservableOutcomeRel range
+        sourceOutcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases compileCheckedWithAdaptiveSpillSourceOwned?_eq_some hCompile with
+    ⟨obj, hObj, hObjCompile⟩
+  have hObjRun :
+      Objects.Source.Program.run Locals.Source.PrimitiveSemantics.structured
+          fuel obj initial =
+        .ok sourceOutcome := by
+    simpa [SourceLowered.run, hObj] using hRun
+  exact
+    Objects.Source.Program.compileCheckedWithAdaptiveSpillSourceOwned?_observations
+      hSpec hWordBytes hObjCompile hBoundary hInitialPc hObjRun
+
+theorem compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_source_observations
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    {maxWords : Nat}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hCompile :
+      compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?
+          maxWords program =
+        some (range, asm))
+    (hInitialMemory :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchInitialMemoryEmpty
+        initial.toMachineState)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun :
+      SourceLowered.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.AdaptiveSpillPrivateObservableProgramOutcomeRel
+        range sourceOutcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases
+      compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_eq_some
+        hCompile with
+    ⟨obj, hObj, hObjCompile⟩
+  have hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec :=
+    Locals.SourceLowering.StateRel.SpillScratch.wordByteEncoding_of_zeroPadding
+      hSpec
+  have hObjRun :
+      Objects.Source.Program.run Locals.Source.PrimitiveSemantics.structured
+          fuel obj initial =
+        .ok sourceOutcome := by
+    simpa [SourceLowered.run, hObj] using hRun
+  exact
+    Objects.Source.Program.compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_observations
+      hSpec hWordBytes hObjCompile hInitialMemory hInitialPc hObjRun
+
+theorem compileStackGuardedSourceOwned?_source_preserves
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hCompile : compileStackGuardedSourceOwned? range program = some asm)
+    (hBoundary :
+      StackGuardedSourceOwnedFallbackScratchReady range program initial)
+    (hSourceAccepted : program.SourceAccepted)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hRun :
+      SourceLowered.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      StackGuardedSourceOwnedProgramOutcomeRel range initial sourceOutcome
+        targetOutcome := by
+  cases compileStackGuardedSourceOwned?_eq_some hCompile with
+  | inl hLive =>
+      rcases
+        compile_live_noInternalCall_source_preserves_checked_anyFuel
+          Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound hLive
+          hSourceAccepted hInitialPc hInitialStack hRun with
+      ⟨targetFuel, targetOutcome, hTargetRun, hRel⟩
+      exact
+        ⟨targetFuel, targetOutcome, hTargetRun,
+          Or.inl hRel⟩
+  | inr hFallback =>
+      rcases hFallback with ⟨hLiveNone, hAdaptive⟩
+      rcases
+        compileCheckedWithAdaptiveSpillSourceOwned?_source_preserves
+          hSpec hWordBytes hAdaptive (hBoundary hLiveNone) hInitialPc hRun with
+      ⟨targetFuel, targetOutcome, hTargetRun, hRel⟩
+      exact
+        ⟨targetFuel, targetOutcome, hTargetRun,
+          Or.inr hRel⟩
+
+theorem compileStackGuardedSourceOwned?_source_observations
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hCompile : compileStackGuardedSourceOwned? range program = some asm)
+    (hBoundary :
+      StackGuardedSourceOwnedFallbackScratchReady range program initial)
+    (hSourceAccepted : program.SourceAccepted)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hRun :
+      SourceLowered.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      StackGuardedSourceOwnedObservableOutcomeRel range sourceOutcome
+        targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  cases compileStackGuardedSourceOwned?_eq_some hCompile with
+  | inl hLive =>
+      rcases
+        compile_live_noInternalCall_source_preserves_checked_endPc_anyFuel
+          Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound hLive
+          hSourceAccepted hInitialPc hInitialStack hRun with
+      ⟨targetFuel, targetOutcome, hTargetRun, hRel, hEndPc⟩
+      exact
+        ⟨targetFuel, targetOutcome, hTargetRun,
+          Or.inl hRel, hEndPc⟩
+  | inr hFallback =>
+      rcases hFallback with ⟨hLiveNone, hAdaptive⟩
+      rcases
+        compileCheckedWithAdaptiveSpillSourceOwned?_source_observations
+          hSpec hWordBytes hAdaptive (hBoundary hLiveNone) hInitialPc hRun with
+      ⟨targetFuel, targetOutcome, hTargetRun, hRel, hEndPc⟩
+      exact
+        ⟨targetFuel, targetOutcome, hTargetRun,
+          Or.inr hRel, hEndPc⟩
 
 /--
 Source-facing compiler acceptance for the Yul adapter.

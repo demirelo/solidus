@@ -710,6 +710,16 @@ theorem BlockTraceResult.revert_output_eq_H_return
   have hOutput := hTrace.halted_output
   simpa [HaltKind.output, hRevert] using hOutput
 
+theorem BlockTraceResult.return_output_eq_H_return
+    {program : Program} {target : TargetProgram}
+    {fuel : Nat} {state : EVMState} {halt : Halt}
+    (hTrace :
+      BlockTraceResult program target fuel state (.halted halt))
+    (hReturn : halt.kind = .return) :
+    halt.output = halt.state.toMachineState.H_return := by
+  have hOutput := hTrace.halted_output
+  simpa [HaltKind.output, hReturn] using hOutput
+
 theorem assemble_runN_block_trace_sound {program : Program}
     {target : TargetProgram} {fuel : Nat} {state sourceState : EVMState}
     (hAsm : assemble? program = some target)

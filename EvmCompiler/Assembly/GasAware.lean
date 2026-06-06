@@ -746,6 +746,37 @@ theorem eraseGas_eq {full target : EVMState}
   rw [hRel]
   simp [eraseGas]
 
+theorem of_eraseGas_eq {full target : EVMState}
+    (hErase : eraseGas full = eraseGas target) :
+    GasExecRel full target := by
+  cases full with
+  | mk fullShared fullPc fullStack fullExecLength =>
+      cases target with
+      | mk targetShared targetPc targetStack targetExecLength =>
+          cases fullShared with
+          | mk fullState fullMachine =>
+              cases targetShared with
+              | mk targetState targetMachine =>
+                  cases fullMachine
+                  cases targetMachine
+                  simp [GasExecRel, eraseGas] at hErase ⊢
+                  exact hErase
+
+theorem incrPC {full target : EVMState}
+    (hRel : GasExecRel full target) :
+    GasExecRel
+      (EvmYul.EVM.State.incrPC full)
+      (EvmYul.EVM.State.incrPC target) := by
+  rw [hRel]
+  simp [GasExecRel, EvmYul.EVM.State.incrPC]
+
+theorem trans {left mid right : EVMState}
+    (hLeft : GasExecRel left mid)
+    (hRight : GasExecRel mid right) :
+    GasExecRel left right := by
+  rw [hLeft, hRight]
+  simp [GasExecRel]
+
 theorem pc_eq {full target : EVMState}
     (hRel : GasExecRel full target) :
     full.pc = target.pc := by
@@ -6710,6 +6741,249 @@ def XResultAgrees (targetResult : StepResult) :
       | .running _ => False
       | .halted halt => halt.kind = .revert ∧ output = halt.output
 
+/--
+Final committed-result observation for gas-aware execution.
+
+Successful execution observes the persistent/shared EVM state and return
+output.  All revert-like outcomes are collapsed by the run-level predicates
+below, so revert data and remaining gas are intentionally not part of the
+committed observation.
+-/
+inductive XCommittedObservation where
+  | committed (state : EvmYul.State .EVM) (output : ByteArray)
+  | reverted
+
+def XTargetCommittedObservation : StepResult → XCommittedObservation
+  | .running state => .committed state.toState ByteArray.empty
+  | .halted halt =>
+      match halt.kind with
+      | .revert => .reverted
+      | .stop => .committed halt.state.toState halt.output
+      | .return => .committed halt.state.toState halt.output
+      | .selfdestruct => .committed halt.state.toState halt.output
+
+def XResultCommittedObservation :
+    EvmYul.EVM.ExecutionResult EVMState → XCommittedObservation
+  | .success state output => .committed state.toState output
+  | .revert _gas _output => .reverted
+
+def XRunOutcomeFails :
+    Except EVMException (EvmYul.EVM.ExecutionResult EVMState) → Prop
+  | .ok (.revert _gas _output) => True
+  | .error EvmYul.EVM.ExecutionException.OutOfGass => True
+  | _ => False
+
+def XRunOutcomeCommitsTo
+    (outcome : Except EVMException (EvmYul.EVM.ExecutionResult EVMState))
+    (observation : XCommittedObservation) : Prop :=
+  match outcome with
+  | .ok (.success state output) =>
+      observation = .committed state.toState output
+  | _ => False
+
+namespace XRunOutcomeCommitsTo
+
+theorem ok_result_observation
+    {result : EvmYul.EVM.ExecutionResult EVMState}
+    {observation : XCommittedObservation}
+    (hCommit : XRunOutcomeCommitsTo (.ok result) observation) :
+    observation = XResultCommittedObservation result := by
+  cases result with
+  | success state output =>
+      simpa [XRunOutcomeCommitsTo, XResultCommittedObservation] using hCommit
+  | revert gas output =>
+      simp [XRunOutcomeCommitsTo] at hCommit
+
+end XRunOutcomeCommitsTo
+
+def XRunOutcomeSafelyMatches (targetResult : StepResult)
+    (outcome : Except EVMException (EvmYul.EVM.ExecutionResult EVMState)) :
+    Prop :=
+  (∃ result,
+      outcome = .ok result ∧
+        XResultCommittedObservation result =
+          XTargetCommittedObservation targetResult) ∨
+    XRunOutcomeFails outcome
+
+namespace XRunOutcomeCommitsTo
+
+theorem outcomeSafelyMatches
+    {targetResult : StepResult}
+    {outcome : Except EVMException (EvmYul.EVM.ExecutionResult EVMState)}
+    {observation : XCommittedObservation}
+    (hCommit : XRunOutcomeCommitsTo outcome observation)
+    (hObservation :
+      observation = XTargetCommittedObservation targetResult) :
+    XRunOutcomeSafelyMatches targetResult outcome := by
+  cases outcome with
+  | ok result =>
+      cases result with
+      | success state output =>
+          refine Or.inl ⟨.success state output, rfl, ?_⟩
+          simpa [XRunOutcomeCommitsTo, XResultCommittedObservation]
+            using hCommit.symm.trans hObservation
+      | revert gas output =>
+          simp [XRunOutcomeCommitsTo] at hCommit
+  | error err =>
+      simp [XRunOutcomeCommitsTo] at hCommit
+
+end XRunOutcomeCommitsTo
+
+def XRunOutcomesSafeEquivalent
+    (left right :
+      Except EVMException (EvmYul.EVM.ExecutionResult EVMState)) : Prop :=
+  (∃ observation,
+      XRunOutcomeCommitsTo left observation ∧
+        XRunOutcomeCommitsTo right observation) ∨
+    XRunOutcomeFails left ∨
+      XRunOutcomeFails right
+
+/--
+Directional committed-observation tracking.
+
+`candidate` is safe relative to `reference` when the candidate either fails
+(including out-of-gas) or, if it commits, commits to the same observation as the
+reference.  Unlike `XRunOutcomesSafeEquivalent`, failure of the reference alone
+does not make an arbitrary candidate safe. This is the useful low-gas proof
+shape: the low-gas run may fail, but any low-gas commit must track the
+high-gas/reference commit.
+-/
+def XRunOutcomeSafelyTracks
+    (candidate reference :
+      Except EVMException (EvmYul.EVM.ExecutionResult EVMState)) : Prop :=
+  (∃ observation,
+      XRunOutcomeCommitsTo candidate observation ∧
+        XRunOutcomeCommitsTo reference observation) ∨
+    XRunOutcomeFails candidate
+
+namespace XRunOutcomeSafelyTracks
+
+theorem of_candidate_fails
+    {candidate reference :
+      Except EVMException (EvmYul.EVM.ExecutionResult EVMState)}
+    (hFails : XRunOutcomeFails candidate) :
+    XRunOutcomeSafelyTracks candidate reference :=
+  Or.inr hFails
+
+theorem ok_refl (result : EvmYul.EVM.ExecutionResult EVMState) :
+    XRunOutcomeSafelyTracks (.ok result) (.ok result) := by
+  cases result with
+  | success state output =>
+      exact
+        Or.inl
+          ⟨.committed state.toState output,
+            by simp [XRunOutcomeCommitsTo],
+            by simp [XRunOutcomeCommitsTo]⟩
+  | revert gas output =>
+      exact Or.inr (by simp [XRunOutcomeFails])
+
+theorem retarget_ok
+    {candidate : Except EVMException (EvmYul.EVM.ExecutionResult EVMState)}
+    {left right : EvmYul.EVM.ExecutionResult EVMState}
+    (hTracks : XRunOutcomeSafelyTracks candidate (.ok left))
+    (hObservation :
+      XResultCommittedObservation left =
+        XResultCommittedObservation right) :
+    XRunOutcomeSafelyTracks candidate (.ok right) := by
+  rcases hTracks with hCommit | hFails
+  · rcases hCommit with ⟨observation, hCandidate, hLeft⟩
+    cases left with
+    | success leftState leftOutput =>
+        cases right with
+        | success rightState rightOutput =>
+            exact
+              Or.inl
+                ⟨observation, hCandidate, by
+                  simp [XRunOutcomeCommitsTo,
+                    XResultCommittedObservation] at hLeft hObservation ⊢
+                  rcases hObservation with ⟨hState, hOutput⟩
+                  rw [← hState, ← hOutput]
+                  exact hLeft⟩
+        | revert gas output =>
+            simp [XRunOutcomeCommitsTo,
+              XResultCommittedObservation] at hLeft hObservation
+    | revert gas output =>
+        simp [XRunOutcomeCommitsTo] at hLeft
+  · exact Or.inr hFails
+
+theorem outcomeSafelyMatches_of_result
+    {targetResult : StepResult}
+    {candidate : Except EVMException (EvmYul.EVM.ExecutionResult EVMState)}
+    {reference : EvmYul.EVM.ExecutionResult EVMState}
+    (hTracks : XRunOutcomeSafelyTracks candidate (.ok reference))
+    (hReference :
+      XResultCommittedObservation reference =
+        XTargetCommittedObservation targetResult) :
+    XRunOutcomeSafelyMatches targetResult candidate := by
+  rcases hTracks with hCommit | hFails
+  · rcases hCommit with ⟨observation, hCandidate, hReferenceCommit⟩
+    exact
+      XRunOutcomeCommitsTo.outcomeSafelyMatches hCandidate
+        ((XRunOutcomeCommitsTo.ok_result_observation hReferenceCommit).trans
+          hReference)
+  · exact Or.inr hFails
+
+end XRunOutcomeSafelyTracks
+
+theorem eraseGas_toState (state : EVMState) :
+    (eraseGas state).toState = state.toState := by
+  rfl
+
+theorem XResultAgrees.committedObservation
+    {targetResult : StepResult}
+    {result : EvmYul.EVM.ExecutionResult EVMState}
+    (hAgree : XResultAgrees targetResult result) :
+    XResultCommittedObservation result =
+      XTargetCommittedObservation targetResult := by
+  cases result with
+  | success evmFinal output =>
+      cases targetResult with
+      | running state =>
+          rcases hAgree with ⟨hState, hOutput⟩
+          cases hOutput
+          have hToState :
+              evmFinal.toState = state.toState := by
+            calc
+              evmFinal.toState = (eraseGas evmFinal).toState := by
+                rw [eraseGas_toState]
+              _ = (eraseGas state).toState := by
+                rw [hState]
+              _ = state.toState := eraseGas_toState state
+          simp [XResultCommittedObservation, XTargetCommittedObservation,
+            hToState]
+      | halted halt =>
+          rcases hAgree with ⟨hKind, hState, hOutput⟩
+          cases hOutput
+          rcases halt with ⟨kind, state, haltOutput⟩
+          have hToState :
+              evmFinal.toState = state.toState := by
+            calc
+              evmFinal.toState = (eraseGas evmFinal).toState := by
+                rw [eraseGas_toState]
+              _ = (eraseGas state).toState := by
+                rw [hState]
+              _ = state.toState := eraseGas_toState state
+          cases kind <;>
+            simp [XResultCommittedObservation, XTargetCommittedObservation,
+              hToState] at hKind ⊢
+  | revert gas output =>
+      cases targetResult with
+      | running state =>
+          cases hAgree
+      | halted halt =>
+          rcases hAgree with ⟨hKind, _hOutput⟩
+          rcases halt with ⟨kind, state, haltOutput⟩
+          cases kind <;>
+            simp [XResultCommittedObservation, XTargetCommittedObservation]
+              at hKind ⊢
+
+theorem XResultAgrees.outcomeSafelyMatches
+    {targetResult : StepResult}
+    {result : EvmYul.EVM.ExecutionResult EVMState}
+    (hAgree : XResultAgrees targetResult result) :
+    XRunOutcomeSafelyMatches targetResult (.ok result) :=
+  Or.inl ⟨result, rfl, hAgree.committedObservation⟩
+
 theorem XResultAgrees_running_success_of_gasExecRel
     {full target : EVMState}
     (hRel : GasExecRel full target) :
@@ -11833,7 +12107,7 @@ def XBlockTraceGasBudget (program : Program) :
 /--
 The concrete gas bridge only needs the finite gas budget computed from the
 gasless block trace to fit in a `UInt256`.  This is a resource bound, not a
-semantic replay certificate.
+semantic replay witness.
 -/
 def XTraceGasBudgetFits (program : Program) (targetFuel : Nat)
     (state : EVMState) (targetResult : StepResult) : Prop :=
@@ -13323,7 +13597,7 @@ Trace-local non-gas `EVM.X` path safety for a particular gasless block trace.
 
 This is the small intermediate layer between the gasless target trace and the
 gas-aware runner.  It deliberately follows one concrete `BlockTraceResult`
-rather than asking for a global replay certificate over every possible target
+rather than asking for a global replay assumption over every possible target
 state.  The remaining obligation for higher compiler layers is to construct
 this predicate for the trace they produce, using source/runtime safety facts
 such as return-data-copy bounds and static-mode write exclusion.
@@ -14433,7 +14707,7 @@ def XRunsResultSuccessfullyAbove (target : TargetProgram) (initial : EVMState)
             XResultAgrees targetResult result
 
 /--
-The gas-analysis certificate needed to move from the gasless block trace to
+The gas-analysis evidence needed to move from the gasless block trace to
 EVMYulLean's gas-aware `X` runner.
 
 This is intentionally an assumption interface, not a trusted constant.  A later
@@ -14455,7 +14729,7 @@ abbrev XPreconditionAssumptions :=
   SufficientGasForX
 
 /--
-Result-level gas-analysis certificate for the theorem path whose source
+Result-level gas-analysis evidence for the theorem path whose source
 semantics can halt.  This is the explicit gas/resource boundary for connecting
 the gasless result trace to EVMYulLean's gas-aware `X` runner.
 -/
@@ -14611,7 +14885,7 @@ Higher compiler layers should depend on this structure rather than destructing
 large conjunctions: it names the bytecode facts, runtime-boundary facts,
 gasless block trace, and sufficient-gas `X` behavior that the bridge provides.
 -/
-structure XBridgeCertificate
+structure XBridgeEvidence
     (program : Program) (target : TargetProgram) (fuel : Nat)
     (initial sourceFinal : EVMState) : Prop where
   accepted : Accepted program
@@ -14629,11 +14903,11 @@ structure XBridgeCertificate
       gasBound < EvmYul.UInt256.size ∧
       XRunsSuccessfullyAbove target initial sourceFinal evmFuel gasBound
 
-namespace XBridgeCertificate
+namespace XBridgeEvidence
 
 theorem exists_sufficient_gas {program : Program} {target : TargetProgram}
     {fuel : Nat} {initial sourceFinal : EVMState}
-    (cert : XBridgeCertificate program target fuel initial sourceFinal) :
+    (evidence : XBridgeEvidence program target fuel initial sourceFinal) :
     ∃ evmFuel gasBound,
       gasBound < EvmYul.UInt256.size ∧
       ∀ gas,
@@ -14644,24 +14918,24 @@ theorem exists_sufficient_gas {program : Program} {target : TargetProgram}
                   (installCodeAndGas target gas initial) =
                 .ok result ∧
                 XSuccessErasesTo sourceFinal result :=
-  cert.sufficientGas
+  evidence.sufficientGas
 
 theorem exists_concrete_gas {program : Program}
     {target : TargetProgram} {fuel : Nat} {initial sourceFinal : EVMState}
-    (cert : XBridgeCertificate program target fuel initial sourceFinal) :
+    (evidence : XBridgeEvidence program target fuel initial sourceFinal) :
     ∃ evmFuel gas result,
       gas < EvmYul.UInt256.size ∧
         EvmYul.EVM.X evmFuel (validJumps target)
             (installCodeAndGas target gas initial) =
           .ok result ∧
         XSuccessErasesTo sourceFinal result := by
-  obtain ⟨evmFuel, gasBound, hFits, hRuns⟩ := cert.sufficientGas
+  obtain ⟨evmFuel, gasBound, hFits, hRuns⟩ := evidence.sufficientGas
   obtain ⟨result, hRun, hAgrees⟩ := hRuns gasBound (Nat.le_refl _) hFits
   exact ⟨evmFuel, gasBound, result, hFits, hRun, hAgrees⟩
 
 theorem not_out_of_gas_above_bound {program : Program} {target : TargetProgram}
     {fuel : Nat} {initial sourceFinal : EVMState}
-    (cert : XBridgeCertificate program target fuel initial sourceFinal) :
+    (evidence : XBridgeEvidence program target fuel initial sourceFinal) :
     ∃ evmFuel gasBound,
       gasBound < EvmYul.UInt256.size ∧
       ∀ gas,
@@ -14670,18 +14944,18 @@ theorem not_out_of_gas_above_bound {program : Program} {target : TargetProgram}
             EvmYul.EVM.X evmFuel (validJumps target)
                 (installCodeAndGas target gas initial) ≠
               .error EvmYul.EVM.ExecutionException.OutOfGass := by
-  obtain ⟨evmFuel, gasBound, hFits, hRuns⟩ := cert.sufficientGas
+  obtain ⟨evmFuel, gasBound, hFits, hRuns⟩ := evidence.sufficientGas
   exact
     ⟨evmFuel, gasBound, hFits, fun gas hGas hUInt256 =>
       hRuns.not_out_of_gas hGas hUInt256⟩
 
-end XBridgeCertificate
+end XBridgeEvidence
 
 /--
 Primary gas-aware bridge theorem.
 
 This theorem packages the existing compiler-correctness theorem together with
-the explicit `XPreconditionAssumptions` certificate into a single named
+the explicit `XPreconditionAssumptions` evidence into a single named
 artifact for higher compiler layers.
 -/
 theorem compile_whole_program_X_bridge {program : Program}
@@ -14690,7 +14964,7 @@ theorem compile_whole_program_X_bridge {program : Program}
     (hRuntime : RuntimeAssumptions program target initial)
     (hRun : Source.runN program fuel initial = .ok sourceFinal)
     (hPreconditions : XPreconditionAssumptions target initial sourceFinal) :
-    XBridgeCertificate program target fuel initial sourceFinal := by
+    XBridgeEvidence program target fuel initial sourceFinal := by
   obtain
     ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection,
       targetFinal, hTrace, hErase⟩ :=

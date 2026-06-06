@@ -1226,7 +1226,7 @@ def programShape? (program : Functions.Program) :
 
 /--
 Checked executable check result for the first genuinely recursive source pattern
-we can recognize without a proof-carrying user witness.
+we can recognize without a caller-supplied witness.
 
 The accepted shape is intentionally tiny: a single non-returning function
 `f(counter)` whose body is exactly `if counter { f(0) }`, and a main body made
@@ -3830,7 +3830,7 @@ This is the small theorem-facing `Type` wrapper for the bounded-recursive
 checker we currently support.  The semantic proof comes from the checked
 guarded-zero backend, but the public resource path can talk about SCC entries,
 procedures, ranked edges, and the maximum frame count without exposing the
-backend recognizer as an arbitrary proof-carrying input.
+backend recognizer as an arbitrary caller-supplied input.
 -/
 structure SCCRecurrenceCheckResult (program : Functions.Program) : Type where
   procedures : List Name
@@ -5139,14 +5139,14 @@ theorem afterAttachReturnsWithCaller?
     {calleeSource callerSource : Source.State}
     {state returned callerTarget : Structured.RunState}
     {frame : Structured.ReturnDest} {stack : EvmYul.Stack Word}
-    {callerProofSource : Source.State}
-    {callerProofTarget : Structured.RunState}
+    {callerContextSource : Source.State}
+    {callerContextTarget : Structured.RunState}
     (hCalleeContext :
       RankedResourceContext program check (active ++ [callee])
         calleeNodes calleeLayout calleeHidden calleeSource state)
     (hCallerContext :
       RankedResourceContext program check active callerNodes callerLayout
-        callerHidden callerProofSource callerProofTarget)
+        callerHidden callerContextSource callerContextTarget)
     (hPop : state.popReturn? = some (frame, returned))
     (hAttach :
       Structured.StackFrame.attachReturns? frame state.evm.stack =

@@ -1,5 +1,6 @@
 import EvmCompiler.Functions.SourceSemantics
 import EvmCompiler.Functions.Compiler
+import EvmCompiler.Locals.SourceLowering
 
 namespace EvmCompiler
 namespace Functions
@@ -104,6 +105,108 @@ def Default.AtomicSourceOwned (returns : List Name) :
   | none => True
   | some body => Block.AtomicSourceOwned returns body
 
+def Stmt.atomicSourceOwned? (returns : List Name) : Stmt → Bool
+  | .expr expr =>
+      Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.expr?
+        expr
+  | .let_ _name value =>
+      Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.expr?
+        value
+  | .assign _name value =>
+      Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.expr?
+        value
+  | .brk => true
+  | .cont => true
+  | .leave => returns.isEmpty
+  | .terminal _kind => true
+  | .terminalArgs _kind args =>
+      Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.exprSeq?
+        args
+  | .block _body => false
+  | .if_ _cond _body => false
+  | .switch _scrutinee _cases _defaultBody => false
+  | .for_ _init _cond _post _body => false
+  | .call _targets _functionName _args => false
+
+def StmtList.atomicSourceOwned? (returns : List Name) :
+    List Stmt → Bool
+  | [] => true
+  | stmt :: rest =>
+      Stmt.atomicSourceOwned? returns stmt &&
+        StmtList.atomicSourceOwned? returns rest
+
+def Block.atomicSourceOwned? (returns : List Name) (block : Block) :
+    Bool :=
+  StmtList.atomicSourceOwned? returns block.stmts
+
+theorem Stmt.atomicSourceOwned?_sound {returns : List Name}
+    {stmt : Stmt}
+    (hCheck : Stmt.atomicSourceOwned? returns stmt = true) :
+    Stmt.AtomicSourceOwned returns stmt := by
+  cases stmt with
+  | expr expr =>
+      exact
+        Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.exprSafe_sourceOwned
+          (Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.expr?_sound
+            (by simpa [Stmt.atomicSourceOwned?] using hCheck))
+  | let_ name value =>
+      exact
+        Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.exprSafe_sourceOwned
+          (Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.expr?_sound
+            (by simpa [Stmt.atomicSourceOwned?] using hCheck))
+  | assign name value =>
+      exact
+        Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.exprSafe_sourceOwned
+          (Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.expr?_sound
+            (by simpa [Stmt.atomicSourceOwned?] using hCheck))
+  | brk =>
+      simp [Stmt.AtomicSourceOwned]
+  | cont =>
+      simp [Stmt.AtomicSourceOwned]
+  | leave =>
+      cases returns <;> simp [Stmt.atomicSourceOwned?,
+        Stmt.AtomicSourceOwned] at hCheck ⊢
+  | terminal kind =>
+      simp [Stmt.AtomicSourceOwned]
+  | terminalArgs kind args =>
+      exact
+        Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.exprSeqSafe_sourceOwned
+          (Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.exprSeq?_sound
+            (by simpa [Stmt.atomicSourceOwned?] using hCheck))
+  | block body =>
+      simp [Stmt.atomicSourceOwned?] at hCheck
+  | if_ cond body =>
+      simp [Stmt.atomicSourceOwned?] at hCheck
+  | switch scrutinee cases defaultBody =>
+      simp [Stmt.atomicSourceOwned?] at hCheck
+  | for_ init cond post body =>
+      simp [Stmt.atomicSourceOwned?] at hCheck
+  | call targets functionName args =>
+      simp [Stmt.atomicSourceOwned?] at hCheck
+
+theorem StmtList.atomicSourceOwned?_sound {returns : List Name}
+    {stmts : List Stmt}
+    (hCheck : StmtList.atomicSourceOwned? returns stmts = true) :
+    StmtList.AtomicSourceOwned returns stmts := by
+  induction stmts with
+  | nil =>
+      simp [StmtList.AtomicSourceOwned]
+  | cons stmt rest ih =>
+      have hAnd :
+          Stmt.atomicSourceOwned? returns stmt = true ∧
+            StmtList.atomicSourceOwned? returns rest = true := by
+        simpa [StmtList.atomicSourceOwned?] using hCheck
+      exact
+        ⟨Stmt.atomicSourceOwned?_sound hAnd.1, ih hAnd.2⟩
+
+theorem Block.atomicSourceOwned?_sound {returns : List Name}
+    {block : Block}
+    (hCheck : Block.atomicSourceOwned? returns block = true) :
+    Block.AtomicSourceOwned returns block := by
+  cases block with
+  | mk stmts =>
+      exact StmtList.atomicSourceOwned?_sound hCheck
+
 mutual
   /--
   Recursive function statements whose compiler output stays inside the
@@ -160,6 +263,97 @@ mutual
 end
 
 mutual
+  def Expr.sourceOwned? {results : Nat} : Expr results → Bool
+    | .lit _value => true
+    | .var _name => true
+    | .code _code => false
+    | .prim _op args => ExprSeq.sourceOwned? args
+
+  def ExprSeq.sourceOwned? {results : Nat} :
+      Locals.ExprSeq results → Bool
+    | .nil => true
+    | .cons head tail =>
+        Expr.sourceOwned? head && ExprSeq.sourceOwned? tail
+end
+
+mutual
+  def Block.sourceOwned? (returns : List Name) : Block → Bool
+    | ⟨stmts⟩ => StmtList.sourceOwned? returns stmts
+
+  def Stmt.sourceOwned? (returns : List Name) : Stmt → Bool
+    | .expr expr => Expr.sourceOwned? expr
+    | .let_ _name value => Expr.sourceOwned? value
+    | .assign _name value => Expr.sourceOwned? value
+    | .block body => Block.sourceOwned? returns body
+    | .if_ cond body =>
+        Expr.sourceOwned? cond && Block.sourceOwned? returns body
+    | .switch scrutinee cases defaultBody =>
+        Expr.sourceOwned? scrutinee &&
+          CaseList.sourceOwned? returns cases &&
+            Default.sourceOwned? returns defaultBody
+    | .for_ init cond post body =>
+        Block.sourceOwned? returns init &&
+          Expr.sourceOwned? cond &&
+            Block.sourceOwned? returns post &&
+              Block.sourceOwned? returns body
+    | .brk => true
+    | .cont => true
+    | .leave => returns.isEmpty
+    | .call _targets _functionName _args => false
+    | .terminal _kind => true
+    | .terminalArgs _kind args => ExprSeq.sourceOwned? args
+
+  def StmtList.sourceOwned? (returns : List Name) : List Stmt → Bool
+    | [] => true
+    | stmt :: rest =>
+        Stmt.sourceOwned? returns stmt &&
+          StmtList.sourceOwned? returns rest
+
+  def CaseList.sourceOwned? (returns : List Name) :
+      List (Word × Block) → Bool
+    | [] => true
+    | (_value, body) :: rest =>
+        Block.sourceOwned? returns body &&
+          CaseList.sourceOwned? returns rest
+
+  def Default.sourceOwned? (returns : List Name) :
+      Option Block → Bool
+    | none => true
+    | some body => Block.sourceOwned? returns body
+end
+
+mutual
+  theorem Expr.sourceOwned?_sound {results : Nat} {expr : Expr results}
+      (hCheck : Expr.sourceOwned? expr = true) :
+      Locals.Source.Expr.SourceOwned expr := by
+    cases expr with
+    | lit value =>
+        simp [Expr.sourceOwned?, Locals.Source.Expr.SourceOwned]
+    | var name =>
+        simp [Expr.sourceOwned?, Locals.Source.Expr.SourceOwned]
+    | code code =>
+        simp [Expr.sourceOwned?] at hCheck
+    | prim op args =>
+        exact ExprSeq.sourceOwned?_sound hCheck
+
+  theorem ExprSeq.sourceOwned?_sound {results : Nat}
+      {exprs : Locals.ExprSeq results}
+      (hCheck : ExprSeq.sourceOwned? exprs = true) :
+      Locals.Source.ExprSeq.SourceOwned exprs := by
+    cases exprs with
+    | nil =>
+        simp [ExprSeq.sourceOwned?, Locals.Source.ExprSeq.SourceOwned]
+    | cons head tail =>
+        have hAnd :
+            Expr.sourceOwned? head = true ∧
+              ExprSeq.sourceOwned? tail = true := by
+          simpa [ExprSeq.sourceOwned?] using hCheck
+        exact
+          ⟨Expr.sourceOwned?_sound hAnd.1,
+            ExprSeq.sourceOwned?_sound hAnd.2⟩
+end
+
+mutual
   def Block.sourceSize : Block → Nat
     | ⟨stmts⟩ => StmtList.sourceSize stmts + 1
 
@@ -193,6 +387,138 @@ mutual
   def Default.sourceSize : Option Block → Nat
     | none => 0
     | some body => Block.sourceSize body + 1
+end
+
+mutual
+  theorem Block.sourceOwned?_sound {returns : List Name} :
+      ∀ {block : Block},
+        Block.sourceOwned? returns block = true →
+        Block.SourceOwned returns block
+    | ⟨stmts⟩, hCheck =>
+        StmtList.sourceOwned?_sound hCheck
+  termination_by block _hCheck => sizeOf block
+  decreasing_by
+    cases block
+    all_goals simp_wf
+    all_goals omega
+
+  theorem Stmt.sourceOwned?_sound {returns : List Name} :
+      ∀ {stmt : Stmt},
+        Stmt.sourceOwned? returns stmt = true →
+        Stmt.SourceOwned returns stmt
+    | .expr expr, hCheck => by
+        exact Expr.sourceOwned?_sound (by
+          simpa [Stmt.sourceOwned?] using hCheck)
+    | .let_ name value, hCheck => by
+        exact Expr.sourceOwned?_sound (by
+          simpa [Stmt.sourceOwned?] using hCheck)
+    | .assign name value, hCheck => by
+        exact Expr.sourceOwned?_sound (by
+          simpa [Stmt.sourceOwned?] using hCheck)
+    | .block body, hCheck => by
+        exact Block.sourceOwned?_sound (by
+          simpa [Stmt.sourceOwned?] using hCheck)
+    | .if_ cond body, hCheck => by
+        have hAnd :
+            Expr.sourceOwned? cond = true ∧
+              Block.sourceOwned? returns body = true := by
+          simpa [Stmt.sourceOwned?] using hCheck
+        exact
+          ⟨Expr.sourceOwned?_sound hAnd.1,
+            Block.sourceOwned?_sound hAnd.2⟩
+    | .switch scrutinee cases defaultBody, hCheck => by
+        have hParts :
+            Expr.sourceOwned? scrutinee = true ∧
+              CaseList.sourceOwned? returns cases = true ∧
+                Default.sourceOwned? returns defaultBody = true := by
+          simpa [Stmt.sourceOwned?, Bool.and_assoc] using hCheck
+        exact
+          ⟨Expr.sourceOwned?_sound hParts.1,
+            CaseList.sourceOwned?_sound hParts.2.1,
+            Default.sourceOwned?_sound hParts.2.2⟩
+    | .for_ init cond post body, hCheck => by
+        have hParts :
+            Block.sourceOwned? returns init = true ∧
+              Expr.sourceOwned? cond = true ∧
+                Block.sourceOwned? returns post = true ∧
+                  Block.sourceOwned? returns body = true := by
+          simpa [Stmt.sourceOwned?, Bool.and_assoc] using hCheck
+        exact
+          ⟨Block.sourceOwned?_sound hParts.1,
+            Expr.sourceOwned?_sound hParts.2.1,
+            Block.sourceOwned?_sound hParts.2.2.1,
+            Block.sourceOwned?_sound hParts.2.2.2⟩
+    | .brk, _hCheck => by
+        simp [Stmt.SourceOwned]
+    | .cont, _hCheck => by
+        simp [Stmt.SourceOwned]
+    | .leave, hCheck => by
+        cases returns <;> simp [Stmt.sourceOwned?, Stmt.SourceOwned] at hCheck ⊢
+    | .call targets functionName args, hCheck => by
+        simp [Stmt.sourceOwned?] at hCheck
+    | .terminal kind, _hCheck => by
+        simp [Stmt.SourceOwned]
+    | .terminalArgs kind args, hCheck => by
+        exact ExprSeq.sourceOwned?_sound (by
+          simpa [Stmt.sourceOwned?] using hCheck)
+  termination_by stmt _hCheck => sizeOf stmt
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+  theorem StmtList.sourceOwned?_sound {returns : List Name} :
+      ∀ {stmts : List Stmt},
+        StmtList.sourceOwned? returns stmts = true →
+        StmtList.SourceOwned returns stmts
+    | [], _hCheck => by
+        simp [StmtList.SourceOwned]
+    | stmt :: rest, hCheck => by
+        have hAnd :
+            Stmt.sourceOwned? returns stmt = true ∧
+              StmtList.sourceOwned? returns rest = true := by
+          simpa [StmtList.sourceOwned?] using hCheck
+        exact
+          ⟨Stmt.sourceOwned?_sound hAnd.1,
+            StmtList.sourceOwned?_sound hAnd.2⟩
+  termination_by stmts _hCheck => sizeOf stmts
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+  theorem CaseList.sourceOwned?_sound {returns : List Name} :
+      ∀ {cases : List (Word × Block)},
+        CaseList.sourceOwned? returns cases = true →
+        CaseList.SourceOwned returns cases
+    | [], _hCheck => by
+        simp [CaseList.SourceOwned]
+    | (_value, body) :: rest, hCheck => by
+        have hAnd :
+            Block.sourceOwned? returns body = true ∧
+              CaseList.sourceOwned? returns rest = true := by
+          simpa [CaseList.sourceOwned?] using hCheck
+        exact
+          ⟨Block.sourceOwned?_sound hAnd.1,
+            CaseList.sourceOwned?_sound hAnd.2⟩
+  termination_by cases _hCheck => sizeOf cases
+  decreasing_by
+    all_goals simp_wf
+    all_goals try simp
+    all_goals omega
+
+  theorem Default.sourceOwned?_sound {returns : List Name} :
+      ∀ {defaultBody : Option Block},
+        Default.sourceOwned? returns defaultBody = true →
+        Default.SourceOwned returns defaultBody
+    | none, _hCheck => by
+        simp [Default.SourceOwned]
+    | some body, hCheck => by
+        exact Block.sourceOwned?_sound (by
+          simpa [Default.sourceOwned?] using hCheck)
+  termination_by defaultBody _hCheck => sizeOf defaultBody
+  decreasing_by
+    all_goals simp_wf
+    all_goals try simp
+    all_goals omega
 end
 
 theorem atomic_toLocals_sourceOwned {returns : List Name} {stmt : Stmt}
@@ -396,6 +722,32 @@ theorem switch_select_sourceOwned {returns : List Name}
           simp [Source.Switch.select] at hSelect
           cases hSelect
           simpa [Default.AtomicSourceOwned] using hDefault
+  | cons head rest ih =>
+      rcases head with ⟨value, caseBody⟩
+      rcases hCases with ⟨hCaseBody, hRest⟩
+      by_cases hEq : value = scrutinee
+      · simp [Source.Switch.select, hEq] at hSelect
+        cases hSelect
+        exact hCaseBody
+      · exact ih hRest (by
+          simpa [Source.Switch.select, hEq] using hSelect)
+
+theorem switch_select_sourceOwned_full {returns : List Name}
+    {scrutinee : Word} {cases : List (Word × Block)}
+    {defaultBody : Option Block} {body : Block}
+    (hCases : CaseList.SourceOwned returns cases)
+    (hDefault : Default.SourceOwned returns defaultBody)
+    (hSelect : Source.Switch.select scrutinee cases defaultBody = some body) :
+    Block.SourceOwned returns body := by
+  induction cases with
+  | nil =>
+      cases defaultBody with
+      | none =>
+          simp [Source.Switch.select] at hSelect
+      | some defaultBlock =>
+          simp [Source.Switch.select] at hSelect
+          cases hSelect
+          simpa [Default.SourceOwned] using hDefault
   | cons head rest ih =>
       rcases head with ⟨value, caseBody⟩
       rcases hCases with ⟨hCaseBody, hRest⟩
@@ -1277,26 +1629,806 @@ theorem switchStmt_toLocals_of_run {prim : Source.PrimitiveSemantics}
               | error err =>
                   simp [Source.Stmt.run, Locals.Source.Stmt.run, hScrutinee,
                     hSelect, hScoped] at hRun
-              | ok bodyOutcome =>
-                  have hLowerScoped :=
-                    atomicBlock_runScoped_toLocals_of_run
-                      (lowerProgram := lowerProgram) hBodyOwned hScoped
-                  simp [Source.Stmt.run, Locals.Source.Stmt.run, hScrutinee,
-                    hSelect, hLowerSelect, hScoped, hLowerScoped,
-                    Ctx.toLocals] at hRun ⊢
-                  rcases hRun with ⟨hOutcome, hCtx⟩
-                  subst outcome
-                  subst ctx'
-                  have hLowerScoped' :
-                      Locals.Source.Block.runScoped prim lowerProgram
-                          { scope := ctx.scope, breakScope? := ctx.breakScope?,
-                            continueScope? := ctx.continueScope?,
-                            leaveScope? := ctx.leaveScope? }
-                          (Block.toLocals returns body) fuel
-                          stateAfterScrutinee =
-                        .ok bodyOutcome := by
-                    simpa [Ctx.toLocals] using hLowerScoped
-                  simp [hLowerScoped']
+                | ok bodyOutcome =>
+                    have hLowerScoped :=
+                      atomicBlock_runScoped_toLocals_of_run
+                        (lowerProgram := lowerProgram) hBodyOwned hScoped
+                    have hLowerScoped' :
+                        Locals.Source.Block.runScoped prim lowerProgram
+                            { scope := ctx.scope, breakScope? := ctx.breakScope?,
+                              continueScope? := ctx.continueScope?,
+                              leaveScope? := ctx.leaveScope? }
+                            (Block.toLocals returns body) fuel
+                            stateAfterScrutinee =
+                          .ok bodyOutcome := by
+                      simpa [Ctx.toLocals] using hLowerScoped
+                    simp [Source.Stmt.run, Locals.Source.Stmt.run, hScrutinee,
+                      hSelect, hLowerSelect, hScoped, hLowerScoped',
+                      Ctx.toLocals] at hRun ⊢
+                    rcases hRun with ⟨hOutcome, hCtx⟩
+                    subst outcome
+                    subst ctx'
+                    simp [hLowerScoped']
+
+mutual
+  theorem sourceOwnedBlock_runOpen_toLocals_of_run
+      {prim : Source.PrimitiveSemantics} :
+      ∀ {program : Program} {lowerProgram : Locals.Program}
+        {returns : List Name} {ctx ctx' : Source.Ctx} {fuel : Nat}
+        {block : Block} {state : Source.State} {outcome : Source.Outcome},
+        Block.SourceOwned returns block →
+        Source.Block.runOpen prim program ctx fuel block state =
+          .ok (outcome, ctx') →
+        Locals.Source.Block.runOpen prim lowerProgram (Ctx.toLocals ctx) fuel
+          (Block.toLocals returns block) state =
+          .ok (outcome, Ctx.toLocals ctx')
+    | _program, _lowerProgram, _returns, _ctx, _ctx', _fuel,
+      ⟨stmts⟩, _state, _outcome, hOwned, hRun =>
+        sourceOwnedStmtList_runOpen_toLocals_of_run hOwned hRun
+  termination_by _program _lowerProgram _returns _ctx _ctx' fuel block _state
+      _outcome _hOwned _hRun =>
+    (fuel, 0, sizeOf block)
+  decreasing_by
+    all_goals simp_wf
+    exact Prod.Lex.right _
+      (Prod.Lex.right _ (by omega))
+
+  theorem sourceOwnedBlock_runScoped_toLocals_of_run
+      {prim : Source.PrimitiveSemantics} :
+      ∀ {program : Program} {lowerProgram : Locals.Program}
+        {returns : List Name} {block : Block} {ctx : Source.Ctx}
+        {fuel : Nat} {state : Source.State} {outcome : Source.Outcome},
+        Block.SourceOwned returns block →
+        Source.Block.runScoped prim program ctx block fuel state =
+          .ok outcome →
+        Locals.Source.Block.runScoped prim lowerProgram (Ctx.toLocals ctx)
+          (Block.toLocals returns block) fuel state =
+          .ok outcome
+    | _program, _lowerProgram, _returns, ⟨stmts⟩, ctx, fuel, state,
+      outcome, hOwned, hRun => by
+        cases hOpen :
+            Source.Block.runOpen prim _program ctx fuel { stmts := stmts }
+              state with
+        | error err =>
+            simp [Source.Block.runScoped, hOpen] at hRun
+        | ok result =>
+            rcases result with ⟨openOutcome, openCtx⟩
+            have hLowerOpen :=
+              sourceOwnedStmtList_runOpen_toLocals_of_run
+                (lowerProgram := _lowerProgram) hOwned hOpen
+            cases openOutcome with
+            | mk openState mode =>
+                have hLowerOpen' :
+                    Locals.Source.Block.runOpen prim _lowerProgram
+                        { scope := ctx.scope, breakScope? := ctx.breakScope?,
+                          continueScope? := ctx.continueScope?,
+                          leaveScope? := ctx.leaveScope? }
+                        fuel { stmts := StmtList.toLocals _returns stmts }
+                        state =
+                      .ok ({ state := openState, mode := mode },
+                        Ctx.toLocals openCtx) := by
+                  simpa [Ctx.toLocals] using hLowerOpen
+                cases mode <;>
+                  simp [Source.Block.runScoped, Locals.Source.Block.runScoped,
+                    Block.toLocals, hOpen, hLowerOpen', Ctx.toLocals]
+                    at hRun ⊢
+                all_goals simp [hRun]
+  termination_by _program _lowerProgram _returns block _ctx fuel _state
+      _outcome _hOwned _hRun =>
+    (fuel, 1, sizeOf block)
+  decreasing_by
+    all_goals simp_wf
+    exact Prod.Lex.right _
+      (Prod.Lex.left _ _ (by omega))
+
+  theorem sourceOwnedRunForLoop_toLocals_of_run
+      {prim : Source.PrimitiveSemantics}
+      {program : Program} {lowerProgram : Locals.Program}
+      {returns : List Name} {loopCtx postBase bodyBase : Source.Ctx}
+      {cond : Expr 1} {post body : Block} :
+      ∀ {fuel : Nat} {state : Source.State} {outcome : Source.Outcome},
+        Block.SourceOwned returns post →
+        Block.SourceOwned returns body →
+        Source.Stmt.runForLoop prim program loopCtx cond postBase post
+            bodyBase body fuel state =
+          .ok outcome →
+        Locals.Source.Stmt.runForLoop prim lowerProgram (Ctx.toLocals loopCtx)
+          cond (Ctx.toLocals postBase) (Block.toLocals returns post)
+          (Ctx.toLocals bodyBase) (Block.toLocals returns body) fuel state =
+          .ok outcome
+    | 0, _state, _outcome, _hPost, _hBody, hRun => by
+        simp [Source.Stmt.runForLoop, Source.invalid, Structured.invalid]
+          at hRun
+    | fuel + 1, state, outcome, hPost, hBody, hRun => by
+        cases hCond : Source.Expr.evalCondition prim cond state with
+        | error err =>
+            simp [Source.Stmt.runForLoop, Locals.Source.Stmt.runForLoop,
+              hCond] at hRun
+        | ok result =>
+            rcases result with ⟨stateAfterCond, condTrue⟩
+            cases condTrue with
+            | false =>
+                simp [Source.Stmt.runForLoop, Locals.Source.Stmt.runForLoop,
+                  hCond, Ctx.toLocals] at hRun ⊢
+                exact hRun
+            | true =>
+                cases hBodyRun :
+                    Source.Block.runScoped prim program bodyBase body fuel
+                      stateAfterCond with
+                | error err =>
+                    simp [Source.Stmt.runForLoop, Locals.Source.Stmt.runForLoop,
+                      hCond, hBodyRun] at hRun
+                | ok bodyOutcome =>
+                    have hLowerBody :=
+                      sourceOwnedBlock_runScoped_toLocals_of_run
+                        (lowerProgram := lowerProgram) hBody hBodyRun
+                    cases bodyOutcome with
+                    | mk bodyState bodyMode =>
+                        have hLowerBody' :
+                            Locals.Source.Block.runScoped prim lowerProgram
+                                { scope := bodyBase.scope,
+                                  breakScope? := bodyBase.breakScope?,
+                                  continueScope? := bodyBase.continueScope?,
+                                  leaveScope? := bodyBase.leaveScope? }
+                                (Block.toLocals returns body) fuel
+                                stateAfterCond =
+                              .ok { state := bodyState, mode := bodyMode } := by
+                          simpa [Ctx.toLocals] using hLowerBody
+                        cases bodyMode with
+                        | brk =>
+                            simp [Source.Stmt.runForLoop,
+                              Locals.Source.Stmt.runForLoop, hCond, hBodyRun,
+                              hLowerBody', Ctx.toLocals] at hRun ⊢
+                            exact hRun
+                        | regular =>
+                            cases hPostRun :
+                                Source.Block.runScoped prim program postBase post
+                                  fuel bodyState with
+                            | error err =>
+                                simp [Source.Stmt.runForLoop, hCond, hBodyRun,
+                                  hPostRun] at hRun
+                            | ok postOutcome =>
+                                have hLowerPost :=
+                                  sourceOwnedBlock_runScoped_toLocals_of_run
+                                    (lowerProgram := lowerProgram) hPost
+                                    hPostRun
+                                cases postOutcome with
+                                | mk postState postMode =>
+                                    have hLowerPost' :
+                                        Locals.Source.Block.runScoped prim
+                                            lowerProgram
+                                            { scope := postBase.scope,
+                                              breakScope? := postBase.breakScope?,
+                                              continueScope? :=
+                                                postBase.continueScope?,
+                                              leaveScope? :=
+                                                postBase.leaveScope? }
+                                            (Block.toLocals returns post) fuel
+                                            bodyState =
+                                          .ok (Locals.Source.Outcome.mk
+                                            postState postMode) := by
+                                      simpa [Ctx.toLocals] using hLowerPost
+                                    cases postMode with
+                                    | regular =>
+                                        simp [Source.Stmt.runForLoop,
+                                          Locals.Source.Stmt.runForLoop, hCond,
+                                          hBodyRun, hLowerBody', hPostRun,
+                                          hLowerPost', Ctx.toLocals] at hRun ⊢
+                                        exact
+                                          sourceOwnedRunForLoop_toLocals_of_run
+                                            hPost hBody hRun
+                                    | brk =>
+                                        simp [Source.Stmt.runForLoop,
+                                          Locals.Source.Stmt.runForLoop, hCond,
+                                          hBodyRun, hLowerBody', hPostRun,
+                                          hLowerPost', Source.invalid,
+                                          Locals.Source.invalid,
+                                          Structured.invalid, Ctx.toLocals]
+                                          at hRun
+                                    | cont =>
+                                        simp [Source.Stmt.runForLoop,
+                                          Locals.Source.Stmt.runForLoop, hCond,
+                                          hBodyRun, hLowerBody', hPostRun,
+                                          hLowerPost', Source.invalid,
+                                          Locals.Source.invalid,
+                                          Structured.invalid, Ctx.toLocals]
+                                          at hRun
+                                    | leave =>
+                                        simp [Source.Stmt.runForLoop,
+                                          Locals.Source.Stmt.runForLoop, hCond,
+                                          hBodyRun, hLowerBody', hPostRun,
+                                          hLowerPost', Ctx.toLocals] at hRun ⊢
+                                        exact hRun
+                                    | halt kind =>
+                                        simp [Source.Stmt.runForLoop,
+                                          Locals.Source.Stmt.runForLoop, hCond,
+                                          hBodyRun, hLowerBody', hPostRun,
+                                          hLowerPost', Ctx.toLocals] at hRun ⊢
+                                        exact hRun
+                        | cont =>
+                            cases hPostRun :
+                                Source.Block.runScoped prim program postBase post
+                                  fuel bodyState with
+                            | error err =>
+                                simp [Source.Stmt.runForLoop, hCond, hBodyRun,
+                                  hPostRun] at hRun
+                            | ok postOutcome =>
+                                have hLowerPost :=
+                                  sourceOwnedBlock_runScoped_toLocals_of_run
+                                    (lowerProgram := lowerProgram) hPost
+                                    hPostRun
+                                cases postOutcome with
+                                | mk postState postMode =>
+                                    have hLowerPost' :
+                                        Locals.Source.Block.runScoped prim
+                                            lowerProgram
+                                            { scope := postBase.scope,
+                                              breakScope? := postBase.breakScope?,
+                                              continueScope? :=
+                                                postBase.continueScope?,
+                                              leaveScope? :=
+                                                postBase.leaveScope? }
+                                            (Block.toLocals returns post) fuel
+                                            bodyState =
+                                          .ok (Locals.Source.Outcome.mk
+                                            postState postMode) := by
+                                      simpa [Ctx.toLocals] using hLowerPost
+                                    cases postMode with
+                                    | regular =>
+                                        simp [Source.Stmt.runForLoop,
+                                          Locals.Source.Stmt.runForLoop, hCond,
+                                          hBodyRun, hLowerBody', hPostRun,
+                                          hLowerPost', Ctx.toLocals] at hRun ⊢
+                                        exact
+                                          sourceOwnedRunForLoop_toLocals_of_run
+                                            hPost hBody hRun
+                                    | brk =>
+                                        simp [Source.Stmt.runForLoop,
+                                          Locals.Source.Stmt.runForLoop, hCond,
+                                          hBodyRun, hLowerBody', hPostRun,
+                                          hLowerPost', Source.invalid,
+                                          Locals.Source.invalid,
+                                          Structured.invalid, Ctx.toLocals]
+                                          at hRun
+                                    | cont =>
+                                        simp [Source.Stmt.runForLoop,
+                                          Locals.Source.Stmt.runForLoop, hCond,
+                                          hBodyRun, hLowerBody', hPostRun,
+                                          hLowerPost', Source.invalid,
+                                          Locals.Source.invalid,
+                                          Structured.invalid, Ctx.toLocals]
+                                          at hRun
+                                    | leave =>
+                                        simp [Source.Stmt.runForLoop,
+                                          Locals.Source.Stmt.runForLoop, hCond,
+                                          hBodyRun, hLowerBody', hPostRun,
+                                          hLowerPost', Ctx.toLocals] at hRun ⊢
+                                        exact hRun
+                                    | halt kind =>
+                                        simp [Source.Stmt.runForLoop,
+                                          Locals.Source.Stmt.runForLoop, hCond,
+                                          hBodyRun, hLowerBody', hPostRun,
+                                          hLowerPost', Ctx.toLocals] at hRun ⊢
+                                        exact hRun
+                        | leave =>
+                            simp [Source.Stmt.runForLoop,
+                              Locals.Source.Stmt.runForLoop, hCond, hBodyRun,
+                              hLowerBody', Ctx.toLocals] at hRun ⊢
+                            exact hRun
+                        | halt kind =>
+                            simp [Source.Stmt.runForLoop,
+                              Locals.Source.Stmt.runForLoop, hCond, hBodyRun,
+                              hLowerBody', Ctx.toLocals] at hRun ⊢
+                            exact hRun
+  termination_by fuel _state _outcome _hPost _hBody _hRun =>
+    (fuel, 3, 0)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+  theorem sourceOwnedStmt_toLocals_stmt_run_of_run
+      {prim : Source.PrimitiveSemantics} :
+      ∀ {program : Program} {lowerProgram : Locals.Program}
+        {returns : List Name} {stmt : Stmt} {ctx ctx' : Source.Ctx}
+        {fuel : Nat} {state : Source.State} {outcome : Source.Outcome},
+        Stmt.SourceOwned returns stmt →
+        Source.Stmt.run prim program ctx fuel stmt state =
+          .ok (outcome, ctx') →
+        ∃ lowerStmt,
+          Stmt.toLocals returns stmt = [lowerStmt] ∧
+            Locals.Source.Stmt.run prim lowerProgram (Ctx.toLocals ctx) fuel
+              lowerStmt state =
+              .ok (outcome, Ctx.toLocals ctx')
+    | _program, lowerProgram, returns, stmt, ctx, ctx', fuel, state,
+      outcome, hOwned, hRun => by
+        cases stmt with
+        | expr expr =>
+            exact ⟨Locals.Stmt.expr expr, by simp [Stmt.toLocals],
+              Stmt.expr_toLocals_of_run (lowerProgram := lowerProgram) hRun⟩
+        | let_ name value =>
+            exact ⟨Locals.Stmt.let_ name value, by simp [Stmt.toLocals],
+              Stmt.let_toLocals_of_run (lowerProgram := lowerProgram) hRun⟩
+        | assign name value =>
+            exact ⟨Locals.Stmt.assign name value, by simp [Stmt.toLocals],
+              Stmt.assign_toLocals_of_run (lowerProgram := lowerProgram)
+                hRun⟩
+        | block body =>
+            cases hScoped :
+                Source.Block.runScoped prim _program ctx body fuel state with
+            | error err =>
+                simp [Source.Stmt.run, hScoped] at hRun
+            | ok scopedOutcome =>
+                have hLowerScoped :=
+                  sourceOwnedBlock_runScoped_toLocals_of_run
+                    (lowerProgram := lowerProgram) hOwned hScoped
+                have hLowerScoped' :
+                    Locals.Source.Block.runScoped prim lowerProgram
+                        (Ctx.toLocals ctx) (Block.toLocals returns body) fuel
+                        state =
+                      .ok scopedOutcome := hLowerScoped
+                simp [Source.Stmt.run, hScoped] at hRun
+                rcases hRun with ⟨hOutcome, hCtx⟩
+                subst outcome
+                subst ctx'
+                exact ⟨Locals.Stmt.block (Block.toLocals returns body),
+                  by simp [Stmt.toLocals],
+                  by simpa [Locals.Source.Stmt.run, hLowerScoped']⟩
+        | if_ cond body =>
+            rcases hOwned with ⟨_hCondOwned, hBodyOwned⟩
+            cases fuel with
+            | zero =>
+                simp [Source.Stmt.run, Source.invalid, Structured.invalid]
+                  at hRun
+            | succ fuel =>
+                cases hCond : Source.Expr.evalCondition prim cond state with
+                | error err =>
+                    simp [Source.Stmt.run, Locals.Source.Stmt.run, hCond]
+                      at hRun
+                | ok result =>
+                    rcases result with ⟨stateAfterCond, condTrue⟩
+                    cases condTrue with
+                    | false =>
+                        simp [Source.Stmt.run, hCond] at hRun
+                        rcases hRun with ⟨hOutcome, hCtx⟩
+                        subst outcome
+                        subst ctx'
+                        exact ⟨Locals.Stmt.if_ cond
+                          (Block.toLocals returns body),
+                          by simp [Stmt.toLocals],
+                          by simpa [Locals.Source.Stmt.run, hCond]⟩
+                    | true =>
+                        cases hScoped :
+                            Source.Block.runScoped prim _program ctx body fuel
+                              stateAfterCond with
+                        | error err =>
+                            simp [Source.Stmt.run, Locals.Source.Stmt.run,
+                              hCond, hScoped] at hRun
+                        | ok bodyOutcome =>
+                            have hLowerScoped :=
+                              sourceOwnedBlock_runScoped_toLocals_of_run
+                                (lowerProgram := lowerProgram) hBodyOwned
+                                hScoped
+                            have hLowerScoped' :
+                                Locals.Source.Block.runScoped prim lowerProgram
+                                    (Ctx.toLocals ctx)
+                                    (Block.toLocals returns body) fuel
+                                    stateAfterCond =
+                                  .ok bodyOutcome := hLowerScoped
+                            simp [Source.Stmt.run, hCond, hScoped] at hRun
+                            rcases hRun with ⟨hOutcome, hCtx⟩
+                            subst outcome
+                            subst ctx'
+                            exact ⟨Locals.Stmt.if_ cond
+                              (Block.toLocals returns body),
+                              by simp [Stmt.toLocals],
+                              by simpa [Locals.Source.Stmt.run, hCond,
+                                hLowerScoped']⟩
+        | switch scrutinee cases defaultBody =>
+            rcases hOwned with ⟨_hScrutineeOwned, hCasesOwned, hDefaultOwned⟩
+            cases fuel with
+            | zero =>
+                simp [Source.Stmt.run, Source.invalid, Structured.invalid]
+                  at hRun
+            | succ fuel =>
+                cases hScrutinee :
+                    Source.Expr.evalOne prim scrutinee state with
+                | error err =>
+                    simp [Source.Stmt.run, Locals.Source.Stmt.run, hScrutinee]
+                      at hRun
+                | ok result =>
+                    rcases result with ⟨stateAfterScrutinee, value⟩
+                    have hSelectEq :=
+                      switch_select_toLocals returns value cases defaultBody
+                    cases hSelect :
+                        Source.Switch.select value cases defaultBody with
+                    | none =>
+                        have hLowerSelect :
+                            Locals.Source.Switch.select value
+                                (CaseList.toLocals returns cases)
+                                (Default.toLocals returns defaultBody) =
+                              none := by
+                          simpa [hSelect] using hSelectEq
+                        simp [Source.Stmt.run, hScrutinee, hSelect] at hRun
+                        rcases hRun with ⟨hOutcome, hCtx⟩
+                        subst outcome
+                        subst ctx'
+                        exact ⟨Locals.Stmt.switch scrutinee
+                          (CaseList.toLocals returns cases)
+                          (Default.toLocals returns defaultBody),
+                          by simp [Stmt.toLocals],
+                          by simpa [Locals.Source.Stmt.run, hScrutinee,
+                            hLowerSelect]⟩
+                    | some body =>
+                        have hLowerSelect :
+                            Locals.Source.Switch.select value
+                                (CaseList.toLocals returns cases)
+                                (Default.toLocals returns defaultBody) =
+                              some (Block.toLocals returns body) := by
+                          simpa [hSelect] using hSelectEq
+                        have hBodyOwned :
+                            Block.SourceOwned returns body :=
+                          switch_select_sourceOwned_full hCasesOwned
+                            hDefaultOwned hSelect
+                        cases hScoped :
+                            Source.Block.runScoped prim _program ctx body fuel
+                              stateAfterScrutinee with
+                        | error err =>
+                            simp [Source.Stmt.run, Locals.Source.Stmt.run,
+                              hScrutinee, hSelect, hScoped] at hRun
+                        | ok bodyOutcome =>
+                            have hLowerScoped :=
+                              sourceOwnedBlock_runScoped_toLocals_of_run
+                                (lowerProgram := lowerProgram) hBodyOwned
+                                hScoped
+                            have hLowerScoped' :
+                                Locals.Source.Block.runScoped prim lowerProgram
+                                    (Ctx.toLocals ctx)
+                                    (Block.toLocals returns body) fuel
+                                    stateAfterScrutinee =
+                                  .ok bodyOutcome := hLowerScoped
+                            simp [Source.Stmt.run, hScrutinee, hSelect,
+                              hScoped] at hRun
+                            rcases hRun with ⟨hOutcome, hCtx⟩
+                            subst outcome
+                            subst ctx'
+                            exact ⟨Locals.Stmt.switch scrutinee
+                              (CaseList.toLocals returns cases)
+                              (Default.toLocals returns defaultBody),
+                              by simp [Stmt.toLocals],
+                              by simpa [Locals.Source.Stmt.run, hScrutinee,
+                                hLowerSelect, hLowerScoped']⟩
+        | for_ init cond post body =>
+            rcases hOwned with ⟨hInitOwned, _hCondOwned, hPostOwned, hBodyOwned⟩
+            cases fuel with
+            | zero =>
+                simp [Source.Stmt.run, Source.invalid, Structured.invalid]
+                  at hRun
+            | succ fuel =>
+                let initBase := ctx.withoutLoopControl
+                cases hInitRun :
+                    Source.Block.runOpen prim _program initBase fuel init
+                      state with
+                | error err =>
+                    simp [Source.Stmt.run, Locals.Source.Stmt.run, initBase,
+                      hInitRun] at hRun
+                | ok initResult =>
+                    rcases initResult with ⟨initOutcome, initCtx⟩
+                    have hLowerInit :=
+                      sourceOwnedBlock_runOpen_toLocals_of_run
+                        (lowerProgram := lowerProgram) hInitOwned hInitRun
+                    cases initOutcome with
+                    | mk initState initMode =>
+                        have hLowerInit' :
+                            Locals.Source.Block.runOpen prim lowerProgram
+                                ((Ctx.toLocals ctx).withoutLoopControl) fuel
+                                (Block.toLocals returns init) state =
+                              .ok ({ state := initState, mode := initMode },
+                                Ctx.toLocals initCtx) := by
+                          simpa [initBase, Ctx.toLocals_withoutLoopControl]
+                            using hLowerInit
+                        have hLowerInitTarget :
+                            Locals.Source.Block.runOpen prim lowerProgram
+                                (({ scope := ctx.scope,
+                                    breakScope? := ctx.breakScope?,
+                                    continueScope? := ctx.continueScope?,
+                                    leaveScope? := ctx.leaveScope? } :
+                                    Locals.Source.Ctx).withoutLoopControl)
+                                fuel (Block.toLocals returns init) state =
+                              .ok ({ state := initState, mode := initMode },
+                                Ctx.toLocals initCtx) := by
+                          simpa [Ctx.toLocals] using hLowerInit'
+                        have hLowerInitReduced :
+                            Locals.Source.Block.runOpen prim lowerProgram
+                                (Locals.Source.Ctx.mk ctx.scope none none
+                                  ctx.leaveScope?)
+                                fuel (Block.toLocals returns init) state =
+                              .ok ({ state := initState, mode := initMode },
+                                Ctx.toLocals initCtx) := by
+                          simpa [Locals.Source.Ctx.withoutLoopControl]
+                            using hLowerInitTarget
+                        cases initMode with
+                        | regular =>
+                            let postBase := initCtx.withoutLoopControl
+                            let bodyBase :=
+                              initCtx.withLoopControl initCtx.scope
+                                initCtx.scope
+                            cases hLoopRun :
+                                Source.Stmt.runForLoop prim _program initCtx cond
+                                  postBase post bodyBase body fuel initState with
+                            | error err =>
+                                simp [Source.Stmt.run, Locals.Source.Stmt.run,
+                                  initBase, postBase, bodyBase, hInitRun,
+                                  hLoopRun] at hRun
+                            | ok loopOutcome =>
+                                have hLowerLoop :=
+                                  sourceOwnedRunForLoop_toLocals_of_run
+                                    (lowerProgram := lowerProgram)
+                                    (returns := returns) hPostOwned hBodyOwned
+                                    hLoopRun
+                                cases loopOutcome with
+                                | mk loopState loopMode =>
+                                    have hLowerLoop' :
+                                        Locals.Source.Stmt.runForLoop prim
+                                            lowerProgram (Ctx.toLocals initCtx)
+                                            cond
+                                            ((Ctx.toLocals initCtx).withoutLoopControl)
+                                            (Block.toLocals returns post)
+                                            ((Ctx.toLocals initCtx).withLoopControl
+                                              initCtx.scope initCtx.scope)
+                                            (Block.toLocals returns body) fuel
+                                            initState =
+                                          .ok
+                                            (Locals.Source.Outcome.mk loopState
+                                              loopMode) := by
+                                      simpa [postBase, bodyBase,
+                                        Ctx.toLocals_withoutLoopControl,
+                                        Ctx.toLocals_withLoopControl]
+                                        using hLowerLoop
+                                    have hLowerLoopScoped :
+                                        Locals.Source.Stmt.runForLoop prim
+                                            lowerProgram (Ctx.toLocals initCtx)
+                                            cond
+                                            ((Ctx.toLocals initCtx).withoutLoopControl)
+                                            (Block.toLocals returns post)
+                                            ((Ctx.toLocals initCtx).withLoopControl
+                                              (Ctx.toLocals initCtx).scope
+                                              (Ctx.toLocals initCtx).scope)
+                                            (Block.toLocals returns body) fuel
+                                            initState =
+                                          .ok
+                                            (Locals.Source.Outcome.mk loopState
+                                              loopMode) := by
+                                      simpa [Ctx.toLocals] using hLowerLoop'
+                                    have hLowerLoopReduced :
+                                        Locals.Source.Stmt.runForLoop prim
+                                            lowerProgram
+                                            (Locals.Source.Ctx.mk initCtx.scope
+                                              initCtx.breakScope?
+                                              initCtx.continueScope?
+                                              initCtx.leaveScope?)
+                                            cond
+                                            (Locals.Source.Ctx.mk initCtx.scope
+                                              none none initCtx.leaveScope?)
+                                            (Block.toLocals returns post)
+                                            (Locals.Source.Ctx.mk initCtx.scope
+                                              (some initCtx.scope)
+                                              (some initCtx.scope)
+                                              initCtx.leaveScope?)
+                                            (Block.toLocals returns body) fuel
+                                            initState =
+                                          .ok
+                                            (Locals.Source.Outcome.mk loopState
+                                              loopMode) := by
+                                      simpa [Ctx.toLocals,
+                                        Locals.Source.Ctx.withoutLoopControl,
+                                        Locals.Source.Ctx.withLoopControl]
+                                        using hLowerLoopScoped
+                                    cases loopMode with
+                                    | regular =>
+                                        simp [Source.Stmt.run,
+                                          initBase, postBase, bodyBase,
+                                          hInitRun, hLoopRun] at hRun
+                                        rcases hRun with ⟨hOutcome, hCtx⟩
+                                        subst outcome
+                                        subst ctx'
+                                        exact ⟨Locals.Stmt.for_
+                                          (Block.toLocals returns init) cond
+                                          (Block.toLocals returns post)
+                                          (Block.toLocals returns body),
+                                          by simp [Stmt.toLocals],
+                                          by
+                                            simp [Locals.Source.Stmt.run,
+                                              Stmt.toLocals, hLowerInitReduced,
+                                              hLowerLoopReduced,
+                                              Locals.Source.Ctx.withoutLoopControl,
+                                              Locals.Source.Ctx.withLoopControl,
+                                              Ctx.toLocals_withoutLoopControl,
+                                              Ctx.toLocals_withLoopControl,
+                                              Ctx.toLocals]⟩
+                                    | brk =>
+                                        simp [Source.Stmt.run,
+                                          Locals.Source.Stmt.run, initBase,
+                                          postBase, bodyBase, hInitRun,
+                                          hLoopRun, Source.invalid,
+                                          Structured.invalid] at hRun
+                                    | cont =>
+                                        simp [Source.Stmt.run,
+                                          Locals.Source.Stmt.run, initBase,
+                                          postBase, bodyBase, hInitRun,
+                                          hLoopRun, Source.invalid,
+                                          Structured.invalid] at hRun
+                                    | leave =>
+                                        simp [Source.Stmt.run,
+                                          initBase, postBase, bodyBase,
+                                          hInitRun, hLoopRun] at hRun
+                                        rcases hRun with ⟨hOutcome, hCtx⟩
+                                        subst outcome
+                                        subst ctx'
+                                        exact ⟨Locals.Stmt.for_
+                                          (Block.toLocals returns init) cond
+                                          (Block.toLocals returns post)
+                                          (Block.toLocals returns body),
+                                          by simp [Stmt.toLocals],
+                                          by
+                                            simp [Locals.Source.Stmt.run,
+                                              Stmt.toLocals, hLowerInitReduced,
+                                              hLowerLoopReduced,
+                                              Locals.Source.Ctx.withoutLoopControl,
+                                              Locals.Source.Ctx.withLoopControl,
+                                              Ctx.toLocals_withoutLoopControl,
+                                              Ctx.toLocals_withLoopControl,
+                                              Ctx.toLocals]⟩
+                                    | halt kind =>
+                                        simp [Source.Stmt.run,
+                                          initBase, postBase, bodyBase,
+                                          hInitRun, hLoopRun] at hRun
+                                        rcases hRun with ⟨hOutcome, hCtx⟩
+                                        subst outcome
+                                        subst ctx'
+                                        exact ⟨Locals.Stmt.for_
+                                          (Block.toLocals returns init) cond
+                                          (Block.toLocals returns post)
+                                          (Block.toLocals returns body),
+                                          by simp [Stmt.toLocals],
+                                          by
+                                            simp [Locals.Source.Stmt.run,
+                                              Stmt.toLocals, hLowerInitReduced,
+                                              hLowerLoopReduced,
+                                              Locals.Source.Ctx.withoutLoopControl,
+                                              Locals.Source.Ctx.withLoopControl,
+                                              Ctx.toLocals_withoutLoopControl,
+                                              Ctx.toLocals_withLoopControl,
+                                              Ctx.toLocals]⟩
+                        | brk =>
+                            simp [Source.Stmt.run, Locals.Source.Stmt.run,
+                              initBase, hInitRun, Source.invalid,
+                              Structured.invalid] at hRun
+                        | cont =>
+                            simp [Source.Stmt.run, Locals.Source.Stmt.run,
+                              initBase, hInitRun, Source.invalid,
+                              Structured.invalid] at hRun
+                        | leave =>
+                            simp [Source.Stmt.run, initBase, hInitRun]
+                              at hRun
+                            rcases hRun with ⟨hOutcome, hCtx⟩
+                            subst outcome
+                            subst ctx'
+                            exact ⟨Locals.Stmt.for_
+                              (Block.toLocals returns init) cond
+                              (Block.toLocals returns post)
+                              (Block.toLocals returns body),
+                              by simp [Stmt.toLocals],
+                              by simpa [Locals.Source.Stmt.run, Stmt.toLocals,
+                                hLowerInit']⟩
+                        | halt kind =>
+                            simp [Source.Stmt.run, initBase, hInitRun]
+                              at hRun
+                            rcases hRun with ⟨hOutcome, hCtx⟩
+                            subst outcome
+                            subst ctx'
+                            exact ⟨Locals.Stmt.for_
+                              (Block.toLocals returns init) cond
+                              (Block.toLocals returns post)
+                              (Block.toLocals returns body),
+                              by simp [Stmt.toLocals],
+                              by simpa [Locals.Source.Stmt.run, Stmt.toLocals,
+                                hLowerInit']⟩
+        | brk =>
+            exact ⟨Locals.Stmt.brk, by simp [Stmt.toLocals],
+              Stmt.brk_toLocals_of_run (lowerProgram := lowerProgram) hRun⟩
+        | cont =>
+            exact ⟨Locals.Stmt.cont, by simp [Stmt.toLocals],
+              Stmt.cont_toLocals_of_run (lowerProgram := lowerProgram) hRun⟩
+        | leave =>
+            subst returns
+            exact ⟨Locals.Stmt.leave,
+              by simp [Stmt.toLocals, Lower.pushReturns],
+              Stmt.leave_toLocals_of_run (lowerProgram := lowerProgram) hRun⟩
+        | call targets functionName args =>
+            simp [Stmt.SourceOwned] at hOwned
+        | terminal kind =>
+            exact ⟨Locals.Stmt.terminal kind, by simp [Stmt.toLocals],
+              Stmt.terminal_toLocals_of_run (lowerProgram := lowerProgram)
+                hRun⟩
+        | terminalArgs kind args =>
+            exact ⟨Locals.Stmt.terminalArgs kind args,
+              by simp [Stmt.toLocals],
+              Stmt.terminalArgs_toLocals_of_run
+                (lowerProgram := lowerProgram) hRun⟩
+  termination_by _program _lowerProgram _returns stmt _ctx _ctx' fuel _state
+      _outcome _hOwned _hRun =>
+    (fuel, 4, sizeOf stmt)
+  decreasing_by
+    all_goals simp_wf
+    all_goals
+      first
+      | omega
+      | exact Prod.Lex.right _
+          (Prod.Lex.left _ _ (by omega))
+
+  theorem sourceOwnedStmtList_runOpen_toLocals_of_run
+      {prim : Source.PrimitiveSemantics} :
+      ∀ {program : Program} {lowerProgram : Locals.Program}
+        {returns : List Name} {stmts : List Stmt} {ctx ctx' : Source.Ctx}
+        {fuel : Nat} {state : Source.State} {outcome : Source.Outcome},
+        StmtList.SourceOwned returns stmts →
+        Source.Block.runOpen prim program ctx fuel { stmts := stmts } state =
+          .ok (outcome, ctx') →
+        Locals.Source.Block.runOpen prim lowerProgram (Ctx.toLocals ctx) fuel
+          { stmts := StmtList.toLocals returns stmts } state =
+          .ok (outcome, Ctx.toLocals ctx')
+    | _program, lowerProgram, returns, [], ctx, ctx', fuel, state,
+      outcome, _hOwned, hRun => by
+        cases fuel with
+        | zero =>
+            simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+              at hRun
+        | succ fuel =>
+            simp [Source.Block.runOpen] at hRun
+            rcases hRun with ⟨hOutcome, hCtx⟩
+            subst outcome
+            subst ctx'
+            simp [Locals.Source.Block.runOpen, StmtList.toLocals]
+    | _program, lowerProgram, returns, stmt :: rest, ctx, ctx', fuel, state,
+      outcome, hOwned, hRun => by
+        cases fuel with
+        | zero =>
+            simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+              at hRun
+        | succ fuel =>
+            rcases hOwned with ⟨hStmtOwned, hRestOwned⟩
+            cases hStmtRun :
+                Source.Stmt.run prim _program ctx fuel stmt state with
+            | error err =>
+                simp [Source.Block.runOpen, hStmtRun] at hRun
+            | ok result =>
+                rcases result with ⟨stmtOutcome, stmtCtx⟩
+                rcases sourceOwnedStmt_toLocals_stmt_run_of_run
+                    (lowerProgram := lowerProgram) hStmtOwned hStmtRun with
+                  ⟨lowerStmt, hLowerEq, hLowerRun⟩
+                cases stmtOutcome with
+                | mk stmtState mode =>
+                    cases mode <;>
+                      simp [Source.Block.runOpen, Locals.Source.Block.runOpen,
+                        StmtList.toLocals, hStmtRun, hLowerEq, hLowerRun]
+                        at hRun ⊢
+                    · exact
+                        sourceOwnedStmtList_runOpen_toLocals_of_run
+                          hRestOwned hRun
+                    all_goals
+                      rcases hRun with ⟨hOutcome, hCtx⟩
+                      exact ⟨hOutcome, congrArg Ctx.toLocals hCtx⟩
+  termination_by _program _lowerProgram _returns stmts _ctx _ctx' fuel _state
+      _outcome _hOwned _hRun =>
+    (fuel, 0, sizeOf stmts)
+  decreasing_by
+    all_goals simp_wf
+    all_goals
+      first
+      | omega
+      | exact Prod.Lex.right _
+          (Prod.Lex.left _ _ (by omega))
+end
 
 end SourceToLocals
 

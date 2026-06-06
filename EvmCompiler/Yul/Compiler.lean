@@ -67,9 +67,10 @@ def toBasicOp? : EvmYul.Operation .Yul → Option Structured.BasicOp
   | .StackMemFlow .SLOAD => some .sload
   | .StackMemFlow .SSTORE => some .sstore
   | .StackMemFlow .MSTORE8 => some .mstore8
-  | .StackMemFlow .MSIZE => some .msize
-  -- Like `pc()`, imported-Yul `gas()` is recognized but not accepted by
-  -- this verified compiler surface.
+  -- Imported-Yul `msize()` observes `activeWords`, which private-scratch
+  -- preallocation changes. Like `pc()` and `gas()`, it is recognized by the
+  -- source semantics but not accepted by this verified compiler surface.
+  | .StackMemFlow .MSIZE => none
   | .StackMemFlow .GAS => none
   | .StackMemFlow .TLOAD => some .tload
   | .StackMemFlow .TSTORE => some .tstore
@@ -92,6 +93,9 @@ def toBasicOp? : EvmYul.Operation .Yul → Option Structured.BasicOp
 
 @[simp] theorem toBasicOp?_gas :
     toBasicOp? ((.StackMemFlow .GAS : EvmYul.Operation .Yul)) = none := rfl
+
+@[simp] theorem toBasicOp?_msize :
+    toBasicOp? ((.StackMemFlow .MSIZE : EvmYul.Operation .Yul)) = none := rfl
 
 def stop? : EvmYul.Operation .Yul → Option Assembly.HaltKind
   | .StopArith .STOP => some .stop

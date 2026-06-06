@@ -755,6 +755,266 @@ theorem wrapped_ternaryCopyOp_not_checkpoint_of_ok
               | cons d restFinal =>
                   simp [EvmYul.Yul.ternaryCopyOp] at h
 
+theorem wrapped_execUnOp_not_outOfFuel_of_ok
+    {f : EvmYul.Primop.Unary}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.execUnOp f (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  have hEq := wrapped_execUnOp_state_eq_of_ok h
+  cases hEq
+
+theorem wrapped_execBinOp_not_outOfFuel_of_ok
+    {f : EvmYul.Primop.Binary}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.execBinOp f (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  have hEq := wrapped_execBinOp_state_eq_of_ok h
+  cases hEq
+
+theorem wrapped_execTriOp_not_outOfFuel_of_ok
+    {f : EvmYul.Primop.Ternary}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.execTriOp f (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  have hEq := wrapped_execTriOp_state_eq_of_ok h
+  cases hEq
+
+theorem wrapped_execQuadOp_not_outOfFuel_of_ok
+    {f : EvmYul.Primop.Quaternary}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.execQuadOp f (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  have hEq := wrapped_execQuadOp_state_eq_of_ok h
+  cases hEq
+
+theorem wrapped_executionEnvOp_not_outOfFuel_of_ok
+    {op : EvmYul.ExecutionEnv .Yul → Word}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.executionEnvOp op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  have hEq := wrapped_executionEnvOp_state_eq_of_ok (args := args) h
+  cases hEq
+
+theorem wrapped_unaryExecutionEnvOp_not_outOfFuel_of_ok
+    {op : EvmYul.ExecutionEnv .Yul → Word → Word}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.unaryExecutionEnvOp op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  have hEq := wrapped_unaryExecutionEnvOp_state_eq_of_ok h
+  cases hEq
+
+theorem wrapped_machineStateOp_not_outOfFuel_of_ok
+    {op : EvmYul.MachineState → Word}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.machineStateOp op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  have hEq := wrapped_machineStateOp_state_eq_of_ok (args := args) h
+  cases hEq
+
+theorem wrapped_stateOp_not_outOfFuel_of_ok
+    {op : EvmYul.State .Yul → Word}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.stateOp op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  have hEq := wrapped_stateOp_state_eq_of_ok (args := args) h
+  cases hEq
+
+theorem wrapped_binaryMachineStateOp_not_outOfFuel_of_ok
+    {op : EvmYul.MachineState → Word → Word → EvmYul.MachineState}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.binaryMachineStateOp op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  cases args with
+  | nil =>
+      simp [EvmYul.Yul.binaryMachineStateOp] at h
+  | cons a rest =>
+      cases rest with
+      | nil =>
+          simp [EvmYul.Yul.binaryMachineStateOp] at h
+      | cons b restTail =>
+          cases restTail with
+          | nil =>
+              simp [EvmYul.Yul.binaryMachineStateOp,
+                EvmYul.Yul.State.setMachineState] at h
+          | cons c restRest =>
+              simp [EvmYul.Yul.binaryMachineStateOp] at h
+
+theorem wrapped_binaryMachineStateOp'_not_outOfFuel_of_ok
+    {op : EvmYul.MachineState → Word → Word → Word × EvmYul.MachineState}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.binaryMachineStateOp' op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  cases args with
+  | nil =>
+      simp [EvmYul.Yul.binaryMachineStateOp'] at h
+  | cons a rest =>
+      cases rest with
+      | nil =>
+          simp [EvmYul.Yul.binaryMachineStateOp'] at h
+      | cons b restTail =>
+          cases restTail with
+          | nil =>
+              simp [EvmYul.Yul.binaryMachineStateOp',
+                EvmYul.Yul.State.setMachineState] at h
+          | cons c restRest =>
+              simp [EvmYul.Yul.binaryMachineStateOp'] at h
+
+theorem wrapped_ternaryMachineStateOp_not_outOfFuel_of_ok
+    {op : EvmYul.MachineState → Word → Word → Word → EvmYul.MachineState}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.ternaryMachineStateOp op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  cases args with
+  | nil =>
+      simp [EvmYul.Yul.ternaryMachineStateOp] at h
+  | cons a rest =>
+      cases rest with
+      | nil =>
+          simp [EvmYul.Yul.ternaryMachineStateOp] at h
+      | cons b restTail =>
+          cases restTail with
+          | nil =>
+              simp [EvmYul.Yul.ternaryMachineStateOp] at h
+          | cons c restRest =>
+              cases restRest with
+              | nil =>
+                  simp [EvmYul.Yul.ternaryMachineStateOp,
+                    EvmYul.Yul.State.setMachineState] at h
+              | cons d restFinal =>
+                  simp [EvmYul.Yul.ternaryMachineStateOp] at h
+
+theorem wrapped_unaryStateOp_not_outOfFuel_of_ok
+    {op : EvmYul.State .Yul → Word → EvmYul.State .Yul × Word}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.unaryStateOp op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  cases args with
+  | nil =>
+      simp [EvmYul.Yul.unaryStateOp] at h
+  | cons a rest =>
+      cases rest with
+      | nil =>
+          simp [EvmYul.Yul.unaryStateOp,
+            EvmYul.Yul.State.setSharedState] at h
+      | cons b restTail =>
+          simp [EvmYul.Yul.unaryStateOp] at h
+
+theorem wrapped_binaryStateOp_not_outOfFuel_of_ok
+    {op : EvmYul.State .Yul → Word → Word → EvmYul.State .Yul}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.binaryStateOp op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  cases args with
+  | nil =>
+      simp [EvmYul.Yul.binaryStateOp] at h
+  | cons a rest =>
+      cases rest with
+      | nil =>
+          simp [EvmYul.Yul.binaryStateOp] at h
+      | cons b restTail =>
+          cases restTail with
+          | nil =>
+              simp [EvmYul.Yul.binaryStateOp,
+                EvmYul.Yul.State.setState] at h
+          | cons c restRest =>
+              simp [EvmYul.Yul.binaryStateOp] at h
+
+theorem wrapped_ternaryCopyOp_not_outOfFuel_of_ok
+    {op :
+      EvmYul.SharedState .Yul → Word → Word → Word →
+        EvmYul.SharedState .Yul}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.ternaryCopyOp op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  cases args with
+  | nil =>
+      simp [EvmYul.Yul.ternaryCopyOp] at h
+  | cons a rest =>
+      cases rest with
+      | nil =>
+          simp [EvmYul.Yul.ternaryCopyOp] at h
+      | cons b restTail =>
+          cases restTail with
+          | nil =>
+              simp [EvmYul.Yul.ternaryCopyOp] at h
+          | cons c restRest =>
+              cases restRest with
+              | nil =>
+                  simp [EvmYul.Yul.ternaryCopyOp,
+                    EvmYul.Yul.State.setSharedState] at h
+              | cons d restFinal =>
+                  simp [EvmYul.Yul.ternaryCopyOp] at h
+
 theorem primCall_keccak256_state_eq_of_ok_of_nonOk
     {fuel : Nat} {state outState : EvmYul.Yul.State}
     {args values : List Word}
@@ -1311,6 +1571,123 @@ theorem primCall_block_not_checkpoint_of_ok
             (args := args) h
           cases hEq
 
+theorem primCall_block_not_outOfFuel_of_ok
+    {fuel : Nat} {op : EvmYul.Operation.BOp .Yul}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      EvmYul.Yul.primCall fuel (.Ok shared store)
+          ((.Block op : EvmYul.Operation .Yul)) args =
+        .ok (.OutOfFuel, values)) :
+    False := by
+  cases fuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at h
+  | succ fuel =>
+      cases op with
+      | BLOCKHASH =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Block .BLOCKHASH : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.unaryStateOp
+                  (fun s v => (s, EvmYul.State.blockHash s v)) := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_unaryStateOp_not_outOfFuel_of_ok h
+      | COINBASE =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Block .COINBASE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.stateOp
+                  (.ofNat ∘ Fin.val ∘ EvmYul.State.coinBase) := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_stateOp_not_outOfFuel_of_ok (args := args) h
+      | TIMESTAMP =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Block .TIMESTAMP : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.stateOp EvmYul.State.timeStamp := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_stateOp_not_outOfFuel_of_ok (args := args) h
+      | NUMBER =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Block .NUMBER : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.stateOp EvmYul.State.number := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_stateOp_not_outOfFuel_of_ok (args := args) h
+      | PREVRANDAO =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Block .PREVRANDAO : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp EvmYul.prevRandao := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_executionEnvOp_not_outOfFuel_of_ok (args := args) h
+      | GASLIMIT =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Block .GASLIMIT : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.stateOp EvmYul.State.gasLimit := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_stateOp_not_outOfFuel_of_ok (args := args) h
+      | CHAINID =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Block .CHAINID : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.stateOp EvmYul.State.chainId := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_stateOp_not_outOfFuel_of_ok (args := args) h
+      | SELFBALANCE =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Block .SELFBALANCE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.stateOp EvmYul.State.selfbalance := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_stateOp_not_outOfFuel_of_ok (args := args) h
+      | BASEFEE =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Block .BASEFEE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp EvmYul.basefee := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_executionEnvOp_not_outOfFuel_of_ok (args := args) h
+      | BLOBHASH =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Block .BLOBHASH : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.unaryExecutionEnvOp EvmYul.blobhash := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_unaryExecutionEnvOp_not_outOfFuel_of_ok h
+      | BLOBBASEFEE =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Block .BLOBBASEFEE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp
+                  EvmYul.ExecutionEnv.getBlobGasprice := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_executionEnvOp_not_outOfFuel_of_ok (args := args) h
+
 theorem primCall_returndatacopy_state_eq_of_ok_of_nonOk
     {fuel : Nat} {state outState : EvmYul.Yul.State}
     {args values : List Word}
@@ -1411,6 +1788,50 @@ theorem primCall_returndatacopy_not_checkpoint_of_ok
       EvmYul.Yul.primCall fuel (.Ok shared store)
           ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul)) args =
         .ok (.Checkpoint jump, values)) :
+    False := by
+  cases fuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at h
+  | succ fuel =>
+      simp [EvmYul.Yul.primCall] at h
+      have hStep :
+          EvmYul.step
+              ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul)) none =
+            (fun yulState lits =>
+              match lits with
+              | [a, b, c] =>
+                  let mState' :=
+                    yulState.toSharedState.toMachineState.returndatacopy
+                      a b c
+                  .ok (yulState.setMachineState mState', .none)
+              | _ => .error .InvalidArguments) := by
+        rfl
+      rw [hStep] at h
+      cases args with
+      | nil =>
+          simp at h
+      | cons a rest =>
+          cases rest with
+          | nil =>
+              simp at h
+          | cons b restTail =>
+              cases restTail with
+              | nil =>
+                  simp at h
+              | cons c restRest =>
+                  cases restRest with
+                  | nil =>
+                      simp [EvmYul.Yul.State.setMachineState] at h
+                  | cons d restFinal =>
+                      simp at h
+
+theorem primCall_returndatacopy_not_outOfFuel_of_ok
+    {fuel : Nat} {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore} {args values : List Word}
+    (h :
+      EvmYul.Yul.primCall fuel (.Ok shared store)
+          ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul)) args =
+        .ok (.OutOfFuel, values)) :
     False := by
   cases fuel with
   | zero =>
@@ -1904,6 +2325,145 @@ theorem primCall_env_not_checkpoint_of_ok
       | EXTCODEHASH =>
           exact False.elim hSupported
 
+theorem primCall_env_not_outOfFuel_of_ok
+    {fuel : Nat} {op : EvmYul.Operation.EOp .Yul}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (hSupported : EnvCheckpointSafe op)
+    (h :
+      EvmYul.Yul.primCall fuel (.Ok shared store)
+          ((.Env op : EvmYul.Operation .Yul)) args =
+        .ok (.OutOfFuel, values)) :
+    False := by
+  cases fuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at h
+  | succ fuel =>
+      cases op with
+      | ADDRESS =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .ADDRESS : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp
+                  (.ofNat ∘ Fin.val ∘ EvmYul.ExecutionEnv.codeOwner) := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_executionEnvOp_not_outOfFuel_of_ok (args := args) h
+      | BALANCE =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .BALANCE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.unaryStateOp EvmYul.State.balance := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_unaryStateOp_not_outOfFuel_of_ok h
+      | ORIGIN =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step ((.Env .ORIGIN : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp
+                  (.ofNat ∘ Fin.val ∘ EvmYul.ExecutionEnv.sender) := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_executionEnvOp_not_outOfFuel_of_ok (args := args) h
+      | CALLER =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step ((.Env .CALLER : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp
+                  (.ofNat ∘ Fin.val ∘ EvmYul.ExecutionEnv.source) := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_executionEnvOp_not_outOfFuel_of_ok (args := args) h
+      | CALLVALUE =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .CALLVALUE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp EvmYul.ExecutionEnv.weiValue := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_executionEnvOp_not_outOfFuel_of_ok (args := args) h
+      | CALLDATALOAD =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .CALLDATALOAD : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.unaryStateOp
+                  (fun s v => (s, EvmYul.State.calldataload s v)) := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_unaryStateOp_not_outOfFuel_of_ok h
+      | CALLDATASIZE =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .CALLDATASIZE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp
+                  (.ofNat ∘ ByteArray.size ∘
+                    EvmYul.ExecutionEnv.calldata) := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_executionEnvOp_not_outOfFuel_of_ok (args := args) h
+      | CALLDATACOPY =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .CALLDATACOPY : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.ternaryCopyOp
+                  EvmYul.SharedState.calldatacopy := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_ternaryCopyOp_not_outOfFuel_of_ok h
+      | GASPRICE =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step ((.Env .GASPRICE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp
+                  (.ofNat ∘ EvmYul.ExecutionEnv.gasPrice) := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_executionEnvOp_not_outOfFuel_of_ok (args := args) h
+      | CODESIZE =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step ((.Env .CODESIZE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp
+                  (.ofNat ∘ ByteArray.size ∘
+                    EvmYul.ExecutionEnv.codeBytes) := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_executionEnvOp_not_outOfFuel_of_ok (args := args) h
+      | CODECOPY =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step ((.Env .CODECOPY : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.ternaryCopyOp
+                  EvmYul.SharedState.codeBytesCopy := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_ternaryCopyOp_not_outOfFuel_of_ok h
+      | EXTCODESIZE =>
+          exact False.elim hSupported
+      | EXTCODECOPY =>
+          exact False.elim hSupported
+      | RETURNDATASIZE =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .RETURNDATASIZE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.machineStateOp
+                  EvmYul.MachineState.returndatasize := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_machineStateOp_not_outOfFuel_of_ok (args := args) h
+      | RETURNDATACOPY =>
+          exact primCall_returndatacopy_not_outOfFuel_of_ok h
+      | EXTCODEHASH =>
+          exact False.elim hSupported
+
 def StackMemFlowCheckpointSafe : EvmYul.Operation.SMSFOp .Yul → Prop
   | _ => True
 
@@ -1915,6 +2475,42 @@ theorem primCall_mload_not_checkpoint_of_ok
       EvmYul.Yul.primCall fuel (.Ok shared store)
           ((.StackMemFlow .MLOAD : EvmYul.Operation .Yul)) args =
         .ok (.Checkpoint jump, values)) :
+    False := by
+  cases fuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at h
+  | succ fuel =>
+      simp [EvmYul.Yul.primCall] at h
+      have hStep :
+          EvmYul.step
+              ((.StackMemFlow .MLOAD : EvmYul.Operation .Yul)) none =
+            (fun yulState lits =>
+              match lits with
+              | [a] =>
+                  let (v, mState') :=
+                    yulState.toSharedState.toMachineState.mload a
+                  let yulState' := yulState.setMachineState mState'
+                  .ok (yulState', some v)
+              | _ => .error .InvalidArguments) := by
+        rfl
+      rw [hStep] at h
+      cases args with
+      | nil =>
+          simp at h
+      | cons a rest =>
+          cases rest with
+          | nil =>
+              simp [EvmYul.Yul.State.setMachineState] at h
+          | cons b restTail =>
+              simp at h
+
+theorem primCall_mload_not_outOfFuel_of_ok
+    {fuel : Nat} {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore} {args values : List Word}
+    (h :
+      EvmYul.Yul.primCall fuel (.Ok shared store)
+          ((.StackMemFlow .MLOAD : EvmYul.Operation .Yul)) args =
+        .ok (.OutOfFuel, values)) :
     False := by
   cases fuel with
   | zero =>
@@ -2066,6 +2662,127 @@ theorem primCall_stackMemFlow_not_checkpoint_of_ok
             rfl
           rw [hStep] at h
           exact wrapped_ternaryMachineStateOp_not_checkpoint_of_ok h
+
+theorem primCall_stackMemFlow_not_outOfFuel_of_ok
+    {fuel : Nat} {op : EvmYul.Operation.SMSFOp .Yul}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (hSupported : StackMemFlowCheckpointSafe op)
+    (h :
+      EvmYul.Yul.primCall fuel (.Ok shared store)
+          ((.StackMemFlow op : EvmYul.Operation .Yul)) args =
+        .ok (.OutOfFuel, values)) :
+    False := by
+  cases fuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at h
+  | succ fuel =>
+      cases op with
+      | POP =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.StackMemFlow .POP : EvmYul.Operation .Yul)) none =
+                (fun yulState _ => .ok (yulState, .none)) := by
+            rfl
+          rw [hStep] at h
+          simp at h
+      | MLOAD =>
+          exact primCall_mload_not_outOfFuel_of_ok h
+      | MSTORE =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.StackMemFlow .MSTORE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.binaryMachineStateOp
+                  EvmYul.MachineState.mstore := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_binaryMachineStateOp_not_outOfFuel_of_ok h
+      | SLOAD =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.StackMemFlow .SLOAD : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.unaryStateOp EvmYul.State.sload := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_unaryStateOp_not_outOfFuel_of_ok h
+      | SSTORE =>
+          cases hPerm : shared.executionEnv.perm
+          · simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+              hPerm, MonadExcept.throw, instMonadExceptOfExcept,
+              Except.instMonad, Except.bind] at h
+          · simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+              hPerm] at h
+            have hStep :
+                EvmYul.step
+                    ((.StackMemFlow .SSTORE : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.binaryStateOp EvmYul.State.sstore := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_binaryStateOp_not_outOfFuel_of_ok h
+      | MSTORE8 =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.StackMemFlow .MSTORE8 : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.binaryMachineStateOp
+                  EvmYul.MachineState.mstore8 := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_binaryMachineStateOp_not_outOfFuel_of_ok h
+      | MSIZE =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.StackMemFlow .MSIZE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.machineStateOp EvmYul.MachineState.msize := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_machineStateOp_not_outOfFuel_of_ok (args := args) h
+      | GAS =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.StackMemFlow .GAS : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.machineStateOp EvmYul.MachineState.gas := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_machineStateOp_not_outOfFuel_of_ok (args := args) h
+      | TLOAD =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.StackMemFlow .TLOAD : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.unaryStateOp EvmYul.State.tload := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_unaryStateOp_not_outOfFuel_of_ok h
+      | TSTORE =>
+          cases hPerm : shared.executionEnv.perm
+          · simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+              hPerm, MonadExcept.throw, instMonadExceptOfExcept,
+              Except.instMonad, Except.bind] at h
+          · simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+              hPerm] at h
+            have hStep :
+                EvmYul.step
+                    ((.StackMemFlow .TSTORE : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.binaryStateOp EvmYul.State.tstore := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_binaryStateOp_not_outOfFuel_of_ok h
+      | MCOPY =>
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.StackMemFlow .MCOPY : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.ternaryMachineStateOp
+                  EvmYul.MachineState.mcopy := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_ternaryMachineStateOp_not_outOfFuel_of_ok h
 
 theorem primCall_mload_state_eq_of_ok_of_nonOk
     {fuel : Nat} {state outState : EvmYul.Yul.State}
@@ -4459,6 +5176,354 @@ theorem primCall_log4_not_checkpoint_of_ok
       · simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
           hStatic] at h
         cases h
+      · have hWritable : shared.executionEnv.perm = true := by
+          cases hPerm : shared.executionEnv.perm <;> simp [hPerm] at hStatic ⊢
+        have hStep :
+            EvmYul.step ((.Log .LOG4 : EvmYul.Operation .Yul)) none =
+              EvmYul.Yul.log4Op := by
+          rfl
+        revert h
+        cases args with
+        | nil =>
+            intro h
+            simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+              hWritable] at h
+            rw [hStep] at h
+            simp [EvmYul.Yul.log4Op] at h
+        | cons offset rest =>
+            cases rest with
+            | nil =>
+                intro h
+                simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+                  hWritable] at h
+                rw [hStep] at h
+                simp [EvmYul.Yul.log4Op] at h
+            | cons size rest =>
+                cases rest with
+                | nil =>
+                    intro h
+                    simp [EvmYul.Yul.primCall,
+                      EvmYul.Yul.State.executionEnv, hWritable] at h
+                    rw [hStep] at h
+                    simp [EvmYul.Yul.log4Op] at h
+                | cons topic0 rest =>
+                    cases rest with
+                    | nil =>
+                        intro h
+                        simp [EvmYul.Yul.primCall,
+                          EvmYul.Yul.State.executionEnv, hWritable] at h
+                        rw [hStep] at h
+                        simp [EvmYul.Yul.log4Op] at h
+                    | cons topic1 rest =>
+                        cases rest with
+                        | nil =>
+                            intro h
+                            simp [EvmYul.Yul.primCall,
+                              EvmYul.Yul.State.executionEnv, hWritable] at h
+                            rw [hStep] at h
+                            simp [EvmYul.Yul.log4Op] at h
+                        | cons topic2 rest =>
+                            cases rest with
+                            | nil =>
+                                intro h
+                                simp [EvmYul.Yul.primCall,
+                                  EvmYul.Yul.State.executionEnv, hWritable] at h
+                                rw [hStep] at h
+                                simp [EvmYul.Yul.log4Op] at h
+                            | cons topic3 rest =>
+                                cases rest with
+                                | nil =>
+                                    intro h
+                                    rw [primCall_log4_ok_of_writable fuel
+                                      shared store offset size topic0 topic1
+                                      topic2 topic3 hWritable] at h
+                                    cases h
+                                | cons extra rest =>
+                                    intro h
+                                    simp [EvmYul.Yul.primCall,
+                                      EvmYul.Yul.State.executionEnv,
+                                      hWritable] at h
+                                    rw [hStep] at h
+                                    simp [EvmYul.Yul.log4Op] at h
+
+theorem primCall_log0_not_outOfFuel_of_ok
+    {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      EvmYul.Yul.primCall fuel (.Ok shared store)
+          ((.Log .LOG0 : EvmYul.Operation .Yul)) args =
+        .ok (.OutOfFuel, values)) :
+    False := by
+  cases fuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at h
+  | succ fuel =>
+      by_cases hStatic : shared.executionEnv.perm = false
+      · simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+          hStatic, MonadExcept.throw, instMonadExceptOfExcept,
+          Except.instMonad, Except.bind] at h
+      · have hWritable : shared.executionEnv.perm = true := by
+          cases hPerm : shared.executionEnv.perm <;> simp [hPerm] at hStatic ⊢
+        have hStep :
+            EvmYul.step ((.Log .LOG0 : EvmYul.Operation .Yul)) none =
+              EvmYul.Yul.log0Op := by
+          rfl
+        revert h
+        cases args with
+        | nil =>
+            intro h
+            simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+              hWritable] at h
+            rw [hStep] at h
+            simp [EvmYul.Yul.log0Op] at h
+        | cons offset rest =>
+            cases rest with
+            | nil =>
+                intro h
+                simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+                  hWritable] at h
+                rw [hStep] at h
+                simp [EvmYul.Yul.log0Op] at h
+            | cons size rest =>
+                cases rest with
+                | nil =>
+                    intro h
+                    rw [primCall_log0_ok_of_writable fuel shared store
+                      offset size hWritable] at h
+                    cases h
+                | cons extra rest =>
+                    intro h
+                    simp [EvmYul.Yul.primCall,
+                      EvmYul.Yul.State.executionEnv, hWritable] at h
+                    rw [hStep] at h
+                    simp [EvmYul.Yul.log0Op] at h
+
+theorem primCall_log1_not_outOfFuel_of_ok
+    {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      EvmYul.Yul.primCall fuel (.Ok shared store)
+          ((.Log .LOG1 : EvmYul.Operation .Yul)) args =
+        .ok (.OutOfFuel, values)) :
+    False := by
+  cases fuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at h
+  | succ fuel =>
+      by_cases hStatic : shared.executionEnv.perm = false
+      · simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+          hStatic, MonadExcept.throw, instMonadExceptOfExcept,
+          Except.instMonad, Except.bind] at h
+      · have hWritable : shared.executionEnv.perm = true := by
+          cases hPerm : shared.executionEnv.perm <;> simp [hPerm] at hStatic ⊢
+        have hStep :
+            EvmYul.step ((.Log .LOG1 : EvmYul.Operation .Yul)) none =
+              EvmYul.Yul.log1Op := by
+          rfl
+        revert h
+        cases args with
+        | nil =>
+            intro h
+            simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+              hWritable] at h
+            rw [hStep] at h
+            simp [EvmYul.Yul.log1Op] at h
+        | cons offset rest =>
+            cases rest with
+            | nil =>
+                intro h
+                simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+                  hWritable] at h
+                rw [hStep] at h
+                simp [EvmYul.Yul.log1Op] at h
+            | cons size rest =>
+                cases rest with
+                | nil =>
+                    intro h
+                    simp [EvmYul.Yul.primCall,
+                      EvmYul.Yul.State.executionEnv, hWritable] at h
+                    rw [hStep] at h
+                    simp [EvmYul.Yul.log1Op] at h
+                | cons topic rest =>
+                    cases rest with
+                    | nil =>
+                        intro h
+                        rw [primCall_log1_ok_of_writable fuel shared store
+                          offset size topic hWritable] at h
+                        cases h
+                    | cons extra rest =>
+                        intro h
+                        simp [EvmYul.Yul.primCall,
+                          EvmYul.Yul.State.executionEnv, hWritable] at h
+                        rw [hStep] at h
+                        simp [EvmYul.Yul.log1Op] at h
+
+theorem primCall_log2_not_outOfFuel_of_ok
+    {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      EvmYul.Yul.primCall fuel (.Ok shared store)
+          ((.Log .LOG2 : EvmYul.Operation .Yul)) args =
+        .ok (.OutOfFuel, values)) :
+    False := by
+  cases fuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at h
+  | succ fuel =>
+      by_cases hStatic : shared.executionEnv.perm = false
+      · simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+          hStatic, MonadExcept.throw, instMonadExceptOfExcept,
+          Except.instMonad, Except.bind] at h
+      · have hWritable : shared.executionEnv.perm = true := by
+          cases hPerm : shared.executionEnv.perm <;> simp [hPerm] at hStatic ⊢
+        have hStep :
+            EvmYul.step ((.Log .LOG2 : EvmYul.Operation .Yul)) none =
+              EvmYul.Yul.log2Op := by
+          rfl
+        revert h
+        cases args with
+        | nil =>
+            intro h
+            simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+              hWritable] at h
+            rw [hStep] at h
+            simp [EvmYul.Yul.log2Op] at h
+        | cons offset rest =>
+            cases rest with
+            | nil =>
+                intro h
+                simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+                  hWritable] at h
+                rw [hStep] at h
+                simp [EvmYul.Yul.log2Op] at h
+            | cons size rest =>
+                cases rest with
+                | nil =>
+                    intro h
+                    simp [EvmYul.Yul.primCall,
+                      EvmYul.Yul.State.executionEnv, hWritable] at h
+                    rw [hStep] at h
+                    simp [EvmYul.Yul.log2Op] at h
+                | cons topic0 rest =>
+                    cases rest with
+                    | nil =>
+                        intro h
+                        simp [EvmYul.Yul.primCall,
+                          EvmYul.Yul.State.executionEnv, hWritable] at h
+                        rw [hStep] at h
+                        simp [EvmYul.Yul.log2Op] at h
+                    | cons topic1 rest =>
+                        cases rest with
+                        | nil =>
+                            intro h
+                            rw [primCall_log2_ok_of_writable fuel shared store
+                              offset size topic0 topic1 hWritable] at h
+                            cases h
+                        | cons extra rest =>
+                            intro h
+                            simp [EvmYul.Yul.primCall,
+                              EvmYul.Yul.State.executionEnv, hWritable] at h
+                            rw [hStep] at h
+                            simp [EvmYul.Yul.log2Op] at h
+
+theorem primCall_log3_not_outOfFuel_of_ok
+    {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      EvmYul.Yul.primCall fuel (.Ok shared store)
+          ((.Log .LOG3 : EvmYul.Operation .Yul)) args =
+        .ok (.OutOfFuel, values)) :
+    False := by
+  cases fuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at h
+  | succ fuel =>
+      by_cases hStatic : shared.executionEnv.perm = false
+      · simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+          hStatic, MonadExcept.throw, instMonadExceptOfExcept,
+          Except.instMonad, Except.bind] at h
+      · have hWritable : shared.executionEnv.perm = true := by
+          cases hPerm : shared.executionEnv.perm <;> simp [hPerm] at hStatic ⊢
+        have hStep :
+            EvmYul.step ((.Log .LOG3 : EvmYul.Operation .Yul)) none =
+              EvmYul.Yul.log3Op := by
+          rfl
+        revert h
+        cases args with
+        | nil =>
+            intro h
+            simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+              hWritable] at h
+            rw [hStep] at h
+            simp [EvmYul.Yul.log3Op] at h
+        | cons offset rest =>
+            cases rest with
+            | nil =>
+                intro h
+                simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+                  hWritable] at h
+                rw [hStep] at h
+                simp [EvmYul.Yul.log3Op] at h
+            | cons size rest =>
+                cases rest with
+                | nil =>
+                    intro h
+                    simp [EvmYul.Yul.primCall,
+                      EvmYul.Yul.State.executionEnv, hWritable] at h
+                    rw [hStep] at h
+                    simp [EvmYul.Yul.log3Op] at h
+                | cons topic0 rest =>
+                    cases rest with
+                    | nil =>
+                        intro h
+                        simp [EvmYul.Yul.primCall,
+                          EvmYul.Yul.State.executionEnv, hWritable] at h
+                        rw [hStep] at h
+                        simp [EvmYul.Yul.log3Op] at h
+                    | cons topic1 rest =>
+                        cases rest with
+                        | nil =>
+                            intro h
+                            simp [EvmYul.Yul.primCall,
+                              EvmYul.Yul.State.executionEnv, hWritable] at h
+                            rw [hStep] at h
+                            simp [EvmYul.Yul.log3Op] at h
+                        | cons topic2 rest =>
+                            cases rest with
+                            | nil =>
+                                intro h
+                                rw [primCall_log3_ok_of_writable fuel shared
+                                  store offset size topic0 topic1 topic2
+                                  hWritable] at h
+                                cases h
+                            | cons extra rest =>
+                                intro h
+                                simp [EvmYul.Yul.primCall,
+                                  EvmYul.Yul.State.executionEnv, hWritable] at h
+                                rw [hStep] at h
+                                simp [EvmYul.Yul.log3Op] at h
+
+theorem primCall_log4_not_outOfFuel_of_ok
+    {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      EvmYul.Yul.primCall fuel (.Ok shared store)
+          ((.Log .LOG4 : EvmYul.Operation .Yul)) args =
+        .ok (.OutOfFuel, values)) :
+    False := by
+  cases fuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at h
+  | succ fuel =>
+      by_cases hStatic : shared.executionEnv.perm = false
+      · simp [EvmYul.Yul.primCall, EvmYul.Yul.State.executionEnv,
+          hStatic, MonadExcept.throw, instMonadExceptOfExcept,
+          Except.instMonad, Except.bind] at h
       · have hWritable : shared.executionEnv.perm = true := by
           cases hPerm : shared.executionEnv.perm <;> simp [hPerm] at hStatic ⊢
         have hStep :

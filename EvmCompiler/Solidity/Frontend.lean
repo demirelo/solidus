@@ -1207,7 +1207,7 @@ mutual
     all_goals simp_wf
     all_goals
       first
-      | exact List.sizeOf_lt_sizeOf_of_mem (by assumption)
+      | exact Structured.Preservation.list_sizeOf_lt_sizeOf_of_mem (by assumption)
       | omega
 
   def CaseList.touchNames :
@@ -1354,7 +1354,7 @@ mutual
     all_goals simp_wf
     all_goals
       first
-      | exact List.sizeOf_lt_sizeOf_of_mem (by assumption)
+      | exact Structured.Preservation.list_sizeOf_lt_sizeOf_of_mem (by assumption)
       | omega
 
   def CaseList.scopeLetLifetimes :

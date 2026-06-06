@@ -389,6 +389,17 @@ noncomputable def compileChecked? (program : Program) :
   Structured.Preservation.ProcedurePreservation.compileChecked?
     program.toStructured
 
+theorem compileChecked?_of_accepted_bounds {program : Program}
+    (hAccepted : Program.Accepted program)
+    (hBounds :
+      Structured.Preservation.ProcedurePreservation.CompilationBounds
+        program.toStructured) :
+    compileChecked? program = some program.compile := by
+  unfold compileChecked?
+  simpa [Program.compile] using
+    Structured.Preservation.ProcedurePreservation.compileChecked?_of_accepted_bounds
+      (program := program.toStructured) hAccepted hBounds
+
 theorem compileChecked?_noCallCreate {program : Program}
     {asm : Assembly.Program}
     (hProgram : program.usesCallCreate = false)

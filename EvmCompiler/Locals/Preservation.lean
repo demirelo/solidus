@@ -1758,7 +1758,6 @@ mutual
             subst code
             subst compileCtx
             unfold Stmt.run at hRun
-            simp [Stmt.run] at hRun
             rw [Expr.runState_eq_compileCode ctx expr exprCode state hCode]
               at hRun
             cases hCodeRun : Structured.Code.runState exprCode state with
@@ -1785,7 +1784,6 @@ mutual
             subst code
             subst compileCtx
             unfold Stmt.run at hRun
-            simp [Stmt.run] at hRun
             rw [Expr.ExprSeq.runCode_eq_compileCode_zero ctx exprs exprsCode
                 state.evm hCode] at hRun
             cases hCodeRun : Structured.Code.run exprsCode state.evm with
@@ -1818,7 +1816,6 @@ mutual
             subst code
             subst compileCtx
             unfold Stmt.run at hRun
-            simp [Stmt.run] at hRun
             rw [Expr.runState_eq_compileCode ctx value valueCode state hCode]
               at hRun
             cases hCodeRun : Structured.Code.runState valueCode state with
@@ -1853,7 +1850,6 @@ mutual
                     subst code
                     subst compileCtx
                     unfold Stmt.run at hRun
-                    simp [Stmt.run] at hRun
                     rw [Expr.runCode_eq_compileCode ctx 0 value valueCode
                         state.evm hValueCode] at hRun
                     cases hValueRun : Structured.Code.run valueCode state.evm with
@@ -1911,7 +1907,6 @@ mutual
                 subst code
                 subst compileCtx
                 unfold Stmt.run at hRun
-                simp [Stmt.run] at hRun
                 cases hSwapRun : swapOp.step state.evm with
                 | error err =>
                     simp [hDepth, hSwap, hSwapRun] at hRun
@@ -1955,7 +1950,6 @@ mutual
                 subst code
                 subst compileCtx
                 unfold Stmt.run at hRun
-                simp [Stmt.run] at hRun
                 cases hSwapRun : swapOp.step state.evm with
                 | error err =>
                     simp [hDepth, hSwap, hSwapRun] at hRun
@@ -2093,7 +2087,6 @@ mutual
                 subst code
                 subst compileCtx
                 unfold Stmt.run at hRun
-                simp [Stmt.run] at hRun
                 cases hBodyRun :
                     Block.runScoped program ctx body fuel state with
                 | error err =>
@@ -2654,7 +2647,6 @@ mutual
                 subst code
                 subst compileCtx
                 unfold Stmt.run at hRun
-                simp [Stmt.run] at hRun
                 cases hCleanupRun :
                     Ctx.runCleanupTo ctx target state with
                 | error err =>
@@ -2691,7 +2683,6 @@ mutual
                 subst code
                 subst compileCtx
                 unfold Stmt.run at hRun
-                simp [Stmt.run] at hRun
                 cases hCleanupRun :
                     Ctx.runCleanupTo ctx target state with
                 | error err =>
@@ -2729,7 +2720,6 @@ mutual
                 subst code
                 subst compileCtx
                 unfold Stmt.run at hRun
-                simp [Stmt.run] at hRun
                 cases hCleanupRun :
                     Ctx.runCleanupToPreserving ctx ctx.leaveRetc target state with
                 | error err =>
@@ -2998,7 +2988,6 @@ mutual
             subst code
             subst compileCtx
             unfold Stmt.run at hRun
-            simp [Stmt.run] at hRun
             cases hCleanupRun : Ctx.runCleanupAll ctx state with
         | error err =>
             simp [hCleanupRun] at hRun
@@ -3035,7 +3024,6 @@ mutual
             subst code
             subst compileCtx
             unfold Stmt.run at hRun
-            simp [Stmt.run] at hRun
             rw [Expr.ExprSeq.runCode_eq_compileCode_zero ctx args argsCode
                 state.evm hArgsCode] at hRun
             cases hArgsRun : Structured.Code.run argsCode state.evm with

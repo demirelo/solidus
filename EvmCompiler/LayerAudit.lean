@@ -17,6 +17,51 @@ their own modules; this audit file should not keep stale theorem routes alive.
 namespace EvmCompiler
 namespace LayerAudit
 
+abbrev accountStorageImageRel :=
+  @Yul.Reference.StorageImageRel
+
+abbrev accountTransientStorageImageRel :=
+  @Yul.Reference.TransientStorageImageRel
+
+abbrev chainStateRelStorageImageRel :=
+  @Yul.Reference.ChainStateRel.storageImageRel
+
+abbrev chainStateRelTransientStorageImageRel :=
+  @Yul.Reference.ChainStateRel.transientStorageImageRel
+
+abbrev chainStateRelSelfbalanceRel :=
+  @Yul.Reference.ChainStateRel.selfbalanceRel
+
+abbrev sharedStateRelStorageImageRel :=
+  @Yul.Reference.SharedStateRel.storageImageRel
+
+abbrev sharedStateRelTransientStorageImageRel :=
+  @Yul.Reference.SharedStateRel.transientStorageImageRel
+
+abbrev sharedStateRelSelfbalanceRel :=
+  @Yul.Reference.SharedStateRel.selfbalanceRel
+
+abbrev openExternalResponseRelStorageImageRel :=
+  @Yul.Reference.SharedStateRel.OpenExternalResponseRel.storageImageRel
+
+abbrev openExternalResponseRelTransientStorageImageRel :=
+  @Yul.Reference.SharedStateRel.OpenExternalResponseRel.transientStorageImageRel
+
+abbrev sourceStateRelStorageImageRel :=
+  @Yul.Reference.SourceBridgeFacts.SourceStateRel.storageImageRel
+
+abbrev sourceStateRelTransientStorageImageRel :=
+  @Yul.Reference.SourceBridgeFacts.SourceStateRel.transientStorageImageRel
+
+abbrev functionsOpenCurrentSharedStateBridgeRelSelfbalanceRel :=
+  @Yul.OpenLowering.FunctionsOpenCurrentSharedStateBridgeRel.selfbalanceRel
+
+abbrev sourceOpenTargetCommittedStorageImageRel :=
+  @Yul.Program.SourceOpenTargetCommittedStorageImageRel
+
+abbrev sourceOpenTargetCommittedStorageImageRelOfSourceResultOutcomeRel :=
+  @Yul.Program.sourceOpenTargetCommittedStorageImageRel_of_sourceResultOutcomeRel
+
 namespace FunctionsOpenCALLBoundary
 
 noncomputable section
@@ -38,6 +83,429 @@ abbrev checkedCompilerTarget :=
 abbrev checkedRegularOpenCompilerTarget :=
   Yul.OpenLowering.FunctionsProgramCompileCheckedRegularOpenAssemblyTarget?
 
+abbrev callSafePrimitiveIffSafeOrCall :=
+  @Yul.Reference.Safe.CallSafe.primitive_iff_safe_or_call
+
+abbrev callSafeAcceptsCall :=
+  @Yul.Reference.Safe.CallSafe.accepts_call
+
+abbrev callFamilySafePrimitiveIffSafeOrCallFamily :=
+  @Yul.Reference.Safe.CallFamilySafe.primitive_iff_safe_or_call_family
+
+abbrev callFamilySafeAcceptsCall :=
+  @Yul.Reference.Safe.CallFamilySafe.accepts_call
+
+abbrev callFamilySafeAcceptsCallcode :=
+  @Yul.Reference.Safe.CallFamilySafe.accepts_callcode
+
+abbrev callFamilySafeAcceptsDelegatecall :=
+  @Yul.Reference.Safe.CallFamilySafe.accepts_delegatecall
+
+abbrev callFamilySafeAcceptsStaticcall :=
+  @Yul.Reference.Safe.CallFamilySafe.accepts_staticcall
+
+abbrev callFamilySafeRejectsCreate :=
+  @Yul.Reference.Safe.CallFamilySafe.rejects_create
+
+abbrev callFamilySafeRejectsCreate2 :=
+  @Yul.Reference.Safe.CallFamilySafe.rejects_create2
+
+abbrev callFamilySafeProgramOfCoverage :=
+  @Yul.Reference.Safe.CallFamilySafe.program_of_coverage
+
+abbrev callFamilySafePrimitiveOfCallSafe :=
+  @Yul.Reference.Safe.CallFamilySafe.primitive_of_callSafe
+
+abbrev callFamilySafeProgramOfCallSafe :=
+  @Yul.Reference.Safe.CallFamilySafe.program_of_callSafe
+
+abbrev callFamilySafeLookupFunctionBodySafeOfContractLookup :=
+  @Yul.Reference.SourceBridgeFacts.CallFamilySafeLookup.function_body_safe_of_contract_lookup
+
+abbrev callKindOfYulOperationSomeOfExternalCallBoundaryPrimitive :=
+  @Yul.Reference.SourceBridgeFacts.callKind_ofYulOperation?_some_of_externalCallBoundaryPrimitive
+
+abbrev openExternalCallKind :=
+  Yul.OpenExternal.CallKind
+
+abbrev openExternalCallKindOfYulOperationToYulOperation :=
+  @Yul.OpenExternal.CallKind.ofYulOperation?_toYulOperation
+
+abbrev openExternalCallKindToYulOperationEqOfYulOperation :=
+  @Yul.OpenExternal.CallKind.toYulOperation_eq_ofYulOperation?
+
+abbrev openExternalCallKindOfEVMOperationToEVMOperation :=
+  @Yul.OpenExternal.CallKind.ofEVMOperation?_toEVMOperation
+
+abbrev openExternalCreateKind :=
+  Yul.OpenExternal.CreateKind
+
+abbrev openExternalCreateKindOfYulOperationToYulOperation :=
+  @Yul.OpenExternal.CreateKind.ofYulOperation?_toYulOperation
+
+abbrev openExternalCreateKindToYulOperationEqOfYulOperation :=
+  @Yul.OpenExternal.CreateKind.toYulOperation_eq_ofYulOperation?
+
+abbrev openExternalCreateKindOfEVMOperationToEVMOperation :=
+  @Yul.OpenExternal.CreateKind.ofEVMOperation?_toEVMOperation
+
+abbrev openExternalCreateRequest :=
+  @Yul.OpenExternal.CreateRequest
+
+abbrev openExternalCreateSite :=
+  @Yul.OpenExternal.CreateSite
+
+abbrev openExternalCreateOperands :=
+  @Yul.OpenExternal.CreateOperands
+
+abbrev openExternalCallContextRel :=
+  @Yul.OpenExternal.CallContextRel
+
+abbrev openExternalCallContextRelCallSiteEq :=
+  @Yul.OpenExternal.CallContextRel.callSite_eq
+
+abbrev openExternalCallContextRelCreateSiteEq :=
+  @Yul.OpenExternal.CallContextRel.createSite_eq
+
+abbrev openExternalCallKindCallSiteEqOfYulEVMOperands :=
+  @Yul.OpenExternal.CallKind.callSite_eq_of_yul_evm_operands
+
+abbrev openExternalCallKindCallSiteEqOfArgs :=
+  @Yul.OpenExternal.CallKind.callSite_eq_of_args
+
+abbrev openExternalCallKindYulOperandsArgs :=
+  @Yul.OpenExternal.CallKind.yulOperands?_args
+
+abbrev openExternalCallKindEVMOperandsArgs :=
+  @Yul.OpenExternal.CallKind.evmOperands?_args
+
+abbrev openExternalCreateKindCreateSiteEqOfYulEVMOperands :=
+  @Yul.OpenExternal.CreateKind.createSite_eq_of_yul_evm_operands
+
+abbrev openExternalCreateKindCreateSiteEqOfArgs :=
+  @Yul.OpenExternal.CreateKind.createSite_eq_of_args
+
+abbrev openExternalCreateKindYulOperandsArgs :=
+  @Yul.OpenExternal.CreateKind.yulOperands?_args
+
+abbrev openExternalCreateKindEVMOperandsArgs :=
+  @Yul.OpenExternal.CreateKind.evmOperands?_args
+
+abbrev openExternalCreateKindPrimitiveCreateSiteArgsReverse :=
+  @Yul.OpenExternal.CreateKind.primitiveCreateSite?_args_reverse
+
+abbrev openExternalCallResponseFailureZero :=
+  Yul.OpenExternal.CallResponse.failureZero
+
+abbrev openExternalCreateResponseFailureZero :=
+  Yul.OpenExternal.CreateResponse.failureZero
+
+abbrev openExternalOpenCreate :=
+  @Yul.OpenExternal.OpenCreate
+
+abbrev openExternalOpenCreateRel :=
+  @Yul.OpenExternal.OpenCreateRel
+
+abbrev openExternalOpenResultBindCreate :=
+  @Yul.OpenExternal.OpenResult.bind_create
+
+abbrev openExternalYulOpenResultBindCreate :=
+  @Yul.OpenExternal.YulOpenResult.bind_create
+
+abbrev openExternalYulOpenResultToOpenResultCreate :=
+  @Yul.OpenExternal.YulOpenResult.toOpenResult_create
+
+abbrev openExternalYulOpenEvalValuesPrimCreateSuspends :=
+  @Yul.OpenExternal.YulOpen.evalValues_prim_create_suspends_of_evalArgs_done
+
+abbrev openExternalCreateKindYulPrimitiveEvalValuesOpenCreateResumeOk :=
+  @Yul.OpenExternal.CreateKind.yulPrimitiveEvalValuesOpenCreate?_resume_ok
+
+abbrev openExternalOpenResultResolvesExistsTrace :=
+  @Yul.OpenExternal.OpenResultResolves.exists_trace
+
+abbrev openExternalCallKindPrimitiveCallSiteArgsReverse :=
+  @Yul.OpenExternal.CallKind.primitiveCallSite?_args_reverse
+
+abbrev openExternalCreateKindEvmOpenCreateArgs :=
+  @Yul.OpenExternal.CreateKind.evmOpenCreate?_args
+
+abbrev openExternalCreateKindPrimitiveOpenCreateRelEvmOpenCreate :=
+  @Yul.OpenExternal.CreateKind.primitiveOpenCreateRel_evmOpenCreate
+
+abbrev callFamilySafePrimitiveSafeOrCallKind :=
+  @Yul.Reference.SourceBridgeFacts.callFamilySafe_primitive_safe_or_callKind
+
+abbrev sourceExprPreludeOpenCallResponseRelBeforeCallFamilySafePrimitive :=
+  @Yul.Reference.SourceBridgeFacts.SourceExprPreludeOpenCallResponseRel.beforeCallFamilySafePrimitive
+
+abbrev lower1PrimSourceExprPreludeOpenSoundAtExactTargetCallFamilySafeOfLowerBound1ArgPreludeOpenCanonical :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_prim_sourceExprPreludeOpenSoundAtExactTarget_callFamilySafe_of_lowerBound1?_arg_prelude_open_canonical
+
+abbrev lower1PrimSourceExprPreludeOpenSoundAtExactTargetCallFamilySafeExprOfLower1ArgPreludeOpenCanonical :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_prim_sourceExprPreludeOpenSoundAtExactTarget_callFamilySafe_expr_of_lower1?_arg_prelude_open_canonical
+
+abbrev lower1SourceExprPreludeOpenSoundAtExactTargetCallFamilySafeExprOfLower1Cases :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_sourceExprPreludeOpenSoundAtExactTarget_callFamilySafe_expr_of_lower1?_cases
+
+abbrev sourceExprRawPreludeOpenSoundAtExactTargetPrimCallFamilySafeOfArgTerminalCanonical :=
+  @Yul.Reference.SourceBridgeFacts.sourceExprRawPreludeOpenSoundAtExactTarget_prim_callFamilySafe_of_arg_terminal_canonical
+
+abbrev lower1PrimSourceExprRawPreludeOpenSoundAtExactTargetCallFamilySafeExprOfLower1ArgTerminalCanonical :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_prim_sourceExprRawPreludeOpenSoundAtExactTarget_callFamilySafe_expr_of_lower1?_arg_terminal_canonical
+
+abbrev lower1SourceExprRawPreludeOpenSoundAtExactTargetCallFamilySafeExprOfLower1Cases :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callFamilySafe_expr_of_lower1?_cases
+
+abbrev primCallCallKindToOpenResultDoneInvariantCheckpointStoreContainsOfNoOpen :=
+  @Yul.Reference.SourceBridgeFacts.primCall_callKind_toOpenResult_doneInvariant_checkpointStoreContains_of_no_open
+
+abbrev yulOpenEvalArgsReverseToOpenResultDoneInvariantCheckpointStoreContainsOfCallFamilySafePrimitiveFamilies :=
+  @Yul.Reference.SourceBridgeFacts.yulOpenEvalArgsReverse_toOpenResult_doneInvariant_checkpointStoreContains_of_callFamilySafe_primitiveFamilies
+
+abbrev lower1YulOpenEvalValuesCallFamilySafeExprDoneInvariantSingleOfLower1CasesUserArityOfMem :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_yulOpenEvalValues_callFamilySafe_expr_doneInvariant_single_of_lower1?_cases_userArity_of_mem
+
+abbrev sourceArgTerminalRawPreludeOpenSoundAtExactTargetOfLowerBound1HeadExprMemCheckedCanonicalCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_expr_mem_checked_canonical_callFamilySafe
+
+abbrev lower1SourceExprRawPreludeOpenSoundAtExactTargetCallFamilySafeExprOfLower1ReserveCases :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callFamilySafe_expr_of_lower1?_reserve_cases
+
+abbrev lower1SourceExprRawPreludeOpenSoundAtExactTargetUserCallOfGeneratedArgTerminalReserveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generated_arg_terminal_reserve_callFamilySafe
+
+abbrev lower1SourceExprRawPreludeOpenSoundAtExactTargetCallFamilySafeExprOfLower1Recursive :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callFamilySafe_expr_of_lower1?_recursive
+
+abbrev primCallCallKindStateDomainExactOfNoOpenOk :=
+  @Yul.Reference.SourceBridgeFacts.primCall_callKind_state_domain_exact_of_no_open_ok
+
+abbrev yulOpenEvalValuesStateDomainExactOfCallFamilySafePrimitiveFamilies :=
+  @Yul.Reference.SourceBridgeFacts.yulOpenEvalValues_state_domain_exact_of_callFamilySafe_primitiveFamilies
+
+abbrev lower1YulOpenEvalValuesCallFamilySafeExprDoneInvariantDomainSingleOfLower1CasesUserArity :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_yulOpenEvalValues_callFamilySafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
+
+abbrev lower1YulOpenEvalValuesCallFamilySafeExprDoneInvariantSingleOfLower1CasesUserArityOfMemActualFuel :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_yulOpenEvalValues_callFamilySafe_expr_doneInvariant_single_of_lower1?_cases_userArity_of_mem_actual_fuel
+
+abbrev lower1YulOpenEvalValuesCallFamilySafeExprDoneInvariantDomainSingleOfLower1CasesUserArityActualFuel :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_yulOpenEvalValues_callFamilySafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity_actual_fuel
+
+abbrev sourceExprSeqPreludeOpenLetSoundAtExactHiddenCtxOfLower1RecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.SourceExprSeqPreludeOpen.letSoundAtExactHiddenCtx_of_lower1?_recursive_callFamilySafe
+
+abbrev sourceExprSeqPreludeOpenAssignSoundAtExactHiddenCtxOfLower1RecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.SourceExprSeqPreludeOpen.assignSoundAtExactHiddenCtx_of_lower1?_recursive_callFamilySafe
+
+abbrev checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtxConsLetExprRecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_recursive_callFamilySafe
+
+abbrev checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtxConsAssignExprRecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_recursive_callFamilySafe
+
+abbrev sourceArgTerminalRawPreludeOpenPathSoundWhenOfLowerBound1HeadExprMemActualFuelCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.sourceArgTerminalRawPreludeOpenPathSoundWhen_of_lowerBound1?_head_expr_mem_actual_fuel_callFamilySafe
+
+abbrev lower1SourceExprRawPreludeOpenPathSoundWhenCallFamilySafeExprOfLower1ActualFuelRecursive :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_sourceExprRawPreludeOpenPathSoundWhen_callFamilySafe_expr_of_lower1?_actual_fuel_recursive
+
+abbrev lower0CallFamilySafePrimitiveSafeOfLower0 :=
+  @Yul.Reference.SourceBridgeFacts.lower0?_callFamilySafe_primitive_safe_of_lower0?
+
+abbrev lower0YulOpenEvalValuesCallFamilySafePrimDoneInvariantDomainOfLower0ActualFuel :=
+  @Yul.Reference.SourceBridgeFacts.lower0?_yulOpenEvalValues_callFamilySafe_prim_doneInvariant_domain_of_lower0?_actual_fuel
+
+abbrev lower0SourceExprRawPreludeOpenPathSoundWhenCallFamilySafePrimOfLower0ActualFuelRecursive :=
+  @Yul.Reference.SourceBridgeFacts.lower0?_sourceExprRawPreludeOpenPathSoundWhen_callFamilySafe_prim_of_lower0?_actual_fuel_recursive
+
+abbrev sourceOpenResultSeqPathSoundWhenAtExactHiddenCtxConsLetExprRecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive_callFamilySafe
+
+abbrev sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtxConsLetExprRecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive_callFamilySafe
+
+abbrev sourceOpenResultSeqPathSoundWhenAtExactHiddenCtxConsAssignExprRecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recursive_callFamilySafe
+
+abbrev sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtxConsAssignExprRecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recursive_callFamilySafe
+
+abbrev sourceOpenResultSeqPathSoundWhenAtExactHiddenCtxConsExprStmtPrimRecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_exprStmt_prim_recursive_callFamilySafe
+
+abbrev sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtxConsExprStmtPrimRecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_cons_exprStmt_prim_recursive_callFamilySafe
+
+abbrev programCALLFamilyBridgeContextOfCallContext :=
+  @Yul.Reference.SourceBridgeFacts.ProgramCALLFamilyBridgeContext.of_call_context
+
+abbrev programCALLFamilyBridgeContextFindFunctionOfUserExprOk :=
+  @Yul.Reference.SourceBridgeFacts.ProgramCALLFamilyBridgeContext.find_function_of_user_expr_ok
+
+abbrev callOpenSeqPathFamilyRecursiveAtOfFrontiersLe :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenSeqPathFamilyRecursiveAt.of_frontiers_le
+
+abbrev callOpenSeqKontPathFamilyRecursiveAtOfFrontiersLe :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenSeqKontPathFamilyRecursiveAt.of_frontiers_le
+
+abbrev callOpenLoopContinuationPathFamilyRecursiveAtOfFrontiersLe :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenLoopContinuationPathFamilyRecursiveAt.of_frontiers_le
+
+abbrev callOpenSeqPathCallFamilyRecursiveAtOfFrontiersLe :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenSeqPathCallFamilyRecursiveAt.of_frontiers_le
+
+abbrev callOpenSeqKontPathCallFamilyRecursiveAtOfFrontiersLe :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenSeqKontPathCallFamilyRecursiveAt.of_frontiers_le
+
+abbrev callOpenLoopContinuationPathCallFamilyRecursiveAtOfFrontiersLe :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenLoopContinuationPathCallFamilyRecursiveAt.of_frontiers_le
+
+abbrev yulOpenExecFunctionBodyToOpenResultDoneInvariantCheckpointStoreContainsOfCallFamilySafeScoped :=
+  @Yul.Reference.SourceBridgeFacts.yulOpenExec_function_body_toOpenResult_doneInvariant_checkpointStoreContains_of_callFamilySafe_scoped
+
+abbrev sourceUserCallBodyOpenResultPathRelOfSeqCallFamilySafeScopedFunction :=
+  @Yul.Reference.SourceBridgeFacts.SourceExprSeqPreludeOpen.sourceUserCallBodyOpenResultPathRel_of_seq_callFamilySafe_scoped_function
+
+abbrev sourceUserCallResultOpenResultPathRelSuccOfOverrideFunctionBodyCallFamilySafeScoped :=
+  @Yul.Reference.SourceBridgeFacts.SourceExprSeqPreludeOpen.sourceUserCallResultOpenResultPathRel_succ_of_override_function_body_callFamilySafe_scoped
+
+abbrev sourceExprRawPreludeOpenResultPathRelUserCallRegularOfOverrideFunctionBodyCallFamilySafeScoped :=
+  @Yul.Reference.SourceBridgeFacts.SourceExprSeqPreludeOpen.sourceExprRawPreludeOpenResultPathRel_user_call_regular_of_override_function_body_callFamilySafe_scoped
+
+abbrev sourceExprRawPreludeOpenUserCallRegularPathWhenOfRecursiveBodySeqCallFamily :=
+  @Yul.Reference.SourceBridgeFacts.SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_body_seq_callFamily
+
+abbrev sourceExprRawPreludeOpenUserCallRegularPathWhenOfRecursiveCheckedBodyCallFamily :=
+  @Yul.Reference.SourceBridgeFacts.SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_checked_body_callFamily
+
+abbrev sourceExprRawPreludeOpenUserCallRegularPathWhenOfProgramCALLFamilyRecursive :=
+  @Yul.Reference.SourceBridgeFacts.SourceExprRawPreludeOpenUserCallRegularPathWhen.of_programCALLFamily_recursive
+
+abbrev checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtxConsExprStmtPrimOfProgramCALLFamilyRecursive :=
+  @Yul.Reference.SourceBridgeFacts.checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_exprStmt_prim_of_programCALLFamily_recursive
+
+abbrev checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtxConsExprStmtPrimOfProgramCALLFamilyRecursive :=
+  @Yul.Reference.SourceBridgeFacts.checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_exprStmt_prim_of_programCALLFamily_recursive
+
+abbrev yulOpenExecPrimCallToOpenResultDoneInvariantCheckpointStoreContainsOfCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.yulOpenExecPrimCall_toOpenResult_doneInvariant_checkpointStoreContains_of_callFamilySafe
+
+abbrev yulOpenExecExprStmtCallSuccToOpenResultDoneInvariantCheckpointStoreContainsOfCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.yulOpenExec_exprStmtCall_succ_toOpenResult_doneInvariant_checkpointStoreContains_of_callFamilySafe
+
+abbrev yulOpenExecExecSeqOkToOpenResultDoneInvariantCheckpointStoreContainsOfCallFamilySafeScoped :=
+  @Yul.Reference.SourceBridgeFacts.yulOpenExec_execSeq_ok_toOpenResult_doneInvariant_checkpointStoreContains_of_callFamilySafe_scoped
+
+abbrev yulOpenExecSeqOkToOpenResultDoneInvariantCheckpointStoreContainsOfCallFamilySafeScoped :=
+  @Yul.Reference.SourceBridgeFacts.yulOpenExecSeq_ok_toOpenResult_doneInvariant_checkpointStoreContains_of_callFamilySafe_scoped
+
+abbrev yulOpenExecBlockToOpenResultDoneInvariantStateStoreDomainExactOfCallFamilySafeScoped :=
+  @Yul.Reference.SourceBridgeFacts.yulOpenExec_block_toOpenResult_doneInvariant_stateStoreDomainExact_of_callFamilySafe_scoped
+
+abbrev sourceOpenResultSeqPathSoundWhenAtExactHiddenCtxConsIfExprRecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_if_expr_recursive_callFamilySafe
+
+abbrev sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtxConsIfExprRecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_cons_if_expr_recursive_callFamilySafe
+
+abbrev sourceOpenResultSeqPathSoundWhenAtExactHiddenCtxConsSwitchExprRecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_switch_expr_recursive_callFamilySafe
+
+abbrev sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtxConsSwitchExprRecursiveCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_cons_switch_expr_recursive_callFamilySafe
+
+abbrev sourceResultCheckpointAllowedExecOfScopedCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.SourceResultCheckpointAllowed.exec_of_scoped_callFamilySafe
+
+abbrev sourceResultCheckpointAllowedExecSeqOfScopedCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.SourceResultCheckpointAllowed.execSeq_of_scoped_callFamilySafe
+
+abbrev sourceResultCheckpointAllowedFunctionBodyOkOfScopedCallFamilySafe :=
+  @Yul.Reference.SourceBridgeFacts.SourceResultCheckpointAllowed.function_body_ok_of_scoped_callFamilySafe
+
+abbrev dispatcherBodyNoCheckpointOfScopedCallFamilySafe :=
+  @Yul.Program.DispatcherBodyNoCheckpoint.of_scoped_callFamilySafe
+
+abbrev sourceArgListPreludeRegularAllCallFamilySafeCheckedAt :=
+  @Yul.Reference.SourceBridgeFacts.SourceArgListPreludeRegularAllCallFamilySafeCheckedAt
+
+abbrev callOpenSeqPathFamilyLoweringFrontierAt :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenSeqPathFamilyLoweringFrontierAt
+
+abbrev callOpenSeqKontPathFamilyLoweringFrontierAt :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenSeqKontPathFamilyLoweringFrontierAt
+
+abbrev callOpenLoopContinuationPathFamilyLoweringFrontierAt :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenLoopContinuationPathFamilyLoweringFrontierAt
+
+abbrev callOpenSeqPathCallFamilyLoweringFrontierAt :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenSeqPathCallFamilyLoweringFrontierAt
+
+abbrev callOpenSeqKontPathCallFamilyLoweringFrontierAt :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenSeqKontPathCallFamilyLoweringFrontierAt
+
+abbrev callOpenLoopContinuationPathCallFamilyLoweringFrontierAt :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenLoopContinuationPathCallFamilyLoweringFrontierAt
+
+abbrev callOpenSeqPathCallSafeFamilyLoweringFrontierAt :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenSeqPathCallSafeFamilyLoweringFrontierAt
+
+abbrev callOpenSeqKontPathCallSafeFamilyLoweringFrontierAt :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenSeqKontPathCallSafeFamilyLoweringFrontierAt
+
+abbrev callOpenLoopContinuationPathCallSafeFamilyLoweringFrontierAt :=
+  @Yul.Reference.SourceBridgeFacts.CALLOpenLoopContinuationPathCallSafeFamilyLoweringFrontierAt
+
+abbrev callOpenSeqPathCallSafeFamilyLoweringFrontierAtOfCallSafe :=
+  @Yul.Reference.SourceBridgeFacts.callOpenSeqPathCallSafeFamilyLoweringFrontierAt_of_callSafe
+
+abbrev callOpenSeqPathLoweringFrontierAtOfCallSafeFamily :=
+  @Yul.Reference.SourceBridgeFacts.callOpenSeqPathLoweringFrontierAt_of_callSafeFamily
+
+abbrev callOpenSeqKontPathCallSafeFamilyLoweringFrontierAtOfCallSafe :=
+  @Yul.Reference.SourceBridgeFacts.callOpenSeqKontPathCallSafeFamilyLoweringFrontierAt_of_callSafe
+
+abbrev callOpenSeqKontPathLoweringFrontierAtOfCallSafeFamily :=
+  @Yul.Reference.SourceBridgeFacts.callOpenSeqKontPathLoweringFrontierAt_of_callSafeFamily
+
+abbrev callOpenLoopContinuationPathCallSafeFamilyLoweringFrontierAtOfCallSafe :=
+  @Yul.Reference.SourceBridgeFacts.callOpenLoopContinuationPathCallSafeFamilyLoweringFrontierAt_of_callSafe
+
+abbrev callOpenLoopContinuationPathLoweringFrontierAtOfCallSafeFamily :=
+  @Yul.Reference.SourceBridgeFacts.callOpenLoopContinuationPathLoweringFrontierAt_of_callSafeFamily
+
+abbrev callOpenSeqPathFamilyLoweringFrontierAtZero :=
+  @Yul.Reference.SourceBridgeFacts.callOpenSeqPathFamilyLoweringFrontierAt_zero
+
+abbrev callOpenSeqPathFamilyLoweringFrontierAtOne :=
+  @Yul.Reference.SourceBridgeFacts.callOpenSeqPathFamilyLoweringFrontierAt_one
+
+abbrev callOpenSeqKontPathFamilyLoweringFrontierAtZero :=
+  @Yul.Reference.SourceBridgeFacts.callOpenSeqKontPathFamilyLoweringFrontierAt_zero
+
+abbrev callOpenSeqKontPathFamilyLoweringFrontierAtOne :=
+  @Yul.Reference.SourceBridgeFacts.callOpenSeqKontPathFamilyLoweringFrontierAt_one
+
+abbrev callOpenLoopContinuationPathFamilyLoweringFrontierAtLowFuel :=
+  @Yul.Reference.SourceBridgeFacts.callOpenLoopContinuationPathFamilyLoweringFrontierAt_low_fuel
+
+abbrev callOpenSeqPathCallFamilyLoweringFrontierAtZero :=
+  @Yul.Reference.SourceBridgeFacts.callOpenSeqPathCallFamilyLoweringFrontierAt_zero
+
+abbrev callOpenSeqPathCallFamilyLoweringFrontierAtOne :=
+  @Yul.Reference.SourceBridgeFacts.callOpenSeqPathCallFamilyLoweringFrontierAt_one
+
+abbrev callOpenSeqKontPathCallFamilyLoweringFrontierAtZero :=
+  @Yul.Reference.SourceBridgeFacts.callOpenSeqKontPathCallFamilyLoweringFrontierAt_zero
+
+abbrev callOpenSeqKontPathCallFamilyLoweringFrontierAtOne :=
+  @Yul.Reference.SourceBridgeFacts.callOpenSeqKontPathCallFamilyLoweringFrontierAt_one
+
+abbrev callOpenLoopContinuationPathCallFamilyLoweringFrontierAtLowFuel :=
+  @Yul.Reference.SourceBridgeFacts.callOpenLoopContinuationPathCallFamilyLoweringFrontierAt_low_fuel
+
 abbrev soundAt :=
   @Yul.OpenLowering.FunctionsProgramToCompiledOpenSoundAt
 
@@ -55,9 +523,6 @@ abbrev sourceOpenBridgeReadySoundAt :=
 
 abbrev sourceOpenBridgeReadySoundOfCheckedCompile :=
   @Yul.OpenLowering.FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready
-
-abbrev sourceOpenBridgeReadySoundOfCheckedCompileSourceGasSeedResponses :=
-  @Yul.OpenLowering.FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_sourceGasSeed_responses
 
 abbrev functionsBlockCompiledOpenResultRelSourceRegularRunningFrameStateRel :=
   @Yul.OpenLowering.FunctionsBlockCompiledOpenResultRel.source_regular_running_stateRel_frameStateRel
@@ -85,6 +550,15 @@ abbrev functionsBlockCompiledOpenCurrentRelOfResultRelCurrentPc :=
 
 abbrev functionsOpenCurrentSharedStateBridgeRel :=
   @Yul.OpenLowering.FunctionsOpenCurrentSharedStateBridgeRel
+
+abbrev functionsOpenCurrentSharedStateBridgeRelStorageImageRel :=
+  @Yul.OpenLowering.FunctionsOpenCurrentSharedStateBridgeRel.storageImageRel
+
+abbrev functionsOpenCurrentSharedStateBridgeRelTransientStorageImageRel :=
+  @Yul.OpenLowering.FunctionsOpenCurrentSharedStateBridgeRel.transientStorageImageRel
+
+abbrev functionsOpenCurrentSharedStateBridgeRelStorageAndTransientImageRel :=
+  @Yul.OpenLowering.FunctionsOpenCurrentSharedStateBridgeRel.storageAndTransientImageRel
 
 abbrev functionsOpenCurrentSharedStateBridgeRelOfSharedStateRel :=
   @Yul.OpenLowering.FunctionsOpenCurrentSharedStateBridgeRel.of_shared_state_rel
@@ -980,8 +1454,14 @@ abbrev compilerOpenFunctionsBlockInitialScopedSourceTraceCurrentSharedBridgeRead
 abbrev compilerOpenFunctionsBlockInitialScopedSourceTraceCurrentSharedBridgeReadyResultRelWholeRelOfCompileOpenSupportedForProgramLayout :=
   @Yul.OpenLowering.compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_of_compileOpen_supportedFor_programLayout
 
+abbrev compilerOpenFunctionsBlockInitialScopedSourceTraceCurrentSharedBridgeReadyResultRelWholeRelEndPcSourceGasSeedOfCompileOpenSupportedForProgramLayout :=
+  @Yul.OpenLowering.compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_endPc_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+
 abbrev compilerOpenFunctionsBlockInitialBlockScopedSourceTraceCurrentSharedBridgeReadyResultRelWholeRelOfCompileOpenSupportedForProgramLayout :=
   @Yul.OpenLowering.compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_of_compileOpen_supportedFor_programLayout
+
+abbrev compilerOpenFunctionsBlockInitialBlockScopedSourceTraceCurrentSharedBridgeReadyResultRelWholeRelEndPcSourceGasSeedOfCompileOpenSupportedForProgramLayout :=
+  @Yul.OpenLowering.compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_endPc_sourceGasSeed_of_compileOpen_supportedFor_programLayout
 
 abbrev functionsBlockCompiledOpenCurrentBridgeRel :=
   @Yul.OpenLowering.FunctionsBlockCompiledOpenCurrentBridgeRel
@@ -1077,6 +1557,12 @@ abbrev checkedCALLRegularOpenTarget :=
 abbrev checkedCALLFeaturesSourceStaticOfCheckedRegularOpenTarget :=
   @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_checkedCALLFeaturesSourceStatic
 
+abbrev assemblyCompileOfCheckedRegularOpenTarget :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_assemblyCompile
+
+abbrev assembleOfCheckedRegularOpenTarget :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_assemble
+
 abbrev decodeWindowOfCheckedRegularOpenTarget :=
   @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_decodeWindow
 
@@ -1095,11 +1581,74 @@ abbrev functionsRegularOpenTargetOfCheckedCALLRegularOpenTarget :=
 abbrev functionsOpenSoundOfCheckedCALLRegularOpenTarget :=
   @Yul.Program.FunctionsProgramToCompiledOpenSoundAt.of_yulCheckedCALLRegularOpenTarget
 
+abbrev checkedCALLFamilyRegularOpenTarget :=
+  Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpen?
+
+abbrev checkedCALLFamilyFeaturesSourceStaticOfCheckedRegularOpenTarget :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpen?_checkedCALLFamilyFeaturesSourceStatic
+
+abbrev assemblyCompileOfCheckedCALLFamilyRegularOpenTarget :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpen?_assemblyCompile
+
+abbrev assembleOfCheckedCALLFamilyRegularOpenTarget :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpen?_assemble
+
+abbrev decodeWindowOfCheckedCALLFamilyRegularOpenTarget :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpen?_decodeWindow
+
+abbrev jumpdestCorrectOfCheckedCALLFamilyRegularOpenTarget :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpen?_jumpdestCorrect
+
+abbrev decodeSafetyOfCheckedCALLFamilyRegularOpenTarget :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpen?_decodeSafety
+
+abbrev encodingCorrectOfCheckedCALLFamilyRegularOpenTarget :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpen?_encodingCorrect
+
+abbrev functionsRegularOpenTargetOfCheckedCALLFamilyRegularOpenTarget :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpen?_functionsRegularOpenTarget
+
+abbrev functionsOpenSoundOfCheckedCALLFamilyRegularOpenTarget :=
+  @Yul.Program.FunctionsProgramToCompiledOpenSoundAt.of_yulCheckedCALLFamilyRegularOpenTarget
+
+abbrev functionsOpenBlockTraceOfCheckedCALLFamilyRegularOpenTarget :=
+  @Yul.Program.functionsProgram_openBlockTrace_of_yulCheckedCALLFamilyRegularOpenTarget
+
 abbrev functionsOpenBlockTraceOfCheckedCALLRegularOpenTarget :=
   @Yul.Program.functionsProgram_openBlockTrace_of_yulCheckedCALLRegularOpenTarget
 
 abbrev sourceOpenDispatcherTraceAccepted :=
   @Yul.Program.SourceOpenDispatcherTraceAccepted
+
+abbrev sourceOpenInternalUserCallBodyFuelAdequateUpTo :=
+  @Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateUpTo
+
+abbrev sourceOpenInternalUserCallBodyFuelAdequateUpToZeroBound :=
+  @Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateUpTo.zero_bound
+
+abbrev sourceOpenInternalUserCallBodyFuelAdequateUpToAt :=
+  @Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateUpTo.of_le
+
+abbrev sourceOpenInternalUserCallBodyFuelAdequateUpToMono :=
+  @Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateUpTo.mono
+
+abbrev sourceOpenInternalUserCallBodyFuelAdequateAtOfNoLookup :=
+  @Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateAt.of_no_lookup
+
+abbrev sourceOpenInternalUserCallBodyFuelAdequateUpToOfNoLookup :=
+  @Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateUpTo.of_no_lookup
+
+abbrev sourceOpenInternalUserCallBodyFuelAdequateUpToOfLookupNone :=
+  @Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateUpTo.of_lookup_none
+
+abbrev sourceOpenInternalUserCallBodyFuelAdequateAtZeroFalseOfLookupDomain :=
+  @Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateUpTo.zero_false_of_lookup_domain
+
+abbrev sourceOpenInternalUserCallBodyFuelAdequateAtOneFalseOfLookupBlockNilDomain :=
+  @Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateUpTo.one_false_of_lookup_block_nil_domain
+
+abbrev sourceOpenInternalUserCallBodyFuelAdequateUpToOneFalseOfLookupBlockNilDomain :=
+  @Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateUpTo.one_false_of_lookup_block_nil_domain_upTo
 
 abbrev relationallyAdmissibleOpenResponse :=
   @Yul.Reference.SourceBridgeFacts.RelationallyAdmissibleOpenResponse
@@ -1110,44 +1659,656 @@ abbrev relationallyAdmissibleOpenResponseTargetCodeStable :=
 abbrev relationallyAdmissibleOpenResponseEvmOpenCallResumeCodeStable :=
   @Yul.Reference.SourceBridgeFacts.RelationallyAdmissibleOpenResponse.evmOpenCall_resume_code_stable
 
+abbrev relationallyAdmissibleOpenResponseTargetPermStable :=
+  @Yul.Reference.SourceBridgeFacts.RelationallyAdmissibleOpenResponse.target_perm_stable
+
+abbrev relationallyAdmissibleOpenResponseEvmOpenCallResumePermStable :=
+  @Yul.Reference.SourceBridgeFacts.RelationallyAdmissibleOpenResponse.evmOpenCall_resume_perm_stable
+
 abbrev sourceOpenTraceResponsesAdmissible :=
   @Yul.Reference.SourceBridgeFacts.SourceOpenTraceResponsesAdmissible
 
 abbrev sourceOpenTraceResponsesAdmissibleEventTargetCodeStable :=
   @Yul.Reference.SourceBridgeFacts.SourceOpenTraceResponsesAdmissible.event_target_code_stable
 
+abbrev sourceOpenTraceResponsesAdmissibleEventTargetPermStable :=
+  @Yul.Reference.SourceBridgeFacts.SourceOpenTraceResponsesAdmissible.event_target_perm_stable
+
 abbrev functionsBlockCompiledOpenCurrentBridgeRelInitialOfRecursiveBridgeInitialCodeImageRel :=
   @Yul.Program.functionsBlockCompiledOpenCurrentBridgeRel_initial_of_recursiveBridgeInitialCodeImageRel
-
-abbrev openXCurrentRunningInstrResponseAdmissibleCase :=
-  Yul.Program.OpenXCurrentRunningInstrResponseAdmissibleCase
-
-abbrev openXCurrentRunningInstrResponseAdmissibleCaseNoCall :=
-  @Yul.Program.OpenXCurrentRunningInstrResponseAdmissibleCase.no_call
-
-abbrev openXCurrentRunningInstrResponseAdmissibleCaseCallOfSharedStateRel :=
-  @Yul.Program.OpenXCurrentRunningInstrResponseAdmissibleCase.call_of_shared_state_rel
-
-abbrev openXCurrentRunningInstrResponseAdmissibleCaseCallOfSourceStateRel :=
-  @Yul.Program.OpenXCurrentRunningInstrResponseAdmissibleCase.call_of_source_state_rel
-
-abbrev openXCurrentRunningInstrResponseAdmissibleCaseSharedStateRelOfSourceDirectFrame :=
-  @Yul.Program.OpenXCurrentRunningInstrResponseAdmissibleCase.shared_state_rel_of_source_direct_frame
-
-abbrev openXCurrentRunningInstrResponseAdmissibleCaseCallOfSourceDirectFrame :=
-  @Yul.Program.OpenXCurrentRunningInstrResponseAdmissibleCase.call_of_source_state_rel_frame
-
-abbrev openXCurrentRunningInstrResponseAdmissibleCaseCallOfFunctionsBlockCompiledOpenResultRel :=
-  @Yul.Program.OpenXCurrentRunningInstrResponseAdmissibleCase.call_of_functions_block_compiled_open_result_rel
-
-abbrev openXCurrentRunningInstrResponseAdmissibleCaseToTraceReadyCase :=
-  @Yul.Program.OpenXCurrentRunningInstrResponseAdmissibleCase.to_trace_ready_case
 
 abbrev openXCurrentRunningInstrGasReadyCase :=
   Yul.Program.OpenXCurrentRunningInstrGasReadyCase
 
 abbrev openXCurrentRunningInstrGasReadyCaseOfReadyCase :=
   @Yul.Program.OpenXCurrentRunningInstrGasReadyCase.of_ready_case
+
+abbrev openCallActualPostGasBudgetFacts :=
+  Yul.Program.OpenCallActualPostGasBudgetFacts
+
+abbrev openCallActualPostGasBudgetFactsTailActualPost :=
+  @Yul.Program.OpenCallActualPostGasBudgetFacts.tail_actual_post
+
+abbrev openCallChildGasStatus :=
+  Yul.Program.OpenCallChildGasStatus
+
+abbrev openCallChildGasStatusEqOutOfGasOrEqCompleted :=
+  @Yul.Program.OpenCallChildGasStatus.eq_outOfGas_or_eq_completed
+
+abbrev openCallSameGasBudgetOutcome :=
+  Yul.Program.OpenCallSameGasBudgetOutcome
+
+abbrev openCallSameGasBudgetOutcomeTargetOutOfGasIffSourceOutOfGas :=
+  @Yul.Program.OpenCallSameGasBudgetOutcome.target_outOfGas_iff_source_outOfGas
+
+abbrev openCallSameGasBudgetOutcomeTargetCompletedIffSourceCompleted :=
+  @Yul.Program.OpenCallSameGasBudgetOutcome.target_completed_iff_source_completed
+
+abbrev openCallResponseGasAdmissible :=
+  Yul.Program.OpenCallResponseGasAdmissible
+
+abbrev openCallResponseGasAdmissibleReturnedGasToNatLeForwarded :=
+  @Yul.Program.OpenCallResponseGasAdmissible.returnedGas_toNat_le_forwarded
+
+abbrev openCallResponseGasAgreementFacts :=
+  Yul.Program.OpenCallResponseGasAgreementFacts
+
+abbrev openCallResponseGasAgreementFactsExistsSameForwardedGasStatus :=
+  @Yul.Program.OpenCallResponseGasAgreementFacts.exists_same_forwardedGas_status
+
+abbrev openCallResponseGasAgreementFactsTargetRequestedGasReturnedGasBound :=
+  @Yul.Program.OpenCallResponseGasAgreementFacts.target_requestedGas_returnedGas_bound
+
+abbrev openCallResponseGasAgreementFactsSourceRequestedGasReturnedGasBound :=
+  @Yul.Program.OpenCallResponseGasAgreementFacts.source_requestedGas_returnedGas_bound
+
+abbrev openCallResponseGasAgreementFactsExistsTargetForwardedGasReturnedGasBound :=
+  @Yul.Program.OpenCallResponseGasAgreementFacts.exists_target_forwardedGas_returnedGas_bound
+
+abbrev openCallResponseGasAgreementFactsExistsSourceForwardedGasReturnedGasBound :=
+  @Yul.Program.OpenCallResponseGasAgreementFacts.exists_source_forwardedGas_returnedGas_bound
+
+abbrev openCallReentrantMutationEquivalent :=
+  Yul.Program.OpenCallReentrantMutationEquivalent
+
+abbrev openCallResponseCommittedEffectsEquivalent :=
+  Yul.Program.OpenCallResponseCommittedEffectsEquivalent
+
+abbrev openCallResponsesCommittedSafeEquivalent :=
+  Yul.Program.OpenCallResponsesCommittedSafeEquivalent
+
+abbrev openCallResponsesCommittedSafeEquivalentRefl :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.refl
+
+abbrev openCallResponsesCommittedSafeEquivalentSuccessEq :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.success_eq
+
+abbrev openCallResponsesCommittedSafeEquivalentSymm :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.symm
+
+abbrev openCallResponsesCommittedSafeEquivalentCommittedEffects :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.committedEffects
+
+abbrev openCallResponsesCommittedSafeEquivalentCommittedEffectsOfSuccess :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.committedEffects_of_success
+
+abbrev openCallResponsesCommittedSafeEquivalentReturnDataEq :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.returnData_eq
+
+abbrev openCallResponsesCommittedSafeEquivalentInternalMutationApplyEq :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.internalMutation_apply_eq
+
+abbrev openCallResponsesCommittedSafeEquivalentStatusWordEq :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.statusWord_eq
+
+abbrev openCallResponsesCommittedSafeEquivalentFinishSharedEq :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.finishShared_eq
+
+abbrev openCallResponsesCommittedSafeEquivalentEvmOpenCallResumeEq :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.evmOpenCall_resume_eq
+
+abbrev openCallResponsesCommittedSafeEquivalentYulOpenCallResumeEq :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.yulOpenCall_resume_eq
+
+abbrev openCallResponsesCommittedSafeEquivalentPrimitiveSharedOpenCallResumeEq :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.primitiveSharedOpenCall_resume_eq
+
+abbrev openCallResponsesCommittedSafeEquivalentEvmOpenCallFinishGasAwareCallEraseGasEq :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.evmOpenCall_finishGasAwareCall_eraseGas_eq
+
+abbrev openCallResponsesCommittedSafeEquivalentEvmOpenCallFinishGasAwareCallGasExecRel :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.evmOpenCall_finishGasAwareCall_gasExecRel
+
+abbrev openCallResponsesCommittedSafeEquivalentEvmOpenCallFinishGasAwareCallIncrPCGasExecRel :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.evmOpenCall_finishGasAwareCall_incrPC_gasExecRel
+
+abbrev openCallResponsesCommittedSafeEquivalentOpenXCurrentGaslessCallContinueOutcomeSafelyTracksOfStepChecksActualPostGasRelReferenceTail :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.openX_current_gasless_call_continue_outcome_safelyTracks_of_step_checks_actual_post_gasrel_reference_tail
+
+abbrev openCallResponsesCommittedSafeEquivalentOpenXCurrentGaslessCallContinueOutcomeSafelyTracksOfStepChecksActualPostStrictOrAllGasOOGReferenceTail :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.openX_current_gasless_call_continue_outcome_safelyTracks_of_step_checks_actual_post_strict_or_allGasOOG_reference_tail
+
+abbrev openCallResponsesCommittedSafeEquivalentOpenXCurrentGaslessCallAllOutcomesSafelyTracksOfStepChecksActualPostStrictOrAllGasOOGReferenceTail :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.openX_current_gasless_call_all_outcomes_safelyTracks_of_step_checks_actual_post_strict_or_allGasOOG_reference_tail
+
+abbrev openCallResponsesCommittedSafeEquivalentOpenXCurrentGaslessCallAllOutcomesSafelyTracksOfExceptionActualPostStrictOrAllGasOOGReferenceTail :=
+  @Yul.Program.OpenCallResponsesCommittedSafeEquivalent.openX_current_gasless_call_all_outcomes_safelyTracks_of_exception_actual_post_strict_or_allGasOOG_reference_tail
+
+abbrev openCallAllForwardedGasOutOfGas :=
+  Yul.Program.OpenCallAllForwardedGasOutOfGas
+
+abbrev openCallAllForwardedGasOutOfGasSuccessFalse :=
+  @Yul.Program.OpenCallAllForwardedGasOutOfGas.success_false
+
+abbrev openCallAllForwardedGasOutOfGasReturnedGasZero :=
+  @Yul.Program.OpenCallAllForwardedGasOutOfGas.returnedGas_zero
+
+abbrev openCallAllForwardedGasOutOfGasPostCallGasZero :=
+  @Yul.Program.OpenCallAllForwardedGasOutOfGas.postCallGas_zero
+
+abbrev openCallResponseTracksReferenceOrAllGasOOG :=
+  Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG
+
+abbrev openCallResponseTracksReferenceOrAllGasOOGOfCommittedSafe :=
+  @Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG.of_committedSafe
+
+abbrev openCallResponseTracksReferenceOrAllGasOOGOfAllForwardedGasOutOfGas :=
+  @Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG.of_allForwardedGasOutOfGas
+
+abbrev openCallResponseTracksReferenceOrAllGasOOGCommittedSafeOfNotAllForwardedGasOutOfGas :=
+  @Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG.committedSafe_of_not_allForwardedGasOutOfGas
+
+abbrev openCallResponseTracksReferenceOrAllGasOOGAllForwardedGasOutOfGasOfNotCommittedSafe :=
+  @Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG.allForwardedGasOutOfGas_of_not_committedSafe
+
+abbrev openCallResponseTracksReferenceOrAllGasOOGSuccessEqOrAllForwardedGasOutOfGas :=
+  @Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG.success_eq_or_allForwardedGasOutOfGas
+
+abbrev openCallResponseTracksReferenceOrAllGasOOGAllForwardedGasOutOfGasOfSuccessNe :=
+  @Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG.allForwardedGasOutOfGas_of_success_ne
+
+abbrev openCallResponseTracksReferenceOrAllGasOOGAllForwardedGasOutOfGasOfReferenceSuccessTrueCandidateSuccessFalse :=
+  @Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG.allForwardedGasOutOfGas_of_reference_success_true_candidate_success_false
+
+abbrev openCallResponseTracksReferenceOrAllGasOOGOutcomeTracksOfSuccessNeCandidateFails :=
+  @Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG.outcome_tracks_of_success_ne_candidate_fails
+
+abbrev openCallResponseTracksReferenceOrAllGasOOGOutcomeTracksOfNotCommittedSafeCandidateFails :=
+  @Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG.outcome_tracks_of_not_committedSafe_candidate_fails
+
+abbrev openCallResponseTracksReferenceOrAllGasOOGCommittedSafeOrAllForwardedGasOutOfGasTracks :=
+  @Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG.committedSafe_or_allForwardedGasOutOfGas_tracks
+
+abbrev openCallResponseTracksReferenceOrAllGasOOGCommittedSafeOrAllForwardedGasOutOfGasCandidateFails :=
+  @Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG.committedSafe_or_allForwardedGasOutOfGas_candidateFails
+
+abbrev openCallResponseTracksReferenceOrAllGasOOGOutcomeTracksOfReferenceSuccessTrueCandidateSuccessFalse :=
+  @Yul.Program.OpenCallResponseTracksReferenceOrAllGasOOG.outcome_tracks_of_reference_success_true_candidate_success_false
+
+abbrev openCallResponseGasBudgetFacts :=
+  Yul.Program.OpenCallResponseGasBudgetFacts
+
+abbrev openCallResponseGasBudgetFactsAgreement :=
+  @Yul.Program.OpenCallResponseGasBudgetFacts.agreement
+
+abbrev openCallResponseGasBudgetFactsActualPost :=
+  @Yul.Program.OpenCallResponseGasBudgetFacts.actual_post
+
+abbrev openCallResponseGasBudgetFactsExistsTargetForwardedGasReturnedGasBound :=
+  @Yul.Program.OpenCallResponseGasBudgetFacts.exists_target_forwardedGas_returnedGas_bound
+
+abbrev openXCurrentRunningInstrCallResponseGasAdmissibleReadyCase :=
+  Yul.Program.OpenXCurrentRunningInstrCallResponseGasAdmissibleReadyCase
+
+abbrev openXCallFamilyResponseGasAdmissibleReadyFor :=
+  Yul.Program.OpenXCallFamilyResponseGasAdmissibleReadyFor
+
+abbrev openXCallFamilyResponseGasAdmissibleReadyForRunning :=
+  @Yul.Program.OpenXCallFamilyResponseGasAdmissibleReadyFor.running
+
+abbrev openXCurrentRunningInstrCallCommittedResponseSafetyTraceReadyCase :=
+  Yul.Program.OpenXCurrentRunningInstrCallCommittedResponseSafetyTraceReadyCase
+
+abbrev openXCurrentRunningInstrCallCommittedResponseSafetyTraceReadyCaseOfAllResponses :=
+  @Yul.Program.OpenXCurrentRunningInstrCallCommittedResponseSafetyTraceReadyCase.of_all_responses
+
+abbrev openXCurrentRunningInstrCallResponseTrackingTraceReadyCase :=
+  Yul.Program.OpenXCurrentRunningInstrCallResponseTrackingTraceReadyCase
+
+abbrev openXCurrentRunningInstrCallResponseTrackingTraceReadyCaseOfCommittedResponseSafety :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseTrackingTraceReadyCase.of_committed_response_safety
+
+abbrev openXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCase :=
+  Yul.Program.OpenXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCase
+
+abbrev openXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCaseResponseTracking :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCase.responseTracking
+
+abbrev openXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCaseOfCommittedResponseSafety :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCase.of_committed_response_safety
+
+abbrev openXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCaseOutcomeTracksOfSuccessNe :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCase.outcomeTracks_of_success_ne
+
+abbrev openXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCaseOutcomeTracksOfNotCommittedSafe :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCase.outcomeTracks_of_not_committedSafe
+
+abbrev openXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCaseCommittedSafeOrAllForwardedGasOutOfGasCandidateFails :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseOutcomeTrackingTraceReadyCase.committedSafe_or_allForwardedGasOutOfGas_candidateFails
+
+abbrev openXCurrentRunningInstrCallResponseResultTrackingTraceReadyCase :=
+  Yul.Program.OpenXCurrentRunningInstrCallResponseResultTrackingTraceReadyCase
+
+abbrev openXCurrentRunningInstrCallResponseResultTrackingTraceReadyCaseResponseTracking :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseResultTrackingTraceReadyCase.responseTracking
+
+abbrev openXCurrentRunningInstrCallResponseResultTrackingTraceReadyCaseOfCommittedResponseSafety :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseResultTrackingTraceReadyCase.of_committed_response_safety
+
+abbrev openXCurrentRunningInstrCallResponseResultTrackingTraceReadyCaseOfOutcomeTracking :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseResultTrackingTraceReadyCase.of_outcome_tracking
+
+abbrev openXCurrentRunningInstrCallResponseResultTrackingTraceReadyCaseOutcomeTracksOfSuccessNe :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseResultTrackingTraceReadyCase.outcomeTracks_of_success_ne
+
+abbrev openXCurrentRunningInstrCallResponseResultTrackingTraceReadyCaseOutcomeTracksOfNotCommittedSafe :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseResultTrackingTraceReadyCase.outcomeTracks_of_not_committedSafe
+
+abbrev openXCurrentRunningInstrCallResponseResultTrackingTraceReadyCaseCommittedSafeOrAllForwardedGasOutOfGasTracks :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseResultTrackingTraceReadyCase.committedSafe_or_allForwardedGasOutOfGas_tracks
+
+abbrev openXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase :=
+  Yul.Program.OpenXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase
+
+abbrev openXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCaseOfResultTracking :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase.of_resultTracking
+
+abbrev openXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCaseToResultTracking :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase.to_resultTracking
+
+abbrev openXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCaseResponseTracking :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase.responseTracking
+
+abbrev openXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCaseResponsesForCall :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase.responses_for_call
+
+abbrev openXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCaseCommittedSafeOfNotOutcomeSafelyTracksForCall :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase.committedSafe_of_not_outcome_safelyTracks_for_call
+
+abbrev openXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCaseAllForwardedGasOutOfGasAndOutcomeTracksOfNotCommittedSafeForCall :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase.allForwardedGasOutOfGas_and_outcomeTracks_of_not_committedSafe_for_call
+
+abbrev openXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCaseOpenXCurrentGaslessCallAllOutcomesSafelyTracksOfStepChecksActualPost :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase.openX_current_gasless_call_all_outcomes_safelyTracks_of_step_checks_actual_post
+
+abbrev openXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCaseOpenXCurrentGaslessCallAllOutcomesSafelyTracksOfExceptionActualPost :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase.openX_current_gasless_call_all_outcomes_safelyTracks_of_exception_actual_post
+
+abbrev openXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCaseOpenXCurrentGaslessCallAllOutcomesSafelyTracksOfNonGasActualPost :=
+  @Yul.Program.OpenXCurrentRunningInstrCallResponseStrictOrAllGasOOGResultTrackingTraceReadyCase.openX_current_gasless_call_all_outcomes_safelyTracks_of_nonGas_actual_post
+
+abbrev openXRunListRunningAllOutcomeTracksReadyCurrentEmittedPrimCallOfNonGasStrictActualPost :=
+  @Yul.Program.openXRunListRunningAllOutcomeTracksReady_current_emitted_prim_call_of_nonGas_strict_actual_post
+
+abbrev openXRunListRunningAllOutcomeTracksReadyCurrentEmittedPrimCallOfNonGasStrictActualPostFixed :=
+  @Yul.Program.openXRunListRunningAllOutcomeTracksReady_current_emitted_prim_call_of_nonGas_strict_actual_post_fixed
+
+abbrev openXRunListRunningAllOutcomeTracksReadyCurrentEmittedCallOfResidualStrict :=
+  @Yul.Program.openXRunListRunningAllOutcomeTracksReady_current_emitted_call_of_residual_strict
+
+abbrev runningPathAllOutcomeTracksReadyOfCurrentEmittedResponseStrictCases :=
+  @Yul.Program.runningPathAllOutcomeTracksReady_of_current_emitted_response_strict_cases
+
+abbrev haltedPathAllOutcomeTracksReadyOfCurrentEmittedNoCallCases :=
+  @Yul.Program.haltedPathAllOutcomeTracksReady_of_current_emitted_no_call_cases
+
+abbrev openXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTrackingOfOpenBlockTraceResultCurrentEmittedResponseStrictCases :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking.of_openBlockTraceResult_current_emitted_response_strict_cases
+
+abbrev openXCallFamilyCommittedResponseSafetyTraceReadyFor :=
+  Yul.Program.OpenXCallFamilyCommittedResponseSafetyTraceReadyFor
+
+abbrev openXCallFamilyCommittedResponseSafetyTraceReadyForRunning :=
+  @Yul.Program.OpenXCallFamilyCommittedResponseSafetyTraceReadyFor.running
+
+abbrev openXCallFamilyResponseTrackingTraceReadyFor :=
+  Yul.Program.OpenXCallFamilyResponseTrackingTraceReadyFor
+
+abbrev openXCallFamilyResponseTrackingTraceReadyForRunning :=
+  @Yul.Program.OpenXCallFamilyResponseTrackingTraceReadyFor.running
+
+abbrev openXCallFamilyResponseTrackingTraceReadyForOfCommittedResponseSafety :=
+  @Yul.Program.OpenXCallFamilyResponseTrackingTraceReadyFor.of_committed_response_safety
+
+abbrev openXCallFamilyResponseOutcomeTrackingTraceReadyFor :=
+  Yul.Program.OpenXCallFamilyResponseOutcomeTrackingTraceReadyFor
+
+abbrev openXCallFamilyResponseOutcomeTrackingTraceReadyForRunning :=
+  @Yul.Program.OpenXCallFamilyResponseOutcomeTrackingTraceReadyFor.running
+
+abbrev openXCallFamilyResponseOutcomeTrackingTraceReadyForResponseTracking :=
+  @Yul.Program.OpenXCallFamilyResponseOutcomeTrackingTraceReadyFor.responseTracking
+
+abbrev openXCallFamilyResponseOutcomeTrackingTraceReadyForOutcomeTracksOfNotCommittedSafe :=
+  @Yul.Program.OpenXCallFamilyResponseOutcomeTrackingTraceReadyFor.outcomeTracks_of_not_committedSafe
+
+abbrev openXCallFamilyResponseOutcomeTrackingTraceReadyForCommittedSafeOrAllForwardedGasOutOfGasCandidateFails :=
+  @Yul.Program.OpenXCallFamilyResponseOutcomeTrackingTraceReadyFor.committedSafe_or_allForwardedGasOutOfGas_candidateFails
+
+abbrev openXCallFamilyResponseOutcomeTrackingTraceReadyForOfCommittedResponseSafety :=
+  @Yul.Program.OpenXCallFamilyResponseOutcomeTrackingTraceReadyFor.of_committed_response_safety
+
+abbrev openXCallFamilyResponseResultTrackingTraceReadyFor :=
+  Yul.Program.OpenXCallFamilyResponseResultTrackingTraceReadyFor
+
+abbrev openXCallFamilyResponseResultTrackingTraceReadyForRunning :=
+  @Yul.Program.OpenXCallFamilyResponseResultTrackingTraceReadyFor.running
+
+abbrev openXCallFamilyResponseResultTrackingTraceReadyForResponseTracking :=
+  @Yul.Program.OpenXCallFamilyResponseResultTrackingTraceReadyFor.responseTracking
+
+abbrev openXCallFamilyResponseResultTrackingTraceReadyForOutcomeTracksOfNotCommittedSafe :=
+  @Yul.Program.OpenXCallFamilyResponseResultTrackingTraceReadyFor.outcomeTracks_of_not_committedSafe
+
+abbrev openXCallFamilyResponseResultTrackingTraceReadyForCommittedSafeOrAllForwardedGasOutOfGasTracks :=
+  @Yul.Program.OpenXCallFamilyResponseResultTrackingTraceReadyFor.committedSafe_or_allForwardedGasOutOfGas_tracks
+
+abbrev openXCallFamilyResponseResultTrackingTraceReadyForOfCommittedResponseSafety :=
+  @Yul.Program.OpenXCallFamilyResponseResultTrackingTraceReadyFor.of_committed_response_safety
+
+abbrev openXCallFamilyResponseResultTrackingTraceReadyForOfOutcomeTracking :=
+  @Yul.Program.OpenXCallFamilyResponseResultTrackingTraceReadyFor.of_outcome_tracking
+
+abbrev openXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor :=
+  Yul.Program.OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor
+
+abbrev openXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyForRunning :=
+  @Yul.Program.OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.running
+
+abbrev openXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyForOfResultTracking :=
+  @Yul.Program.OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.of_resultTracking
+
+abbrev openXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyForToResultTracking :=
+  @Yul.Program.OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.to_resultTracking
+
+abbrev openXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyForResponseTracking :=
+  @Yul.Program.OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.responseTracking
+
+abbrev openXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyForOfCommittedResponseSafety :=
+  @Yul.Program.OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.of_committed_response_safety
+
+abbrev openXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyForOfOutcomeTracking :=
+  @Yul.Program.OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.of_outcome_tracking
+
+abbrev openXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyForCommittedSafeOrAllForwardedGasOutOfGasTracks :=
+  @Yul.Program.OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.committedSafe_or_allForwardedGasOutOfGas_tracks
+
+abbrev openXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyForCommittedSafeOfNotOutcomeSafelyTracksForCall :=
+  @Yul.Program.OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.committedSafe_of_not_outcome_safelyTracks_for_call
+
+abbrev openXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyForAllForwardedGasOutOfGasAndOutcomeTracksOfNotCommittedSafeForCall :=
+  @Yul.Program.OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.allForwardedGasOutOfGas_and_outcomeTracks_of_not_committedSafe_for_call
+
+abbrev openXCallFamilyNoArtificialCapExternalWorldReadyFor :=
+  Yul.Program.OpenXCallFamilyNoArtificialCapExternalWorldReadyFor
+
+abbrev openXCallFamilyNoArtificialCapExternalWorldReadyForOfStrict :=
+  @Yul.Program.OpenXCallFamilyNoArtificialCapExternalWorldReadyFor.of_strict
+
+abbrev openXCallFamilyNoArtificialCapExternalWorldReadyForOfResultTracking :=
+  @Yul.Program.OpenXCallFamilyNoArtificialCapExternalWorldReadyFor.of_resultTracking
+
+abbrev openXCallFamilyNoArtificialCapExternalWorldReadyForOfOutcomeTracking :=
+  @Yul.Program.OpenXCallFamilyNoArtificialCapExternalWorldReadyFor.of_outcome_tracking
+
+abbrev openXCallFamilyNoArtificialCapExternalWorldReadyForOfCommittedResponseSafety :=
+  @Yul.Program.OpenXCallFamilyNoArtificialCapExternalWorldReadyFor.of_committed_response_safety
+
+abbrev openXCallFamilyNoArtificialCapExternalWorldReadyForCommittedSafeOrAllForwardedGasOutOfGasTracks :=
+  @Yul.Program.OpenXCallFamilyNoArtificialCapExternalWorldReadyFor.committedSafe_or_allForwardedGasOutOfGas_tracks
+
+abbrev openXCallFamilyNoArtificialCapExternalWorldReadyForCommittedSafeOfNotOutcomeSafelyTracksForCall :=
+  @Yul.Program.OpenXCallFamilyNoArtificialCapExternalWorldReadyFor.committedSafe_of_not_outcome_safelyTracks_for_call
+
+abbrev openXCallFamilyNoArtificialCapExternalWorldReadyForAllForwardedGasOutOfGasAndOutcomeTracksOfNotCommittedSafeForCall :=
+  @Yul.Program.OpenXCallFamilyNoArtificialCapExternalWorldReadyFor.allForwardedGasOutOfGas_and_outcomeTracks_of_not_committedSafe_for_call
+
+abbrev openXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking
+
+abbrev openXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTrackingMono :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking.mono
+
+abbrev openXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTrackingZeroBound :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking.zero_bound
+
+abbrev openXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTrackingSuccOfAt :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking.succ_of_at
+
+abbrev openXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTrackingToMatch :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking.to_match
+
+abbrev openXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTrackingToCommittedSafeBelow :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking.to_committedSafeBelow
+
+abbrev openXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTrackingCommittedSafeBelowOfOpenBlockTraceResultCurrentEmittedResponseStrictCases :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking.committedSafeBelow_of_openBlockTraceResult_current_emitted_response_strict_cases
+
+abbrev openXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTrackingCommittedSafeForAllGasOfTraceRelAboveAndAllOutcomes :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking.committedSafeForAllGas_of_traceRelAbove_and_all_outcomes_safelyTracks
+
+abbrev openXCommittedSafeForAllGasOfTraceRelAboveAndAllOutcomesSafelyTracksResponseStrictCases :=
+  @Yul.Program.openXCommittedSafeForAllGas_of_traceRelAbove_and_all_outcomes_safelyTracks_response_strict_cases
+
+abbrev openXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTrackingOfOpenBlockTraceResultAllOutcomesReady :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyTrackReferenceBelowOfResponseStrictOrAllGasOOGResultTracking.of_openBlockTraceResult_all_outcomes_ready
+
+abbrev openXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTracking :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTracking
+
+abbrev openXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTrackingMono :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTracking.mono
+
+abbrev openXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTrackingZeroBound :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTracking.zero_bound
+
+abbrev openXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTrackingSuccOfAt :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTracking.succ_of_at
+
+abbrev openXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTrackingToOpenGasAware :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTracking.to_openGasAware
+
+abbrev openXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTrackingOfOpenGasAware :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTracking.of_openGasAware
+
+abbrev openXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTrackingToCommittedSafeBelowOfOpenGasAwareExists :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTracking.to_committedSafeBelow_of_openGasAwareExists
+
+abbrev openXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTrackingToCommittedSafeBelow :=
+  @Yul.Program.OpenXAllOutcomeTracesSafelyMatchBelowOfResponseStrictOrAllGasOOGResultTracking.to_committedSafeBelow
+
+abbrev openXOutcomeTraceExistsBelow :=
+  @Yul.Program.OpenXOutcomeTraceExistsBelow
+
+abbrev openXOutcomeTraceExistsBelowToOpenGasAware :=
+  @Yul.Program.OpenXOutcomeTraceExistsBelow.to_openGasAware
+
+abbrev openXOutcomeTraceExistsBelowOfOpenGasAware :=
+  @Yul.Program.OpenXOutcomeTraceExistsBelow.of_openGasAware
+
+abbrev openXOutcomeTraceExistsBelowOfOpenResult :=
+  @Yul.Program.OpenXOutcomeTraceExistsBelow.of_openResult
+
+abbrev openXOutcomeTraceExistsBelowZeroBound :=
+  @Yul.Program.OpenXOutcomeTraceExistsBelow.zero_bound
+
+abbrev openXOutcomeTraceExistsBelowSuccOfAt :=
+  @Yul.Program.OpenXOutcomeTraceExistsBelow.succ_of_at
+
+abbrev openXCommittedSafeBelowOfCommittedResponseSafety :=
+  @Yul.Program.OpenXCommittedSafeBelowOfCommittedResponseSafety
+
+abbrev openXCommittedSafeBelowTracksOfCommittedResponseSafety :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksOfCommittedResponseSafety
+
+abbrev openXCommittedSafeBelowTracksFixedOfCommittedResponseSafety :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedOfCommittedResponseSafety
+
+abbrev openXCommittedSafeBelowTracksFixedOfResponseTracking :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedOfResponseTracking
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseTracking :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseTracking
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseOutcomeTracking :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseOutcomeTracking
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseResultTracking :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseResultTracking
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseStrictOrAllGasOOGResultTracking :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseStrictOrAllGasOOGResultTracking
+
+abbrev openXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTracking :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTracking
+
+abbrev openXTraceObservationOrFailureBelowOfResponseStrictOrAllGasOOGResultTracking :=
+  @Yul.Program.OpenXTraceObservationOrFailureBelowOfResponseStrictOrAllGasOOGResultTracking
+
+abbrev openXCommittedSafeBelowOfCommittedResponseSafetyMono :=
+  @Yul.Program.OpenXCommittedSafeBelowOfCommittedResponseSafety.mono
+
+abbrev openXCommittedSafeBelowTracksOfCommittedResponseSafetyMono :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksOfCommittedResponseSafety.mono
+
+abbrev openXCommittedSafeBelowTracksFixedOfCommittedResponseSafetyMono :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedOfCommittedResponseSafety.mono
+
+abbrev openXCommittedSafeBelowTracksFixedOfResponseTrackingMono :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedOfResponseTracking.mono
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseTrackingMono :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseTracking.mono
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseOutcomeTrackingMono :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseOutcomeTracking.mono
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseResultTrackingMono :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseResultTracking.mono
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseStrictOrAllGasOOGResultTrackingMono :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseStrictOrAllGasOOGResultTracking.mono
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseStrictOrAllGasOOGResultTrackingZeroBound :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseStrictOrAllGasOOGResultTracking.zero_bound
+
+abbrev openXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTrackingToFrontier :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTracking.to_frontier
+
+abbrev openXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTrackingMono :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTracking.mono
+
+abbrev openXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTrackingZeroBound :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTracking.zero_bound
+
+abbrev openXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTrackingSuccOfAt :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTracking.succ_of_at
+
+abbrev openXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTrackingSuccOfTraceOrFailureAt :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTracking.succ_of_trace_or_failure_at
+
+abbrev openXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTrackingSuccOfTraceObservationOrFailureAt :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTracking.succ_of_trace_observation_or_failure_at
+
+abbrev openXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTrackingOfTraceOrFailureBelow :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTracking.of_trace_or_failure_below
+
+abbrev openXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTrackingOfTraceObservationOrFailureBelow :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceWithReferenceOfResponseStrictOrAllGasOOGResultTracking.of_trace_observation_or_failure_below
+
+abbrev openXTraceObservationOrFailureBelowOfResponseStrictOrAllGasOOGResultTrackingMono :=
+  @Yul.Program.OpenXTraceObservationOrFailureBelowOfResponseStrictOrAllGasOOGResultTracking.mono
+
+abbrev openXTraceObservationOrFailureBelowOfResponseStrictOrAllGasOOGResultTrackingOfFixedTraceWithReference :=
+  @Yul.Program.OpenXTraceObservationOrFailureBelowOfResponseStrictOrAllGasOOGResultTracking.of_fixedTraceWithReference
+
+abbrev openXTraceObservationOrFailureBelowOfResponseStrictOrAllGasOOGResultTrackingToFixedTraceWithReference :=
+  @Yul.Program.OpenXTraceObservationOrFailureBelowOfResponseStrictOrAllGasOOGResultTracking.to_fixedTraceWithReference
+
+abbrev openXCommittedSafeBelowTracksFixedOfCommittedResponseSafetyOfResponseTracking :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedOfCommittedResponseSafety.of_responseTracking
+
+abbrev openXCommittedSafeBelowTracksFixedOfResponseTrackingOfTraceResult :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedOfResponseTracking.of_traceResult
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseTrackingOfResponseOutcomeTracking :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseTracking.of_responseOutcomeTracking
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseOutcomeTrackingOfResponseResultTracking :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseOutcomeTracking.of_responseResultTracking
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseResultTrackingOfStrictOrAllGasOOGResultTracking :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseResultTracking.of_strictOrAllGasOOGResultTracking
+
+abbrev openXCommittedSafeBelowTracksFixedTraceOfResponseStrictOrAllGasOOGResultTrackingOfResponseResultTracking :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksFixedTraceOfResponseStrictOrAllGasOOGResultTracking.of_responseResultTracking
+
+abbrev openXCommittedSafeBelowOfCommittedResponseSafetyOfTracks :=
+  @Yul.Program.OpenXCommittedSafeBelowOfCommittedResponseSafety.of_tracks
+
+abbrev openXCommittedSafeBelowTracksOfCommittedResponseSafetyOfFixed :=
+  @Yul.Program.OpenXCommittedSafeBelowTracksOfCommittedResponseSafety.of_fixed
+
+abbrev sourceOpenTraceCurrentSharedBridgePrimitiveStaticReadyFor :=
+  @Yul.Program.SourceOpenTraceCurrentSharedBridgePrimitiveStaticReadyFor
+
+abbrev sourceOpenTraceCurrentSharedBridgePrimitiveStaticTraceReadyFor :=
+  @Yul.Program.SourceOpenTraceCurrentSharedBridgePrimitiveStaticTraceReadyFor
+
+abbrev sourceOpenTraceCurrentSharedBridgeWritableReadyFor :=
+  @Yul.Program.SourceOpenTraceCurrentSharedBridgeWritableReadyFor
+
+abbrev sourceOpenTraceCurrentSharedBridgeWritableReadyForToPrimitiveStaticReadyFor :=
+  @Yul.Program.SourceOpenTraceCurrentSharedBridgeWritableReadyFor.to_primitiveStaticReadyFor
+
+abbrev sourceOpenTraceCurrentSharedBridgeWritableReadyForOfSourceTraceCurrentSharedBridgeReadyGasBudgetResponsesInitialPerm :=
+  @Yul.Program.SourceOpenTraceCurrentSharedBridgeWritableReadyFor.of_source_trace_current_shared_bridge_ready_gas_budget_responses_initial_perm
+
+abbrev sourceOpenTraceCurrentSharedBridgeWritableTraceReadyFor :=
+  @Yul.Program.SourceOpenTraceCurrentSharedBridgeWritableTraceReadyFor
+
+abbrev sourceOpenTraceCurrentSharedBridgeWritableTraceReadyForToPrimitiveStaticTraceReadyFor :=
+  @Yul.Program.SourceOpenTraceCurrentSharedBridgeWritableTraceReadyFor.to_primitiveStaticTraceReadyFor
+
+abbrev sourceOpenTraceCurrentSharedBridgeWritableTraceReadyForOfSourceTraceCurrentSharedBridgeReadyGasBudgetResponsesInitialPerm :=
+  @Yul.Program.SourceOpenTraceCurrentSharedBridgeWritableTraceReadyFor.of_source_trace_current_shared_bridge_ready_gas_budget_responses_initial_perm
+
+abbrev sourceOpenTraceCurrentSharedBridgePrimitiveStaticTraceReadyForOfSourceTraceCurrentSharedBridgeReadyGasBudgetResponsesInitialPerm :=
+  @Yul.Program.SourceOpenTraceCurrentSharedBridgePrimitiveStaticTraceReadyFor.of_source_trace_current_shared_bridge_ready_gas_budget_responses_initial_perm
+
+abbrev currentEmittedTraceReadyForOfSourceTraceCurrentSharedBridgeReadyGasBudgetStackStaticCases :=
+  @Yul.Program.currentEmittedTraceReadyFor_of_source_trace_current_shared_bridge_ready_gas_budget_stack_static_cases
+
+abbrev openBlockTraceResultAllOutcomesSafelyTracksOfSourceTraceCurrentSharedBridgeReadyGasBudgetStackStaticResponseStrictCases :=
+  @Yul.Program.openBlockTraceResult_all_outcomes_safelyTracks_of_source_trace_current_shared_bridge_ready_gas_budget_stack_static_response_strict_cases
+
+abbrev openBlockTraceResultTraceRelAboveAndAllOutcomesSafelyTracksOfSourceTraceCurrentSharedBridgeReadyGasBudgetStackStaticResponseStrictCases :=
+  @Yul.Program.openBlockTraceResult_traceRelAbove_and_all_outcomes_safelyTracks_of_source_trace_current_shared_bridge_ready_gas_budget_stack_static_response_strict_cases
+
+abbrev openXCurrentRunningInstrGasBudgetReadyCase :=
+  Yul.Program.OpenXCurrentRunningInstrGasBudgetReadyCase
+
+abbrev openXCurrentRunningInstrGasBudgetReadyCaseOfGasReadyCase :=
+  @Yul.Program.OpenXCurrentRunningInstrGasBudgetReadyCase.of_gas_ready_case
+
+abbrev openXCurrentRunningInstrGasBudgetReadyCaseRunListRunningReadyForCurrentEmitted :=
+  @Yul.Program.OpenXCurrentRunningInstrGasBudgetReadyCase.runListRunningReadyFor_current_emitted
+
+abbrev openXCurrentRunningInstrGasBudgetTraceReadyCase :=
+  Yul.Program.OpenXCurrentRunningInstrGasBudgetTraceReadyCase
+
+abbrev openXCurrentRunningInstrGasBudgetTraceReadyCaseRunListRunningReadyForCurrentEmitted :=
+  @Yul.Program.OpenXCurrentRunningInstrGasBudgetTraceReadyCase.runListRunningReadyFor_current_emitted
 
 abbrev openXCurrentRunningInstrCompiledOpenEvidenceCase :=
   Yul.Program.OpenXCurrentRunningInstrCompiledOpenEvidenceCase
@@ -1163,9 +2324,6 @@ abbrev openXCurrentRunningInstrCompiledOpenEvidenceCaseOfReadyCaseCallBridgeRel 
 
 abbrev openXCurrentRunningInstrCompiledOpenEvidenceCaseOfGasReadyCaseCallBridgeRel :=
   @Yul.Program.OpenXCurrentRunningInstrCompiledOpenEvidenceCase.of_gas_ready_case_call_bridge_rel
-
-abbrev openXCurrentRunningInstrCompiledOpenEvidenceCaseToResponseAdmissible :=
-  @Yul.Program.OpenXCurrentRunningInstrCompiledOpenEvidenceCase.to_response_admissible
 
 abbrev openXCurrentRunningInstrCompiledOpenEvidenceCaseToTraceReadyCase :=
   @Yul.Program.OpenXCurrentRunningInstrCompiledOpenEvidenceCase.to_trace_ready_case
@@ -1194,44 +2352,47 @@ abbrev openXCurrentEmittedTraceReadyForOfCompiledOpenCurrentEmittedEvidence :=
 abbrev openXCurrentEmittedTraceReadyForOfSourceTraceCurrentSharedBridgeReadyGasCases :=
   @Yul.Program.currentEmittedTraceReadyFor_of_source_trace_current_shared_bridge_ready_gas_cases
 
-abbrev openXCompiledOpenCurrentCallBridgeReadyFor :=
-  @Yul.Program.OpenXCompiledOpenCurrentCallBridgeReadyFor
-
-abbrev openXCompiledOpenCurrentCallBridgeReadyForDone :=
-  @Yul.Program.OpenXCompiledOpenCurrentCallBridgeReadyFor.done
-
-abbrev openXCompiledOpenCurrentCallBridgeReadyForStepRunning :=
-  @Yul.Program.OpenXCompiledOpenCurrentCallBridgeReadyFor.stepRunning
-
-abbrev openXCompiledOpenCurrentCallBridgeReadyForStepHalted :=
-  @Yul.Program.OpenXCompiledOpenCurrentCallBridgeReadyFor.stepHalted
-
-abbrev openXCompiledOpenCurrentCallBridgeReadyForCastTrace :=
-  @Yul.Program.OpenXCompiledOpenCurrentCallBridgeReadyFor.cast_trace
-
-abbrev openXCompiledOpenCurrentCallBridgeReadyForOfSourceTraceCurrentSharedBridgeReady :=
-  @Yul.Program.OpenXCompiledOpenCurrentCallBridgeReadyFor.of_source_trace_current_shared_bridge_ready
-
-abbrev openXCompiledOpenCurrentCallBridgeReadyForOfOpenBlockTraceCurrentCallBridgeCases :=
-  @Yul.Program.openXCompiledOpenCurrentCallBridgeReadyFor_of_openBlockTrace_current_call_bridge_cases
-
-abbrev openXCompiledOpenCurrentEmittedEvidenceForOfCurrentCallBridgeReady :=
-  @Yul.Program.openXCompiledOpenCurrentEmittedEvidenceFor_of_current_call_bridge_ready
-
-abbrev openXCurrentEmittedTraceReadyForOfCompiledOpenCurrentCallBridgeReady :=
-  @Yul.Program.currentEmittedTraceReadyFor_of_compiled_open_current_call_bridge_ready
-
-abbrev openXCurrentEmittedTraceReadyForOfOpenBlockTraceCurrentEmittedResponseAdmissibleCasesInitialCode :=
-  @Yul.Program.currentEmittedTraceReadyFor_of_openBlockTrace_current_emitted_response_admissible_cases_of_initial_code
+abbrev openXCurrentEmittedTraceReadyForOfSourceTraceCurrentSharedBridgeReadyGasBudgetCases :=
+  @Yul.Program.currentEmittedTraceReadyFor_of_source_trace_current_shared_bridge_ready_gas_budget_cases
 
 abbrev openXCurrentEmittedTraceReadyForOfOpenBlockTraceCurrentEmittedCompiledOpenEvidenceCasesInitialCode :=
   @Yul.Program.currentEmittedTraceReadyFor_of_openBlockTrace_current_emitted_compiled_open_evidence_cases_of_initial_code
+
+abbrev openXCurrentEmittedTraceReadyForOfOpenBlockTraceResponseAdmissibleTraceResidualCasesInitialCode :=
+  @Yul.Program.currentEmittedTraceReadyFor_of_openBlockTrace_current_emitted_response_admissible_trace_residual_cases_of_initial_code
 
 abbrev compiledOpenOfSourceOpenDispatcher :=
   @Yul.Program.compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_compiledOpen
 
 abbrev compiledOpenOfSourceOpenDispatcherOfChecked :=
   @Yul.Program.compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_compiledOpen_of_checked
+
+abbrev compiledOpenOfSourceOpenDispatcherCallFamily :=
+  @Yul.Program.compileCheckedCALLFamilyRegularOpen_sourceOpenDispatcherBlockResult_compiledOpen
+
+abbrev compiledOpenOfSourceOpenDispatcherCallFamilyOfChecked :=
+  @Yul.Program.compileCheckedCALLFamilyRegularOpen_sourceOpenDispatcherBlockResult_compiledOpen_of_checked
+
+abbrev compiledOpenOfSourceOpenDispatcherCallFamilyOfCheckedSupported :=
+  @Yul.Program.compileCheckedCALLFamilyRegularOpen_sourceOpenDispatcherBlockResult_compiledOpen_of_checked_supported
+
+abbrev compiledOpenOfSourceOpenDispatcherCallFamilyOfCheckedTraceAccepted :=
+  @Yul.Program.compileCheckedCALLFamilyRegularOpen_sourceOpenDispatcherBlockResult_compiledOpen_of_checked_traceAccepted
+
+abbrev compiledOpenTraceOfSourceOpenDispatcherCallFamilyOfCheckedTraceAccepted :=
+  @Yul.Program.compileCheckedCALLFamilyRegularOpen_sourceOpenDispatcherBlockResult_compiledOpenTrace_of_checked_traceAccepted
+
+abbrev openBlockTraceOfSourceOpenDispatcherCallFamilyOfCheckedTraceAccepted :=
+  @Yul.Program.compileCheckedCALLFamilyRegularOpen_sourceOpenDispatcherBlockResult_openBlockTrace_of_checked_traceAccepted
+
+abbrev openBlockTraceOfSourceOpenDispatcherCallFamilyAssemblyInferredBoundStackSafeNoReturnDataCopyOfCheckedTraceAccepted :=
+  @Yul.Program.compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openBlockTrace_of_checked_traceAccepted_noReturnDataCopy
+
+abbrev sourceOpenDispatcherBlockResultCallFamilySupportedInitialEmpty :=
+  @Yul.Program.sourceOpenDispatcherBlockResult_callFamily_supported_initial_empty
+
+abbrev sourceOpenDispatcherTraceAcceptedCallFamilySupportedInitialEmpty :=
+  @Yul.Program.SourceOpenDispatcherTraceAccepted.callFamily_supported_initial_empty
 
 abbrev compiledOpenOfSourceOpenDispatcherOfCheckedSupported :=
   @Yul.Program.compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_compiledOpen_of_checked_supported
@@ -1254,23 +2415,20 @@ abbrev openXReplayTraceReadinessForCheckedTraceOfCurrentEmittedCases :=
 abbrev openXReplayTraceReadinessForCheckedTraceOfCurrentEmittedTraceReady :=
   @Yul.Program.OpenXReplayTraceReadinessForCheckedTrace.of_current_emitted_trace_ready
 
+abbrev openXReplayTraceReadinessForCheckedTraceOfCurrentEmittedResponseAdmissibleTraceResidualCases :=
+  @Yul.Program.OpenXReplayTraceReadinessForCheckedTrace.of_current_emitted_response_admissible_trace_residual_cases
+
 abbrev openXReplayTraceReadinessForCheckedTraceOfOpenBlockTraceCurrentEmittedReadyCases :=
   @Yul.Program.OpenXReplayTraceReadinessForCheckedTrace.of_openBlockTrace_current_emitted_ready_cases
 
 abbrev openXReplayTraceReadinessForCheckedTraceOfOpenBlockTraceCurrentEmittedTraceReadyCases :=
   @Yul.Program.OpenXReplayTraceReadinessForCheckedTrace.of_openBlockTrace_current_emitted_trace_ready_cases
 
-abbrev openXReplayTraceReadinessForCheckedTraceOfOpenBlockTraceCurrentEmittedResponseAdmissibleCases :=
-  @Yul.Program.OpenXReplayTraceReadinessForCheckedTrace.of_openBlockTrace_current_emitted_response_admissible_cases
-
 abbrev openXReplayTraceReadinessForCheckedTraceOfOpenBlockTraceCurrentEmittedCompiledOpenEvidenceCases :=
   @Yul.Program.OpenXReplayTraceReadinessForCheckedTrace.of_openBlockTrace_current_emitted_compiled_open_evidence_cases
 
 abbrev openXReplayTraceReadinessForCheckedTraceOfCompiledOpenCurrentEmittedEvidence :=
   @Yul.Program.OpenXReplayTraceReadinessForCheckedTrace.of_compiled_open_current_emitted_evidence
-
-abbrev openXReplayTraceReadinessForCheckedTraceOfCompiledOpenCurrentCallBridgeReady :=
-  @Yul.Program.OpenXReplayTraceReadinessForCheckedTrace.of_compiled_open_current_call_bridge_ready
 
 abbrev openXReplayTraceReadinessForCheckedTraceOfOpenBlockTraceCurrentSharedBridgeCases :=
   @Yul.Program.OpenXReplayTraceReadinessForCheckedTrace.of_openBlockTrace_current_shared_bridge_cases
@@ -1284,26 +2442,474 @@ abbrev checkedCALLRegularOpenNoReturnDataCopyTargetEqSome :=
 abbrev checkedCALLRegularOpenNoReturnDataCopyTargetRegularOpen :=
   @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?_regularOpen
 
+abbrev checkedCALLRegularOpenNoReturnDataCopyTargetAssemblyCompile :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?_assemblyCompile
+
+abbrev checkedCALLRegularOpenNoReturnDataCopyTargetAssemble :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?_assemble
+
 abbrev checkedCALLRegularOpenNoReturnDataCopyTargetNoReturnDataCopy :=
   @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?_targetNoReturnDataCopy
 
 abbrev checkedCALLRegularOpenNoReturnDataCopyTargetBlockReplayNoReturnDataCopy :=
   @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?_blockReplayNoReturnDataCopy
 
-abbrev openXReplayAboveOfSourceOpenDispatcherOfCheckedTraceAcceptedCodeImage :=
-  @Yul.Program.compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_codeImage
+abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTarget :=
+  Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?
 
-abbrev openXReplayAboveOfSourceOpenDispatcherOfCheckedTraceAcceptedResponseAdmissible :=
-  @Yul.Program.compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_responseAdmissible
+abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetEqSome :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
 
-abbrev openXReplayAboveOfSourceOpenDispatcherOfCheckedTraceAcceptedSourceBridgeGasReady :=
-  @Yul.Program.compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady
+abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetBase :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
 
-abbrev openXReplayAboveOfSourceOpenDispatcherOfCheckedTraceAcceptedCodeImageNoReturnDataCopy :=
-  @Yul.Program.compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_codeImage_noReturnDataCopy
+abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetRegularOpen :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_regularOpen
 
-abbrev openXReplayAboveOfSourceOpenDispatcherOfCheckedTraceAcceptedSourceBridgeGasReadyNoReturnDataCopy :=
-  @Yul.Program.compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady_noReturnDataCopy
+abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetBlockReplayNoReturnDataCopy :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_blockReplayNoReturnDataCopy
+
+abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetAssemblyBoundCheck :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+
+abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetInitialSourceStackBoundPoint :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_initialSourceStackBoundPoint
+
+abbrev checkedCALLFamilyRegularOpenNoReturnDataCopyTarget :=
+  Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenNoReturnDataCopy?
+
+abbrev checkedCALLFamilyRegularOpenNoReturnDataCopyTargetEqSome :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenNoReturnDataCopy?_eq_some
+
+abbrev checkedCALLFamilyRegularOpenNoReturnDataCopyTargetRegularOpen :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenNoReturnDataCopy?_regularOpen
+
+abbrev checkedCALLFamilyRegularOpenNoReturnDataCopyTargetAssemblyCompile :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenNoReturnDataCopy?_assemblyCompile
+
+abbrev checkedCALLFamilyRegularOpenNoReturnDataCopyTargetAssemble :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenNoReturnDataCopy?_assemble
+
+abbrev checkedCALLFamilyRegularOpenNoReturnDataCopyTargetNoReturnDataCopy :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenNoReturnDataCopy?_targetNoReturnDataCopy
+
+abbrev checkedCALLFamilyRegularOpenNoReturnDataCopyTargetBlockReplayNoReturnDataCopy :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenNoReturnDataCopy?_blockReplayNoReturnDataCopy
+
+abbrev checkedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTarget :=
+  Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?
+
+abbrev checkedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetEqSome :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+
+abbrev checkedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetBase :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
+
+abbrev checkedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetRegularOpen :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_regularOpen
+
+abbrev checkedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetBlockReplayNoReturnDataCopy :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_blockReplayNoReturnDataCopy
+
+abbrev checkedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetAssemblyBoundCheck :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+
+abbrev checkedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetInitialSourceStackBoundPoint :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_initialSourceStackBoundPoint
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTarget :=
+  Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetEqSome :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetAssemblyCompile :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyCompile
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetBlockReplayNoReturnDataCopy :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_blockReplayNoReturnDataCopy
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetNoCallCreate :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_noCallCreate
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetBlockReplayNoCallCreate :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_blockReplayNoCallCreate
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetExpressionsCompile :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_expressions_compile
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetGeneratedExpressionsPreserveEndPc :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_generatedExpressionsPreserve_endPc
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetGeneratedProcHeaders :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_generatedProcHeaders
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetGeneratedProcLookup :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_generatedProcLookup
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetFunctionsRegularPrivateObservableTargetFacts :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_functions_regular_privateObservable_targetFacts
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetSourceLoweredRegularPrivateObservableTargetFacts :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceLowered_regular_privateObservable_targetFacts
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetFunctionsHaltPrivateObservableTargetFacts :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_functions_halt_privateObservable_targetFacts
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetSourceLoweredHaltPrivateObservableTargetFacts :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceLowered_halt_privateObservable_targetFacts
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetSourceLoweredRegularSufficientGasX :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceLowered_regular_sufficientGas_X
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetSourceLoweredHaltSufficientGasX :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceLowered_halt_sufficientGas_X
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetSourceLoweredRegularEmptyOpenTraceOpenXReplayAbove :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceLowered_regular_emptyOpenTrace_openXReplayAbove
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetSourceLoweredHaltEmptyOpenTraceOpenXReplayAbove :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceLowered_halt_emptyOpenTrace_openXReplayAbove
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetReferenceRunRegularOrNonregularEmptyOpenTraceOpenXReplayAbove :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_referenceRun_regular_or_nonregular_emptyOpenTrace_openXReplayAbove
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetReferenceRunRegularOrHaltEmptyOpenTraceOpenXReplayAbove :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_referenceRun_regular_or_halt_emptyOpenTrace_openXReplayAbove
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetReferenceRunRegularOrHaltOpenReplayConclusion :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_referenceRun_regular_or_halt_openReplayConclusion
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetReferenceRunRegularOrHaltSufficientGasX :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_referenceRun_regular_or_halt_sufficientGas_X
+
+abbrev checkedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopyTargetReferenceRunRegularOrHaltNoOutOfGasX :=
+  @Yul.Program.compileCheckedCALLAwareSpillPlannedPreallocAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_referenceRun_regular_or_halt_noOutOfGas_X
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTarget :=
+  Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSome :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeBranches :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_branches
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetNoReturnDataCopy :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_targetNoReturnDataCopy
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetBlockReplayNoReturnDataCopy :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_blockReplayNoReturnDataCopy
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeTrue :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_true
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalse :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalseCallAwareGeneratedOrNoCall :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false_callAwareGenerated_or_noCall
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalseCallAwareReplayGeneratedOrNoCall :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false_callAwareReplayGenerated_or_noCall
+
+abbrev checkedCALLAwareSpillPlannedPreallocFunctionsRegularPrivateObservableTargetFacts :=
+  @Yul.Program.CALLAwareSpillPlannedPreallocFunctionsRegularPrivateObservableTargetFacts
+
+abbrev checkedCALLAwareSpillPlannedPreallocSourceLoweredRegularPrivateObservableTargetFacts :=
+  @Yul.Program.CALLAwareSpillPlannedPreallocSourceLoweredRegularPrivateObservableTargetFacts
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocNoCallFallbackEvidence :=
+  @Yul.Program.CALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocNoCallFallbackEvidence
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalseFunctionsRegularPrivateObservableTargetFactsOrNoCall :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false_functions_regular_privateObservable_targetFacts_or_noCall
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalseSourceLoweredRegularPrivateObservableTargetFactsOrNoCall :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false_sourceLowered_regular_privateObservable_targetFacts_or_noCall
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalseSourceLoweredRegularEmptyOpenTraceOpenXReplayAboveOrNoCall :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false_sourceLowered_regular_emptyOpenTrace_openXReplayAbove_or_noCall
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalseReferenceRunRegularOrNonregularEmptyOpenTraceOpenXReplayAboveOrNoCall :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false_referenceRun_regular_or_nonregular_emptyOpenTrace_openXReplayAbove_or_noCall
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalseReferenceRunRegularOrHaltEmptyOpenTraceOpenXReplayAboveOrNoCall :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false_referenceRun_regular_or_halt_emptyOpenTrace_openXReplayAbove_or_noCall
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocNoCallFallbackEvidenceToPlannedPrealloc :=
+  @Yul.Program.CALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocNoCallFallbackEvidence.to_compileStackGuardedNoReturnDataCopyPlannedPrealloc?
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalseReferenceRunRegularOrHaltEmptyOpenTraceOpenXReplayAboveOrNoCallSufficientGasX :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false_referenceRun_regular_or_halt_emptyOpenTrace_openXReplayAbove_or_noCall_sufficientGas_X
+
+  abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalseReferenceRunRegularOrHaltOpenReplayConclusionOrNoCall :=
+    @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false_referenceRun_regular_or_halt_openReplayConclusion_or_noCall
+
+  abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalseReferenceRunRegularOrHaltOpenReplayConclusion :=
+    @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false_referenceRun_regular_or_halt_openReplayConclusion
+
+  abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalseReferenceRunRegularOrHaltSufficientGasX :=
+    @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false_referenceRun_regular_or_halt_sufficientGas_X
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEqSomeFalseReferenceRunRegularOrHaltNoOutOfGasX :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_eq_some_false_referenceRun_regular_or_halt_noOutOfGas_X
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteAssumptions :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteAssumptions
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteSufficientGas :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteAssumptions.sufficientGas
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteOpenReplayConclusion :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteAssumptions.openReplayConclusion
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteNoOutOfGas :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteAssumptions.noOutOfGas
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocEvidence :=
+  @Yul.Program.CALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocEvidence
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTargetEvidence :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_evidence
+
+abbrev checkedCALLRegularOpenStackSafeOrNoCallSpillPlannedPreallocTarget :=
+  Yul.Program.compileCheckedCALLRegularOpenStackSafeOrNoCallSpillPlannedPrealloc?
+
+abbrev checkedCALLRegularOpenStackSafeOrNoCallSpillPlannedPreallocTargetEqSome :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrNoCallSpillPlannedPrealloc?_eq_some
+
+abbrev targetOutcomeEndPcRunningPcToCodeByteLength :=
+  @Yul.Program.targetOutcomeEndPc_running_pc_to_codeByteLength
+
+abbrev openXReplayAboveOfSourceOpenDispatcherOfCheckedTraceAcceptedSourceBridgeGasReadyStackSafeOrCallAwareSpillPlannedPreallocTrueNoReturnDataCopy :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc_true_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady_noReturnDataCopy
+
+abbrev openXReplayAboveOfSourceOpenDispatcherCallFamilyAssemblyInferredBoundStackSafeNoReturnDataCopySourceBridgeGlobalResponseGasReadyNoReturnDataCopy :=
+  @Yul.Program.compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGlobalResponseGasReady_noReturnDataCopy
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocSourceOpenDispatcherOrSpillSufficientGasX :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_sourceOpenDispatcher_or_spill_sufficientGas_X
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocSourceOpenDispatcherOrSpillOpenReplayConclusion :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_sourceOpenDispatcher_or_spill_openReplayConclusion
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocSourceOpenReplaySomeGasOrSpillNoOutOfGasX :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_sourceOpenReplaySomeGas_or_spill_noOutOfGas_X
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocSourceOpenLivenessAndSafetyFinalObservationOrSpillNoOutOfGasX :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_sourceOpenLivenessAndSafetyFinalObservation_or_spill_noOutOfGas_X
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocSourceOpenLivenessAndSafetyOrSpillOpenReplayConclusion :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_sourceOpenLivenessAndSafety_or_spill_openReplayConclusion
+
+abbrev checkedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocSourceOpenContractLivenessAndSafetyFinalObservationOrSpillOpenReplayConclusion :=
+  @Yul.Program.compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_sourceOpenContractLivenessAndSafetyFinalObservation_or_spill_openReplayConclusion
+
+abbrev stackGuardedPlannedPreallocSufficientGasConclusionToNoOutOfGas :=
+  @Yul.Program.StackGuardedPlannedPreallocSufficientGasConclusion.to_noOutOfGas
+
+  abbrev stackGuardedPlannedPreallocOpenReplayConclusion :=
+    @Yul.Program.StackGuardedPlannedPreallocOpenReplayConclusion
+
+  abbrev stackGuardedNoReturnDataCopyPlannedPreallocSourceLoweredEmptyOpenTraceOpenXReplayAbove :=
+    @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_sourceLowered_emptyOpenTrace_openXReplayAbove
+
+  abbrev stackGuardedNoReturnDataCopyPlannedPreallocReferenceRunOpenReplayConclusion :=
+    @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_openReplayConclusion
+
+  abbrev stackGuardedPlannedPreallocSufficientGasConclusionToEmptyOpenBlockTrace :=
+    @Yul.Program.StackGuardedPlannedPreallocSufficientGasConclusion.to_emptyOpenBlockTrace
+
+abbrev stackGuardedPlannedPreallocNoOutOfGasConclusionToEmptyOpenBlockTrace :=
+  @Yul.Program.StackGuardedPlannedPreallocNoOutOfGasConclusion.to_emptyOpenBlockTrace
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2SourceOpenDispatcherOrSpillSufficientGas :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions.sourceOpenDispatcherOrSpillSufficientGas
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2SourceOpenDispatcherOrSpillOpenReplayConclusion :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions.sourceOpenDispatcherOrSpillOpenReplayConclusion
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2SourceOpenReplaySomeGasOrSpillNoOutOfGas :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions.sourceOpenReplaySomeGasOrSpillNoOutOfGas
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2SourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfGasBudget :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions.sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfGasBudget
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2SourceOpenLivenessAndSafetyOrSpillOpenReplayConclusionOfGasBudget :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions.sourceOpenLivenessAndSafetyOrSpillOpenReplayConclusionOfGasBudget
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2SourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGResultTrackingTraceObservationOrFailureBelow :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions.sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGResultTrackingTraceObservationOrFailureBelow
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2SourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGResultTrackingFixedTraceLe :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions.sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGResultTrackingFixedTraceLe
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2SourceOpenContractLivenessAndSafetyFinalObservationOrSpillOpenReplayConclusionOfGasBudget :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions.sourceOpenContractLivenessAndSafetyFinalObservationOrSpillOpenReplayConclusionOfGasBudget
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteOfRoute2 :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions.of_route2
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteOfFalseRoute :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions.of_falseRoute
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteSourceOpenDispatcherOrSpillSufficientGas :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions.sourceOpenDispatcherOrSpillSufficientGas
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteSourceOpenDispatcherOrSpillOpenReplayConclusion :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions.sourceOpenDispatcherOrSpillOpenReplayConclusion
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteSourceOpenReplaySomeGasOrSpillNoOutOfGas :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions.sourceOpenReplaySomeGasOrSpillNoOutOfGas
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteSourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfGasBudget :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions.sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfGasBudget
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteSourceOpenLivenessAndSafetyOrSpillOpenReplayConclusionOfGasBudget :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions.sourceOpenLivenessAndSafetyOrSpillOpenReplayConclusionOfGasBudget
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteSourceOpenLivenessAndSafetyFinalObservationOrSpillNoOutOfGasOfGasBudget :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions.sourceOpenLivenessAndSafetyFinalObservationOrSpillNoOutOfGasOfGasBudget
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteSourceOpenContractLivenessAndSafetyFinalObservationOrSpillNoOutOfGasOfGasBudget :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions.sourceOpenContractLivenessAndSafetyFinalObservationOrSpillNoOutOfGasOfGasBudget
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteSourceOpenContractLivenessAndSafetyFinalObservationOrSpillOpenReplayConclusionOfGasBudget :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions.sourceOpenContractLivenessAndSafetyFinalObservationOrSpillOpenReplayConclusionOfGasBudget
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteSourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGResultTrackingTraceObservationOrFailureBelow :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions.sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGResultTrackingTraceObservationOrFailureBelow
+
+abbrev recursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteSourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGResultTrackingFixedTraceLe :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions.sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGResultTrackingFixedTraceLe
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXReplayAbove :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXReplayAbove
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXReplayAt :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXReplayAt
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXCommittedSafeAbove :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeAbove
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXCommittedSafeAboveWithCommittedStorageImageRel :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeAboveWithCommittedStorageImageRel
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXCommittedSafeForAllGasOfBelow :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfBelow
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXCommittedSafeForAllGasOfCommittedResponseSafety :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfCommittedResponseSafety
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXCommittedSafeForAllGasOfCommittedResponseSafetyTracks :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfCommittedResponseSafetyTracks
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXCommittedSafeForAllGasOfCommittedResponseSafetyFixed :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfCommittedResponseSafetyFixed
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXCommittedSafeForAllGasOfResponseTrackingFixed :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfResponseTrackingFixed
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXCommittedSafeForAllGasOfResponseTrackingFixedTrace :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfResponseTrackingFixedTrace
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXCommittedSafeForAllGasOfResponseOutcomeTrackingFixedTrace :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfResponseOutcomeTrackingFixedTrace
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXCommittedSafeForAllGasOfResponseResultTrackingFixedTrace :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfResponseResultTrackingFixedTrace
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXCommittedSafeForAllGasOfResponseStrictOrAllGasOOGResultTrackingFixedTrace :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfResponseStrictOrAllGasOOGResultTrackingFixedTrace
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingFixedTraceLe :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingFixedTraceLe
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceOrFailureBelow :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceOrFailureBelow
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceObservationOrFailureBelow :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceObservationOrFailureBelow
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingAllOutcomeBelow :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingAllOutcomeBelow
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXLivenessAndSafetyOfGasBudget :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfGasBudget
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXLivenessAndSafetyOfGasBudgetWithCommittedStorageImageRel :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfGasBudgetWithCommittedStorageImageRel
+
+abbrev recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2OpenXReplaySomeGas :=
+  @Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXReplaySomeGas
+
+-- The CALL-family route-assumption records remain internal proof plumbing in
+-- `OpenRuntime`; the public audit surface starts at the no-artificial-cap
+-- endpoint below.
+
+abbrev recursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions :=
+  @Yul.Program.RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions
+
+abbrev recursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptionsToCanonicalTopAssumptions :=
+  @Yul.Program.RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions.to_canonicalTopAssumptions
+
+abbrev recursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptionsFinalObservationConclusion :=
+  Yul.Program.RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions.FinalObservationConclusion
+
+abbrev recursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptionsAtGasConclusion :=
+  Yul.Program.RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions.AtGasConclusion
+
+abbrev recursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptionsOutcomeSafetyAtGasConclusion :=
+  Yul.Program.RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions.OutcomeSafetyAtGasConclusion
+
+abbrev recursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptionsResultOrFailureAtGasConclusion :=
+  Yul.Program.RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions.ResultOrFailureAtGasConclusion
+
+abbrev recursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptionsOpenXContractLivenessAndSafetyFinalObservation :=
+  @Yul.Program.RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions.openXContractLivenessAndSafetyFinalObservation
+
+abbrev recursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptionsOpenXContractLivenessAndSafetyAtGas :=
+  @Yul.Program.RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions.openXContractLivenessAndSafetyAtGas
+
+abbrev recursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptionsOpenXContractLivenessAndSafetyOutcomeSafetyAtGas :=
+  @Yul.Program.RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions.openXContractLivenessAndSafetyOutcomeSafetyAtGas
+
+abbrev recursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptionsOpenXContractLivenessAndSafetyResultOrFailureAtGas :=
+  @Yul.Program.RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions.openXContractLivenessAndSafetyResultOrFailureAtGas
+
+abbrev openXContractLivenessAndSafetyFinalObservationOfSourceOpenDispatcherCallFamilyAssemblyInferredBoundStackSafeNoReturnDataCopySourceBridgeNoArtificialCapExternalWorldReadyNoReturnDataCopy :=
+  @Yul.Program.compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+
+abbrev openXContractLivenessAndSafetyAtGasOfSourceOpenDispatcherCallFamilyAssemblyInferredBoundStackSafeNoReturnDataCopySourceBridgeNoArtificialCapExternalWorldReadyNoReturnDataCopy :=
+  @Yul.Program.compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+
+abbrev openXContractLivenessAndSafetyOutcomeSafetyAtGasOfSourceOpenDispatcherCallFamilyAssemblyInferredBoundStackSafeNoReturnDataCopySourceBridgeNoArtificialCapExternalWorldReadyNoReturnDataCopy :=
+  @Yul.Program.compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyOutcomeSafetyAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+
+abbrev openXContractLivenessAndSafetyResultOrFailureAtGasOfSourceOpenDispatcherCallFamilyAssemblyInferredBoundStackSafeNoReturnDataCopySourceBridgeNoArtificialCapExternalWorldReadyNoReturnDataCopy :=
+  @Yul.Program.compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyResultOrFailureAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+
+abbrev openXContractLivenessAndSafetyFinalObservationReplayAtOfBoundLe :=
+  @Yul.Program.OpenXContractLivenessAndSafetyFinalObservation.replayAt_of_bound_le
+
+abbrev openXContractLivenessAndSafetyFinalObservationCommittedSafeAtOfGasLt :=
+  @Yul.Program.OpenXContractLivenessAndSafetyFinalObservation.committedSafeAt_of_gas_lt
+
+abbrev openXContractLivenessAndSafetyFinalObservationResultOrFailureAtOfGasLt :=
+  @Yul.Program.OpenXContractLivenessAndSafetyFinalObservation.resultOrFailureAt_of_gas_lt
+
+abbrev openXContractLivenessAndSafetyFinalObservationOutcomeSafetyAtOfGasLt :=
+  @Yul.Program.OpenXContractLivenessAndSafetyFinalObservation.outcomeSafetyAt_of_gas_lt
 
 example
     {program : Yul.Program} {functionProgram : Functions.Program}
@@ -1362,6 +2968,63 @@ abbrev gasChargedState :=
 abbrev finishGasAwareCall :=
   Yul.OpenGasAware.finishGasAwareCall
 
+abbrev clearReturnBuffers :=
+  Yul.OpenGasAware.clearReturnBuffers
+
+abbrev xCommittedObservation :=
+  Assembly.GasAware.XCommittedObservation
+
+abbrev xTargetCommittedObservation :=
+  Assembly.GasAware.XTargetCommittedObservation
+
+abbrev xResultCommittedObservation :=
+  Assembly.GasAware.XResultCommittedObservation
+
+abbrev xRunOutcomeFails :=
+  Assembly.GasAware.XRunOutcomeFails
+
+abbrev xRunOutcomeCommitsTo :=
+  Assembly.GasAware.XRunOutcomeCommitsTo
+
+abbrev xRunOutcomeCommitsToOkResultObservation :=
+  @Assembly.GasAware.XRunOutcomeCommitsTo.ok_result_observation
+
+abbrev xRunOutcomeCommitsToOutcomeSafelyMatches :=
+  @Assembly.GasAware.XRunOutcomeCommitsTo.outcomeSafelyMatches
+
+abbrev xRunOutcomeSafelyMatches :=
+  Assembly.GasAware.XRunOutcomeSafelyMatches
+
+abbrev xRunOutcomesSafeEquivalent :=
+  Assembly.GasAware.XRunOutcomesSafeEquivalent
+
+abbrev xRunOutcomeSafelyTracks :=
+  Assembly.GasAware.XRunOutcomeSafelyTracks
+
+abbrev xRunOutcomeSafelyTracksOfCandidateFails :=
+  @Assembly.GasAware.XRunOutcomeSafelyTracks.of_candidate_fails
+
+abbrev xRunOutcomeSafelyTracksOkRefl :=
+  @Assembly.GasAware.XRunOutcomeSafelyTracks.ok_refl
+
+abbrev xRunOutcomeSafelyTracksOutcomeSafelyMatchesOfResult :=
+  @Assembly.GasAware.XRunOutcomeSafelyTracks.outcomeSafelyMatches_of_result
+
+abbrev xResultAgreesCommittedObservation :=
+  @Assembly.GasAware.XResultAgrees.committedObservation
+
+abbrev xResultAgreesOutcomeSafelyMatches :=
+  @Assembly.GasAware.XResultAgrees.outcomeSafelyMatches
+
+abbrev uint256AddToNatOfLtSize :=
+  @Yul.OpenGasAware.uint256_add_toNat_of_lt_size
+
+abbrev finishGasAwareCallIncrPCGasAvailableToNatOfNoOverflow :=
+  @Yul.OpenGasAware.finishGasAwareCall_incrPC_gasAvailable_toNat_of_no_overflow
+
+abbrev finishGasAwareCallIncrPCTailBudgetOfNoOverflow :=
+  @Yul.OpenGasAware.finishGasAwareCall_incrPC_tail_budget_of_no_overflow
+
 abbrev evmGasAwareCallResult :=
   Yul.OpenGasAware.evmGasAwareCallResult
 
@@ -1371,14 +3034,29 @@ abbrev evmGasAwareCallResultResolves :=
 abbrev evmCallSiteGasChargedState :=
   Yul.OpenGasAware.evmCallSite?_gasChargedState
 
+abbrev gasExecRelOfEraseGasEq :=
+  @Assembly.GasAware.GasExecRel.of_eraseGas_eq
+
+abbrev gasExecRelIncrPC :=
+  @Assembly.GasAware.GasExecRel.incrPC
+
+abbrev gasExecRelTrans :=
+  @Assembly.GasAware.GasExecRel.trans
+
 abbrev evmCallSiteOfGasExecRel :=
   @Yul.OpenGasAware.evmCallSite?_of_gasExecRel
 
 abbrev evmCallSiteGasChargedStateOfGasExecRel :=
   @Yul.OpenGasAware.evmCallSite?_gasChargedState_of_gasExecRel
 
+abbrev evmOpenCallGasChargedStateSiteOfGasExecRel :=
+  @Yul.OpenGasAware.evmOpenCall?_gasChargedState_site_of_gasExecRel
+
 abbrev evmOpenCallGasChargedStateOfGasExecRel :=
   @Yul.OpenGasAware.evmOpenCall?_gasChargedState_of_gasExecRel
+
+abbrev evmOpenCallGasChargedStateResumeGasExecRelOfGasExecRel :=
+  @Yul.OpenGasAware.evmOpenCall?_gasChargedState_resume_gasExecRel_of_gasExecRel
 
 abbrev xStepException? :=
   Yul.OpenGasAware.xStepException?
@@ -1388,6 +3066,12 @@ abbrev xStepExceptionNoneOfRawChecks :=
 
 abbrev xStepExceptionNoneOfStepChecks :=
   @Yul.OpenGasAware.xStepException?_none_of_step_checks
+
+abbrev xStepExceptionNoneOrOutOfGasOfNonGasChecks :=
+  @Yul.OpenGasAware.xStepException?_none_or_outOfGas_of_nonGas_checks
+
+abbrev xStepExceptionEqOutOfGasOfNonGasChecksOfSome :=
+  @Yul.OpenGasAware.xStepException?_eq_outOfGas_of_nonGas_checks_of_some
 
 abbrev openStepAfterChecks :=
   Yul.OpenGasAware.openStepAfterChecks
@@ -1440,17 +3124,446 @@ abbrev openXCurrentGaslessCallContinue :=
 abbrev openXCurrentGaslessCallContinueOfStepChecks :=
   @Yul.OpenGasAware.openX_current_gasless_call_continue_of_step_checks
 
+abbrev openXCurrentGaslessCallContinueOutcomeInvOfStepChecksActualPost :=
+  @Yul.OpenGasAware.openX_current_gasless_call_continue_outcome_inv_of_step_checks_actual_post
+
+abbrev openXCurrentGaslessCallAnyOutcomeInvOfStepChecksActualPost :=
+  @Yul.OpenGasAware.openX_current_gasless_call_any_outcome_inv_of_step_checks_actual_post
+
+abbrev openXCurrentGaslessCallAnyOutcomeInvOfExceptionActualPost :=
+  @Yul.OpenGasAware.openX_current_gasless_call_any_outcome_inv_of_exception_actual_post
+
+abbrev openXCurrentGaslessCallContinueOutcomeSafelyTracksOfStepChecksActualPost :=
+  @Yul.OpenGasAware.openX_current_gasless_call_continue_outcome_safelyTracks_of_step_checks_actual_post
+
+abbrev openXCurrentGaslessCallContinueOutcomeSafelyTracksOfStepChecksActualPostGasRelTail :=
+  @Yul.OpenGasAware.openX_current_gasless_call_continue_outcome_safelyTracks_of_step_checks_actual_post_gasrel_tail
+
 abbrev openXCurrentEmittedPrimCallContinueOfStepChecks :=
   @Yul.OpenGasAware.openX_current_emitted_prim_call_continue_of_step_checks
 
 abbrev openXTraceResult :=
   Yul.OpenGasAware.OpenXTraceResult
 
+abbrev openXOutcomeTraceResult :=
+  Yul.OpenGasAware.OpenXOutcomeTraceResult
+
+abbrev openXOutcomeResult :=
+  Yul.OpenGasAware.OpenXOutcomeResult
+
+abbrev openXCommittedSafeAt :=
+  Yul.OpenGasAware.OpenXCommittedSafeAt
+
+abbrev openXCommittedSafeAtToResultOrFailure :=
+  @Yul.OpenGasAware.OpenXCommittedSafeAt.to_result_or_failure
+
+abbrev openXCommittedSafeAtToOutcomeSafety :=
+  @Yul.OpenGasAware.OpenXCommittedSafeAt.to_outcome_safety
+
+abbrev openXCommittedSafeAbove :=
+  Yul.OpenGasAware.OpenXCommittedSafeAbove
+
+abbrev openXCommittedSafeForAllGas :=
+  Yul.OpenGasAware.OpenXCommittedSafeForAllGas
+
+abbrev openXCommittedSafeBelow :=
+  Yul.OpenGasAware.OpenXCommittedSafeBelow
+
+abbrev openXOutcomeTraceExistsAt :=
+  Yul.OpenGasAware.OpenXOutcomeTraceExistsAt
+
+abbrev openXOutcomeTraceExistsBelow :=
+  Yul.OpenGasAware.OpenXOutcomeTraceExistsBelow
+
+abbrev openXOutcomeTraceExistsForAllGas :=
+  Yul.OpenGasAware.OpenXOutcomeTraceExistsForAllGas
+
+abbrev openXAllOutcomeTracesSafelyMatchAt :=
+  Yul.OpenGasAware.OpenXAllOutcomeTracesSafelyMatchAt
+
+abbrev openXAllOutcomeTracesSafelyMatchBelow :=
+  Yul.OpenGasAware.OpenXAllOutcomeTracesSafelyMatchBelow
+
+abbrev openXAllOutcomeTracesSafelyMatchAbove :=
+  Yul.OpenGasAware.OpenXAllOutcomeTracesSafelyMatchAbove
+
+abbrev openXAllOutcomeTracesSafelyMatchForAllGas :=
+  Yul.OpenGasAware.OpenXAllOutcomeTracesSafelyMatchForAllGas
+
+abbrev openXOutcomeTraceExistsBelowMono :=
+  @Yul.OpenGasAware.OpenXOutcomeTraceExistsBelow.mono
+
+abbrev openXOutcomeTraceExistsBelowZeroBoundOpenGasAware :=
+  @Yul.OpenGasAware.OpenXOutcomeTraceExistsBelow.zero_bound
+
+abbrev openXOutcomeTraceExistsBelowSuccOfAtOpenGasAware :=
+  @Yul.OpenGasAware.OpenXOutcomeTraceExistsBelow.succ_of_at
+
+abbrev openXOutcomeTraceExistsForAllGasBelow :=
+  @Yul.OpenGasAware.OpenXOutcomeTraceExistsForAllGas.below
+
+abbrev openXOutcomeTraceExistsForAllGasOfOpenResult :=
+  @Yul.OpenGasAware.OpenXOutcomeTraceExistsForAllGas.of_openResult
+
+abbrev openXOutcomeTraceExistsForAllGasBelowOfOpenResult :=
+  @Yul.OpenGasAware.OpenXOutcomeTraceExistsForAllGas.below_of_openResult
+
+abbrev openXAllOutcomeTracesSafelyMatchAtToCommittedSafeAt :=
+  @Yul.OpenGasAware.OpenXAllOutcomeTracesSafelyMatchAt.to_committedSafeAt
+
+abbrev openXAllOutcomeTracesSafelyMatchBelowMono :=
+  @Yul.OpenGasAware.OpenXAllOutcomeTracesSafelyMatchBelow.mono
+
+abbrev openXAllOutcomeTracesSafelyMatchBelowZeroBound :=
+  @Yul.OpenGasAware.OpenXAllOutcomeTracesSafelyMatchBelow.zero_bound
+
+abbrev openXAllOutcomeTracesSafelyMatchBelowSuccOfAt :=
+  @Yul.OpenGasAware.OpenXAllOutcomeTracesSafelyMatchBelow.succ_of_at
+
+abbrev openXAllOutcomeTracesSafelyMatchBelowToCommittedSafeBelow :=
+  @Yul.OpenGasAware.OpenXAllOutcomeTracesSafelyMatchBelow.to_committedSafeBelow
+
+abbrev openXAllOutcomeTracesSafelyMatchForAllGasOfBelowAndAbove :=
+  @Yul.OpenGasAware.OpenXAllOutcomeTracesSafelyMatchForAllGas.of_below_and_above
+
+abbrev openXAllOutcomeTracesSafelyMatchForAllGasToCommittedSafeForAllGas :=
+  @Yul.OpenGasAware.OpenXAllOutcomeTracesSafelyMatchForAllGas.to_committedSafeForAllGas
+
+abbrev openXOutcomeSafelyTracksResult :=
+  Yul.OpenGasAware.OpenXOutcomeSafelyTracksResult
+
+abbrev openXOutcomeSafelyTracksResultOfTrace :=
+  @Yul.OpenGasAware.OpenXOutcomeSafelyTracksResult.of_trace
+
+abbrev openXOutcomeTraceSafelyTracksResult :=
+  Yul.OpenGasAware.OpenXOutcomeTraceSafelyTracksResult
+
+abbrev openXStateAllOutcomeTracesSafelyTrackResult :=
+  Yul.OpenGasAware.OpenXStateAllOutcomeTracesSafelyTrackResult
+
+abbrev openXStateAllOutcomeTracesSafelyMatchTarget :=
+  Yul.OpenGasAware.OpenXStateAllOutcomeTracesSafelyMatchTarget
+
+abbrev openXGasRelStateAllOutcomeTracesSafelyTrackResult :=
+  Yul.OpenGasAware.OpenXGasRelStateAllOutcomeTracesSafelyTrackResult
+
+abbrev openXGasRelStateAllOutcomeTracesSafelyMatchTarget :=
+  Yul.OpenGasAware.OpenXGasRelStateAllOutcomeTracesSafelyMatchTarget
+
+abbrev openXStateAllOutcomeTracesSafelyTrackResultToMatchTarget :=
+  @Yul.OpenGasAware.OpenXStateAllOutcomeTracesSafelyTrackResult.to_matchTarget
+
+abbrev openXGasRelStateAllOutcomeTracesSafelyTrackResultToMatchTarget :=
+  @Yul.OpenGasAware.OpenXGasRelStateAllOutcomeTracesSafelyTrackResult.to_matchTarget
+
+abbrev openXCurrentRunningAllOutcomesSafelyTracksOfOpenStepAfterChecksDone :=
+  @Yul.OpenGasAware.openX_current_running_all_outcomes_safelyTracks_of_openStepAfterChecks_done
+
+abbrev openXCurrentRunningAllOutcomesSafelyTracksOfNotCallKind :=
+  @Yul.OpenGasAware.openX_current_running_all_outcomes_safelyTracks_of_not_callKind
+
+abbrev openXCurrentRunningAllOutcomesSafelyTracksOfCallKindNoCall :=
+  @Yul.OpenGasAware.openX_current_running_all_outcomes_safelyTracks_of_callKind_no_call
+
+abbrev openXCurrentSuccessAllOutcomesSafelyTracksOfOpenStepAfterChecksDone :=
+  @Yul.OpenGasAware.openX_current_success_all_outcomes_safelyTracks_of_openStepAfterChecks_done
+
+abbrev openXCurrentRevertAllOutcomesSafelyTracksOfOpenStepAfterChecksDone :=
+  @Yul.OpenGasAware.openX_current_revert_all_outcomes_safelyTracks_of_openStepAfterChecks_done
+
+abbrev openXCurrentSuccessAllOutcomesSafelyTracksOfNotCallKind :=
+  @Yul.OpenGasAware.openX_current_success_all_outcomes_safelyTracks_of_not_callKind
+
+abbrev openXCurrentSuccessAllOutcomesSafelyTracksOfCallKindNoCall :=
+  @Yul.OpenGasAware.openX_current_success_all_outcomes_safelyTracks_of_callKind_no_call
+
+abbrev openXCurrentRevertAllOutcomesSafelyTracksOfNotCallKind :=
+  @Yul.OpenGasAware.openX_current_revert_all_outcomes_safelyTracks_of_not_callKind
+
+abbrev openXCurrentRevertAllOutcomesSafelyTracksOfCallKindNoCall :=
+  @Yul.OpenGasAware.openX_current_revert_all_outcomes_safelyTracks_of_callKind_no_call
+
+abbrev openXCurrentExceptionAllOutcomesSafelyTracks :=
+  @Yul.OpenGasAware.openX_current_exception_all_outcomes_safelyTracks
+
+abbrev openXCurrentOutOfGasExceptionAllOutcomesSafelyTracks :=
+  @Yul.OpenGasAware.openX_current_outOfGas_exception_all_outcomes_safelyTracks
+
+abbrev openXCurrentNonGasExceptionAllOutcomesSafelyTracks :=
+  @Yul.OpenGasAware.openX_current_nonGas_exception_all_outcomes_safelyTracks
+
+abbrev openXFallthroughStopExceptionAllOutcomesSafelyTracks :=
+  @Yul.OpenGasAware.openX_fallthrough_stop_exception_all_outcomes_safelyTracks
+
+abbrev openXFallthroughStopOutOfGasExceptionAllOutcomesSafelyTracks :=
+  @Yul.OpenGasAware.openX_fallthrough_stop_outOfGas_exception_all_outcomes_safelyTracks
+
+abbrev openXGasRelCurrentRunningAllOutcomesSafelyTracksOfOpenStepAfterChecksDone :=
+  @Yul.OpenGasAware.openX_gasrel_current_running_all_outcomes_safelyTracks_of_openStepAfterChecks_done
+
+abbrev xRunOutcomeSafelyTracksRetargetOk :=
+  @Assembly.GasAware.XRunOutcomeSafelyTracks.retarget_ok
+
+abbrev openXGasRelCurrentRunningAllOutcomesSafelyTracksOfNonGasOpenStepAfterChecksDone :=
+  @Yul.OpenGasAware.openX_gasrel_current_running_all_outcomes_safelyTracks_of_nonGas_openStepAfterChecks_done
+
+abbrev openXRunListResultRunningAllOutcomesSafelyTracksOfPathDecodeChecks :=
+  @Yul.OpenGasAware.openX_runListResult_running_all_outcomes_safelyTracks_of_path_decode_checks
+
+abbrev openXRunListResultHaltedAllOutcomesSafelyTracksOfPathDecodeChecks :=
+  @Yul.OpenGasAware.openX_runListResult_halted_all_outcomes_safelyTracks_of_path_decode_checks
+
+abbrev openXRunListRunningAllOutcomeTracksReady :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.OpenXRunListRunningAllOutcomeTracksReady
+
+abbrev openXRunListHaltedAllOutcomeTracksReady :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.OpenXRunListHaltedAllOutcomeTracksReady
+
+abbrev runListRunningAllOutcomeTracksReadyFor :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.RunListRunningAllOutcomeTracksReadyFor
+
+abbrev runListHaltedAllOutcomeTracksReadyFor :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.RunListHaltedAllOutcomeTracksReadyFor
+
+abbrev runningPathAllOutcomeTracksReady :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.RunningPathAllOutcomeTracksReady
+
+abbrev haltedPathAllOutcomeTracksReady :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.HaltedPathAllOutcomeTracksReady
+
+abbrev openBlockTraceResultAllOutcomesSafelyTracksOfReady :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openBlockTraceResult_all_outcomes_safelyTracks_of_ready
+
+abbrev openBlockTraceResultAllOutcomesSafelyTracksOfTargetDoneReady :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openBlockTraceResult_all_outcomes_safelyTracks_of_target_done_ready
+
+abbrev openBlockTraceResultAllOutcomesSafelyTracksOfTargetTerminalReady :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openBlockTraceResult_all_outcomes_safelyTracks_of_target_terminal_ready
+
+abbrev openXRunListRunningAllOutcomeTracksReadyCurrentRunningOfNonGasOpenStepAfterChecksDone :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openXRunListRunningAllOutcomeTracksReady_current_running_of_nonGas_openStepAfterChecks_done
+
+abbrev openXRunListRunningAllOutcomeTracksReadyCurrentEmittedNoCallOfCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openXRunListRunningAllOutcomeTracksReady_current_emitted_no_call_of_current_path_checks
+
+abbrev runListRunningAllOutcomeTracksReadyForCurrentEmittedNoCallOfCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningAllOutcomeTracksReadyFor_current_emitted_no_call_of_current_path_checks
+
+abbrev openXRunListHaltedAllOutcomeTracksReadyCurrentEmittedNoCallOfCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openXRunListHaltedAllOutcomeTracksReady_current_emitted_no_call_of_current_path_checks
+
+abbrev runListHaltedAllOutcomeTracksReadyForCurrentEmittedNoCallOfCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListHaltedAllOutcomeTracksReadyFor_current_emitted_no_call_of_current_path_checks
+
+abbrev openXRunListHaltedAllOutcomeTracksReadyCurrentSuccessOfNonGasOpenStepAfterChecksDone :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openXRunListHaltedAllOutcomeTracksReady_current_success_of_nonGas_openStepAfterChecks_done
+
+abbrev openXRunListHaltedAllOutcomeTracksReadyCurrentRevertOfNonGasOpenStepAfterChecksDone :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openXRunListHaltedAllOutcomeTracksReady_current_revert_of_nonGas_openStepAfterChecks_done
+
+abbrev openXOutcomeTraceSafelyTracksResultOfTraceObservationEq :=
+  @Yul.OpenGasAware.OpenXOutcomeTraceSafelyTracksResult.of_trace_observation_eq
+
+abbrev openXOutcomeTraceSafelyTracksResultOfTraceAgrees :=
+  @Yul.OpenGasAware.OpenXOutcomeTraceSafelyTracksResult.of_trace_agrees
+
+abbrev openXOutcomeTraceSafelyTracksResultOfFailureTrace :=
+  @Yul.OpenGasAware.OpenXOutcomeTraceSafelyTracksResult.of_failure_trace
+
+abbrev openXOutcomeTraceSafelyTracksResultTraceObservationOrFailure :=
+  @Yul.OpenGasAware.OpenXOutcomeTraceSafelyTracksResult.traceObservation_or_failure
+
+abbrev openXOutcomeTraceSafelyTracksResultOfTraceTargetObservation :=
+  @Yul.OpenGasAware.OpenXOutcomeTraceSafelyTracksResult.of_trace_target_observation
+
+abbrev openXOutcomeTraceSafelyTracksResultToResult :=
+  @Yul.OpenGasAware.OpenXOutcomeTraceSafelyTracksResult.to_result
+
+abbrev openXCommittedSafeBelowTracksResult :=
+  Yul.OpenGasAware.OpenXCommittedSafeBelowTracksResult
+
+abbrev openXCommittedSafeBelowTracksFixedResult :=
+  Yul.OpenGasAware.OpenXCommittedSafeBelowTracksFixedResult
+
+abbrev openXCommittedSafeBelowTracksFixedTraceResult :=
+  Yul.OpenGasAware.OpenXCommittedSafeBelowTracksFixedTraceResult
+
+abbrev openXTraceObservationOrFailure :=
+  Yul.OpenGasAware.OpenXTraceObservationOrFailure
+
+abbrev openXTraceObservationOrFailureOfTraceTargetObservation :=
+  @Yul.OpenGasAware.OpenXTraceObservationOrFailure.of_trace_target_observation
+
+abbrev openXTraceObservationOrFailureOfFailureTrace :=
+  @Yul.OpenGasAware.OpenXTraceObservationOrFailure.of_failure_trace
+
+abbrev openXTraceObservationOrFailureToOutcomeSafelyMatches :=
+  @Yul.OpenGasAware.OpenXTraceObservationOrFailure.to_outcomeSafelyMatches
+
+abbrev openXTraceObservationOrFailureZeroFalse :=
+  @Yul.OpenGasAware.OpenXTraceObservationOrFailure.zero_false
+
+abbrev openXTraceObservationOrFailureOfCurrentOutOfGasException :=
+  @Yul.OpenGasAware.OpenXTraceObservationOrFailure.of_current_outOfGas_exception
+
+abbrev openXTraceObservationOrFailureOfFallthroughStopOutOfGasException :=
+  @Yul.OpenGasAware.OpenXTraceObservationOrFailure.of_fallthrough_stop_outOfGas_exception
+
+abbrev openXTraceObservationOrFailureOfCurrentNonGasException :=
+  @Yul.OpenGasAware.OpenXTraceObservationOrFailure.of_current_nonGas_exception
+
+abbrev openXCurrentCallContinueOutcome :=
+  @Yul.OpenGasAware.openX_current_call_continue_outcome
+
+abbrev openXCurrentCallContinueOutcomeInv :=
+  @Yul.OpenGasAware.openX_current_call_continue_outcome_inv
+
+abbrev openXCurrentCallContinueOutcomeSafelyTracksOfTailInv :=
+  @Yul.OpenGasAware.openX_current_call_continue_outcome_safelyTracks_of_tail_inv
+
+abbrev openXCurrentRunningContinueOutcomeOfOpenStepAfterChecksDone :=
+  @Yul.OpenGasAware.openX_current_running_continue_outcome_of_openStepAfterChecks_done
+
+abbrev openXCurrentGaslessCallContinueTraceObservationOrFailureOfStepChecksActualPost :=
+  @Yul.OpenGasAware.openX_current_gasless_call_continue_trace_observation_or_failure_of_step_checks_actual_post
+
+abbrev openXCurrentGaslessCallContinueTraceObservationOrFailureNamedOfStepChecksActualPost :=
+  @Yul.OpenGasAware.openX_current_gasless_call_continue_traceObservationOrFailure_of_step_checks_actual_post
+
+abbrev openXCurrentEmittedPrimCallContinueTraceObservationOrFailureOfStepChecksActualPost :=
+  @Yul.OpenGasAware.openX_current_emitted_prim_call_continue_trace_observation_or_failure_of_step_checks_actual_post
+
+abbrev openXCurrentEmittedPrimCallContinueTraceObservationOrFailureNamedOfStepChecksActualPost :=
+  @Yul.OpenGasAware.openX_current_emitted_prim_call_continue_traceObservationOrFailure_of_step_checks_actual_post
+
+abbrev openXCommittedSafeBelowTracksResultMono :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelowTracksResult.mono
+
+abbrev openXCommittedSafeBelowTracksFixedResultMono :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelowTracksFixedResult.mono
+
+abbrev openXCommittedSafeBelowTracksFixedTraceResultMono :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelowTracksFixedTraceResult.mono
+
+abbrev openXCommittedSafeBelowTracksFixedTraceResultSuccOfAt :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelowTracksFixedTraceResult.succ_of_at
+
+abbrev openXCommittedSafeBelowTracksFixedTraceResultSuccOfTraceOrFailureAt :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelowTracksFixedTraceResult.succ_of_trace_or_failure_at
+
+abbrev openXCommittedSafeBelowTracksFixedTraceResultSuccOfTraceObservationOrFailureAt :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelowTracksFixedTraceResult.succ_of_trace_observation_or_failure_at
+
+abbrev openXCommittedSafeBelowTracksFixedTraceResultOfTraceOrFailureBelow :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelowTracksFixedTraceResult.of_trace_or_failure_below
+
+abbrev openXCommittedSafeBelowTracksFixedTraceResultOfTraceObservationOrFailureBelow :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelowTracksFixedTraceResult.of_trace_observation_or_failure_below
+
+abbrev openXCommittedSafeBelowTracksFixedTraceResultTraceObservationOrFailureBelow :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelowTracksFixedTraceResult.traceObservation_or_failure_below
+
+abbrev openXCommittedSafeBelowTracksFixedTraceResultZeroBound :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelowTracksFixedTraceResult.zero_bound
+
+abbrev openXCommittedSafeBelowTracksResultOfFixedResult :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelowTracksResult.of_fixedResult
+
+abbrev openXCommittedSafeBelowTracksFixedResultOfTraceResult :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelowTracksFixedResult.of_traceResult
+
+abbrev openXCommittedSafeAtOfOutcomeSafelyTracksResult :=
+  @Yul.OpenGasAware.OpenXCommittedSafeAt.of_outcomeSafelyTracksResult
+
+abbrev openXCommittedSafeBelowMono :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelow.mono
+
+abbrev openXCommittedSafeBelowOfTracksResult :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelow.of_tracksResult
+
+abbrev openXCommittedSafeForAllGasOfBelowAndAbove :=
+  @Yul.OpenGasAware.OpenXCommittedSafeForAllGas.of_below_and_above
+
 abbrev openXReplayAbove :=
   Yul.OpenGasAware.OpenXReplayAbove
 
+abbrev openXReplayAt :=
+  Yul.OpenGasAware.OpenXReplayAt
+
+abbrev openXReplaySomeGas :=
+  Yul.OpenGasAware.OpenXReplaySomeGas
+
+abbrev openXReplayAtToCommittedSafeAt :=
+  @Yul.OpenGasAware.OpenXReplayAt.to_committedSafeAt
+
+abbrev openXReplayAtToOutcomeSafelyTracksResult :=
+  @Yul.OpenGasAware.OpenXReplayAt.to_outcomeSafelyTracksResult
+
+abbrev openXReplayAboveToReplayAt :=
+  @Yul.OpenGasAware.OpenXReplayAbove.to_replayAt
+
+abbrev openXReplayAboveToOutcomeSafelyTracksResult :=
+  @Yul.OpenGasAware.OpenXReplayAbove.to_outcomeSafelyTracksResult
+
+abbrev openXReplayAboveToReplaySomeGas :=
+  @Yul.OpenGasAware.OpenXReplayAbove.to_replaySomeGas
+
+abbrev openXReplayAboveToReplaySomeGasOfBoundLt :=
+  @Yul.OpenGasAware.OpenXReplayAbove.to_replaySomeGas_of_bound_lt
+
+abbrev openXReplayAboveToCommittedSafeAbove :=
+  @Yul.OpenGasAware.OpenXReplayAbove.to_committedSafeAbove
+
+abbrev openXReplayAboveToCommittedSafeForAllGasOfBelow :=
+  @Yul.OpenGasAware.OpenXReplayAbove.to_committedSafeForAllGas_of_below
+
+abbrev openXCommittedSafeBelowOfTraceOrFailureBelow :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelow.of_trace_or_failure_below
+
+abbrev openXCommittedSafeBelowOfTraceObservationOrFailureBelow :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelow.of_trace_observation_or_failure_below
+
+abbrev openXCommittedSafeBelowOfTraceObservationOrFailureNamedBelow :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelow.of_traceObservationOrFailure_below
+
+abbrev openXCommittedSafeBelowOfTraceObservationOrFailureExists :=
+  @Yul.OpenGasAware.OpenXCommittedSafeBelow.of_traceObservationOrFailure_exists
+
+abbrev openXReplayAboveToCommittedSafeForAllGasOfTraceOrFailureBelow :=
+  @Yul.OpenGasAware.OpenXReplayAbove.to_committedSafeForAllGas_of_trace_or_failure_below
+
+abbrev openXReplayAboveToCommittedSafeForAllGasOfTraceObservationOrFailureBelow :=
+  @Yul.OpenGasAware.OpenXReplayAbove.to_committedSafeForAllGas_of_trace_observation_or_failure_below
+
+abbrev openXReplayAboveToCommittedSafeForAllGasOfTraceObservationOrFailureNamedBelow :=
+  @Yul.OpenGasAware.OpenXReplayAbove.to_committedSafeForAllGas_of_traceObservationOrFailure_below
+
+abbrev openXReplayAboveToCommittedSafeForAllGasOfTraceObservationOrFailureExists :=
+  @Yul.OpenGasAware.OpenXReplayAbove.to_committedSafeForAllGas_of_traceObservationOrFailure_exists
+
+abbrev openXReplayAboveToCommittedSafeForAllGasOfFixedTraceLe :=
+  @Yul.OpenGasAware.OpenXReplayAbove.to_committedSafeForAllGas_of_fixedTrace_le
+
 abbrev openXTracePathDoneContinuation :=
   Yul.OpenGasAware.OpenXTracePathDoneContinuation
+
+abbrev openXClearedRunningResultAgrees :=
+  Yul.OpenGasAware.OpenXClearedRunningResultAgrees
+
+abbrev openXResultAgrees :=
+  Yul.OpenGasAware.OpenXResultAgrees
+
+abbrev openXResultAgreesOfAssembly :=
+  @Yul.OpenGasAware.OpenXResultAgrees.of_assembly
+
+abbrev openXResultAgreesRunningSuccessOfGasExecRelClearReturnBuffers :=
+  @Yul.OpenGasAware.OpenXResultAgrees.running_success_of_gasExecRel_clear_return_buffers
+
+abbrev openXResultAgreesClearReturnBuffersToState :=
+  @Yul.OpenGasAware.OpenXResultAgrees.clearReturnBuffers_toState
+
+abbrev openXResultAgreesOutcomeSafelyMatches :=
+  @Yul.OpenGasAware.OpenXResultAgrees.outcomeSafelyMatches
 
 abbrev openXTraceRelAbove :=
   Yul.OpenGasAware.OpenXTraceRelAbove
@@ -1464,6 +3577,9 @@ abbrev openXTraceRelAboveDoneOfPathDone :=
 abbrev openXFallthroughStopSuccessOfChecks :=
   @Yul.OpenGasAware.openX_fallthrough_stop_success_of_checks
 
+abbrev openXFallthroughStopSuccessOfExceptionNone :=
+  @Yul.OpenGasAware.openX_fallthrough_stop_success_of_exception_none
+
 abbrev openXTracePathDoneContinuationHalted :=
   @Yul.OpenGasAware.OpenXTracePathDoneContinuation.halted
 
@@ -1473,14 +3589,29 @@ abbrev openXTracePathDoneContinuationRunningOfFallthroughStop :=
 abbrev openXTracePathDoneContinuationRunningOfCleanFallthroughStop :=
   @Yul.OpenGasAware.OpenXTracePathDoneContinuation.running_of_clean_fallthrough_stop
 
+abbrev openXTracePathDoneContinuationRunningOfFallthroughStopClearReturnBuffers :=
+  @Yul.OpenGasAware.OpenXTracePathDoneContinuation.running_of_fallthrough_stop_clear_return_buffers
+
+abbrev openXTracePathDoneObservationOrFailure :=
+  Yul.OpenGasAware.OpenXTracePathDoneObservationOrFailure
+
+abbrev openXTracePathDoneObservationOrFailureRunningOfFallthroughStopClearReturnBuffers :=
+  @Yul.OpenGasAware.OpenXTracePathDoneObservationOrFailure.running_of_fallthrough_stop_clear_return_buffers
+
 abbrev openXCurrentGaslessCallContinueExistsOfStepChecks :=
   @Yul.OpenGasAware.openX_current_gasless_call_continue_exists_of_step_checks
+
+abbrev openXCurrentGaslessCallContinueExistsOfStepChecksActualPost :=
+  @Yul.OpenGasAware.openX_current_gasless_call_continue_exists_of_step_checks_actual_post
 
 abbrev openXTraceRelAboveCurrentEmittedPrimCallContinueOfStepChecks :=
   @Yul.OpenGasAware.openXTraceRelAbove_current_emitted_prim_call_continue_of_step_checks
 
 abbrev openXTraceRelAboveCurrentEmittedPrimCallContinueExistsOfStepChecks :=
   @Yul.OpenGasAware.openXTraceRelAbove_current_emitted_prim_call_continue_exists_of_step_checks
+
+abbrev openXTraceRelAboveCurrentEmittedPrimCallContinueExistsOfStepChecksActualPost :=
+  @Yul.OpenGasAware.openXTraceRelAbove_current_emitted_prim_call_continue_exists_of_step_checks_actual_post
 
 abbrev openXTraceRelAboveCurrentRunningContinueOfOpenStepAfterChecksDone :=
   @Yul.OpenGasAware.openXTraceRelAbove_current_running_continue_of_openStepAfterChecks_done
@@ -1497,8 +3628,26 @@ abbrev openXRunListRunningRelReady :=
 abbrev openXRunListHaltedRelReady :=
   Yul.OpenGasAware.OpenXRunListHaltedRelReady
 
+abbrev openXRunListRunningTraceObservationOrFailureReady :=
+  Yul.OpenGasAware.OpenXRunListRunningTraceObservationOrFailureReady
+
+abbrev openXRunListRunningTraceObservationOrFailureReadyCurrentEmittedPrimCallActualPost :=
+  @Yul.OpenGasAware.openXRunListRunningTraceObservationOrFailureReady_current_emitted_prim_call_actual_post
+
+abbrev openXRunListRunningTraceObservationOrFailureExistsReady :=
+  Yul.OpenGasAware.OpenXRunListRunningTraceObservationOrFailureExistsReady
+
+abbrev openXRunListHaltedTraceObservationOrFailureExistsReady :=
+  Yul.OpenGasAware.OpenXRunListHaltedTraceObservationOrFailureExistsReady
+
+abbrev openXRunListRunningTraceObservationOrFailureExistsReadyCurrentEmittedPrimCallActualPost :=
+  @Yul.OpenGasAware.openXRunListRunningTraceObservationOrFailureExistsReady_current_emitted_prim_call_actual_post
+
 abbrev openXRunListRunningRelReadyCurrentEmittedPrimCall :=
   @Yul.OpenGasAware.openXRunListRunningRelReady_current_emitted_prim_call
+
+abbrev openXRunListRunningRelReadyCurrentEmittedPrimCallActualPost :=
+  @Yul.OpenGasAware.openXRunListRunningRelReady_current_emitted_prim_call_actual_post
 
 abbrev openXRunListRunningRelReadyCurrentRunning :=
   @Yul.OpenGasAware.openXRunListRunningRelReady_current_running
@@ -1536,6 +3685,27 @@ abbrev openXBlockTraceRelReadyDoneContinuationReadyRunningOfFallthroughStop :=
 abbrev openXBlockTraceRelReadyDoneContinuationReadyRunningOfCleanFallthroughStop :=
   @Yul.OpenGasAware.OpenXBlockTraceRelReady.DoneContinuationReady.running_of_clean_fallthrough_stop
 
+abbrev openXBlockTraceRelReadyDoneContinuationReadyRunningOfFallthroughStopClearReturnBuffers :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.DoneContinuationReady.running_of_fallthrough_stop_clear_return_buffers
+
+abbrev openXBlockTraceRelReadyDoneObservationOrFailureReady :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.DoneObservationOrFailureReady
+
+abbrev openXBlockTraceRelReadyDoneObservationOrFailureReadyRunningOfFallthroughStopClearReturnBuffers :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.DoneObservationOrFailureReady.running_of_fallthrough_stop_clear_return_buffers
+
+abbrev openXBlockTraceRelReadyDoneReplayAndObservationOrFailureReady :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.DoneReplayAndObservationOrFailureReady
+
+abbrev openXBlockTraceRelReadyDoneReplayAndObservationOrFailureReadyRunningOfFallthroughStopClearReturnBuffers :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.DoneReplayAndObservationOrFailureReady.running_of_fallthrough_stop_clear_return_buffers
+
+abbrev openXBlockTraceRelReadyDoneAllOutcomesSafelyTracksOfFallthroughStopClearReturnBuffers :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.done_all_outcomes_safelyTracks_of_fallthrough_stop_clear_return_buffers
+
+abbrev openXBlockTraceRelReadyDoneAllOutcomesSafelyTracksTwoOfFallthroughStopClearReturnBuffers :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.done_all_outcomes_safelyTracks_two_of_fallthrough_stop_clear_return_buffers
+
 abbrev openXBlockTraceRelReadyRunningPathRelReady :=
   Yul.OpenGasAware.OpenXBlockTraceRelReady.RunningPathRelReady
 
@@ -1545,8 +3715,29 @@ abbrev openXBlockTraceRelReadyHaltedPathRelReady :=
 abbrev openXBlockTraceRelReadyRunListRunningReadyFor :=
   Yul.OpenGasAware.OpenXBlockTraceRelReady.RunListRunningReadyFor
 
+abbrev openXBlockTraceRelReadyRunListRunningTraceObservationOrFailureReadyFor :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.RunListRunningTraceObservationOrFailureReadyFor
+
+abbrev openXBlockTraceRelReadyRunListRunningTraceObservationOrFailureExistsReadyFor :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.RunListRunningTraceObservationOrFailureExistsReadyFor
+
 abbrev openXBlockTraceRelReadyRunListHaltedReadyFor :=
   Yul.OpenGasAware.OpenXBlockTraceRelReady.RunListHaltedReadyFor
+
+abbrev openXBlockTraceRelReadyRunListHaltedTraceObservationOrFailureExistsReadyFor :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.RunListHaltedTraceObservationOrFailureExistsReadyFor
+
+abbrev openXBlockTraceRelReadyRunningPathTraceObservationOrFailureExistsReady :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.RunningPathTraceObservationOrFailureExistsReady
+
+abbrev openXBlockTraceRelReadyHaltedPathTraceObservationOrFailureExistsReady :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.HaltedPathTraceObservationOrFailureExistsReady
+
+abbrev openXBlockTraceRelReadyRunningPathReplayAndTraceObservationOrFailureExistsReady :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.RunningPathReplayAndTraceObservationOrFailureExistsReady
+
+abbrev openXBlockTraceRelReadyHaltedPathReplayAndTraceObservationOrFailureExistsReady :=
+  Yul.OpenGasAware.OpenXBlockTraceRelReady.HaltedPathReplayAndTraceObservationOrFailureExistsReady
 
 abbrev openAssemblyOpenRunListResultResolvesClosedInvOfNoCallCreate :=
   @Yul.OpenAssembly.Target.openRunListResult_resolves_closed_inv_of_no_callCreate
@@ -1566,6 +3757,12 @@ abbrev openXRunListResultWithPositivePathContinuationReady :=
 abbrev openXRunListResultRunningWithPositivePathContinuationReady :=
   @Yul.OpenGasAware.openX_runListResult_running_with_positive_path_continuation_agrees_of_path_ready
 
+abbrev openXRunListResultRunningTraceObservationOrFailureExistsOfPathDecodeChecks :=
+  @Yul.OpenGasAware.openX_runListResult_running_traceObservationOrFailure_exists_of_path_decode_checks
+
+abbrev openXRunListResultHaltedTraceObservationOrFailureExistsOfPathDecodeChecks :=
+  @Yul.OpenGasAware.openX_runListResult_halted_traceObservationOrFailure_exists_of_path_decode_checks
+
 abbrev openXRunListResultRunningWithPositivePathContinuationReadyAndBudget :=
   @Yul.OpenGasAware.openX_runListResult_running_with_positive_path_continuation_agrees_of_path_ready_and_budget
 
@@ -1581,15 +3778,6 @@ abbrev openXBlockTraceRelReadyRunListRunningReadyForCurrentEmittedNoCall :=
 abbrev openXBlockTraceRelReadyRunListHaltedReadyForCurrentEmittedNoCall :=
   @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListHaltedReadyFor_current_emitted_no_call_of_path_ready
 
-abbrev openXBlockTraceRelReadyCurrentNoCallPathChecksReady :=
-  @Yul.OpenGasAware.OpenXBlockTraceRelReady.CurrentNoCallPathChecksReady
-
-abbrev openXBlockTraceRelReadyCurrentNoCallPathChecksReadyOfBlockPathChecks :=
-  @Yul.OpenGasAware.OpenXBlockTraceRelReady.CurrentNoCallPathChecksReady.of_blockPathChecks
-
-abbrev openXBlockTraceRelReadyCurrentNoCallPathChecksReadyOfCoreNoReturnDataCopyCurrentNoCall :=
-  @Yul.OpenGasAware.OpenXBlockTraceRelReady.CurrentNoCallPathChecksReady.of_core_noReturnDataCopy_current_no_call
-
 abbrev openXBlockTraceRelReadyRunListRunningReadyForCurrentEmittedNoCallOfPathChecks :=
   @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningReadyFor_current_emitted_no_call_of_path_checks_and_budget
 
@@ -1599,6 +3787,63 @@ abbrev openXBlockTraceRelReadyRunListHaltedReadyForCurrentEmittedNoCallOfPathChe
 abbrev openXBlockTraceRelReadyRunListRunningReadyForCurrentEmittedNoCallOfCurrentPathChecks :=
   @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningReadyFor_current_emitted_no_call_of_current_path_checks_and_budget
 
+abbrev openXBlockTraceRelReadyOpenXRunListRunningRelReadyCurrentEmittedNoCallOfCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openXRunListRunningRelReady_current_emitted_no_call_of_current_path_checks_and_budget
+
+abbrev openXBlockTraceRelReadyOpenXRunListRunningTraceObservationOrFailureExistsReadyCurrentEmittedNoCallOfCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openXRunListRunningTraceObservationOrFailureExistsReady_current_emitted_no_call_of_current_path_checks
+
+abbrev openXBlockTraceRelReadyRunListRunningTraceObservationOrFailureExistsReadyForCurrentEmittedNoCallOfCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningTraceObservationOrFailureExistsReadyFor_current_emitted_no_call_of_current_path_checks
+
+abbrev openXBlockTraceRelReadyRunListRunningTraceObservationOrFailureExistsReadyForCurrentEmittedNoCallOfPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningTraceObservationOrFailureExistsReadyFor_current_emitted_no_call_of_path_checks
+
+abbrev openXBlockTraceRelReadyRunListRunningReplayAndTraceObservationOrFailureExistsReadyForCurrentEmittedNoCallOfCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningReplayAndTraceObservationOrFailureExistsReadyFor_current_emitted_no_call_of_current_path_checks
+
+abbrev openXBlockTraceRelReadyRunListRunningReplayAndTraceObservationOrFailureExistsReadyForCurrentEmittedNoCallOfPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningReplayAndTraceObservationOrFailureExistsReadyFor_current_emitted_no_call_of_path_checks
+
+abbrev openXBlockTraceRelReadyOpenXRunListHaltedTraceObservationOrFailureExistsReadyCurrentEmittedNoCallOfCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openXRunListHaltedTraceObservationOrFailureExistsReady_current_emitted_no_call_of_current_path_checks
+
+abbrev openXBlockTraceRelReadyRunListHaltedTraceObservationOrFailureExistsReadyForCurrentEmittedNoCallOfCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListHaltedTraceObservationOrFailureExistsReadyFor_current_emitted_no_call_of_current_path_checks
+
+abbrev openXBlockTraceRelReadyRunListHaltedTraceObservationOrFailureExistsReadyForCurrentEmittedNoCallOfPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListHaltedTraceObservationOrFailureExistsReadyFor_current_emitted_no_call_of_path_checks
+
+abbrev openXBlockTraceRelReadyOpenXRunListHaltedRelReadyCurrentEmittedNoCallOfCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openXRunListHaltedRelReady_current_emitted_no_call_of_current_path_checks_and_budget
+
+abbrev openXBlockTraceRelReadyRunListRunningTraceObservationOrFailureExistsReadyForCurrentEmittedReadyCaseCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningTraceObservationOrFailureExistsReadyFor_current_emitted_of_ready_case_current_path_checks
+
+abbrev openXBlockTraceRelReadyRunListHaltedTraceObservationOrFailureExistsReadyForCurrentEmittedNoCallCase :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListHaltedTraceObservationOrFailureExistsReadyFor_current_emitted_of_no_call_case
+
+abbrev openXBlockTraceRelReadyRunListRunningReplayAndTraceObservationOrFailureExistsReadyForCurrentEmittedReadyCaseCurrentPathChecks :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningReplayAndTraceObservationOrFailureExistsReadyFor_current_emitted_of_ready_case_current_path_checks
+
+abbrev openXBlockTraceRelReadyRunListHaltedReplayAndTraceObservationOrFailureExistsReadyForCurrentEmittedNoCallCase :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListHaltedReplayAndTraceObservationOrFailureExistsReadyFor_current_emitted_of_no_call_case
+
+abbrev openXBlockTraceRelReadyRunningPathTraceObservationOrFailureExistsReadyOfCurrentEmittedReadyCases :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runningPathTraceObservationOrFailureExistsReady_of_current_emitted_ready_cases
+
+abbrev openXBlockTraceRelReadyHaltedPathTraceObservationOrFailureExistsReadyOfCurrentEmittedNoCallCases :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.haltedPathTraceObservationOrFailureExistsReady_of_current_emitted_no_call_cases
+
+abbrev openXBlockTraceRelReadyRunningPathReplayAndTraceObservationOrFailureExistsReadyOfCurrentEmittedReadyCases :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runningPathReplayAndTraceObservationOrFailureExistsReady_of_current_emitted_ready_cases
+
+abbrev openXBlockTraceRelReadyHaltedPathReplayAndTraceObservationOrFailureExistsReadyOfCurrentEmittedNoCallCases :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.haltedPathReplayAndTraceObservationOrFailureExistsReady_of_current_emitted_no_call_cases
+
+abbrev openXCurrentRunningInstrGasBudgetTraceReadyCaseRunListRunningReadyForCurrentEmittedCurrentPathChecks :=
+  @Yul.Program.OpenXCurrentRunningInstrGasBudgetTraceReadyCase.runListRunningReadyFor_current_emitted_current_path_checks
+
 abbrev openXBlockTraceRelReadyRunListHaltedReadyForCurrentEmittedNoCallOfCurrentPathChecks :=
   @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListHaltedReadyFor_current_emitted_no_call_of_current_path_checks_and_budget
 
@@ -1607,6 +3852,21 @@ abbrev openXBlockTraceRelReadyRunListRunningReadyForCurrentEmittedPrimCall :=
 
 abbrev openXBlockTraceRelReadyRunListRunningReadyForCurrentEmittedPrimCallOfRun :=
   @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningReadyFor_current_emitted_prim_call_of_run_step_checks
+
+abbrev openXBlockTraceRelReadyRunListRunningTraceObservationOrFailureReadyForCurrentEmittedPrimCall :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningTraceObservationOrFailureReadyFor_current_emitted_prim_call_of_step_checks
+
+abbrev openXBlockTraceRelReadyRunListRunningTraceObservationOrFailureReadyForCurrentEmittedPrimCallOfRun :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningTraceObservationOrFailureReadyFor_current_emitted_prim_call_of_run_step_checks
+
+abbrev openXBlockTraceRelReadyRunListRunningTraceObservationOrFailureExistsReadyForCurrentEmittedPrimCall :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningTraceObservationOrFailureExistsReadyFor_current_emitted_prim_call_of_step_checks
+
+abbrev openXBlockTraceRelReadyRunListRunningTraceObservationOrFailureExistsReadyForCurrentEmittedPrimCallOfRun :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningTraceObservationOrFailureExistsReadyFor_current_emitted_prim_call_of_run_step_checks
+
+abbrev openXBlockTraceRelReadyRunListRunningReplayAndTraceObservationOrFailureExistsReadyForCurrentEmittedPrimCallOfRun :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.runListRunningReplayAndTraceObservationOrFailureExistsReadyFor_current_emitted_prim_call_of_run_step_checks
 
 abbrev openXBlockTraceRelReadyCurrentEmittedPrimCallCodeStableOfTraceResponse :=
   @Yul.OpenGasAware.OpenXBlockTraceRelReady.openRunListResult_emitInstr_prim_call_running_preserves_code_of_trace_response_stable
@@ -1722,6 +3982,24 @@ abbrev openXBlockTraceRelReadyOfOpenBlockTrace :=
 abbrev openXBlockTraceRelReadyOfOpenBlockTraceWithDoneContinuation :=
   @Yul.OpenGasAware.OpenXBlockTraceRelReady.of_openBlockTrace_with_done_continuation
 
+abbrev openXBlockTraceRelReadyOpenBlockTraceResultTraceObservationOrFailureExistsOfReady :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openBlockTraceResult_traceObservationOrFailure_exists_of_ready
+
+abbrev openXBlockTraceRelReadyOpenBlockTraceResultTraceObservationOrFailureExistsOfCurrentEmittedReadyCases :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openBlockTraceResult_traceObservationOrFailure_exists_of_current_emitted_ready_cases
+
+abbrev openXBlockTraceRelReadyOpenBlockTraceResultTraceRelAboveAndTraceObservationOrFailureExistsOfReady :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openBlockTraceResult_traceRelAbove_and_traceObservationOrFailure_exists_of_ready
+
+abbrev openXBlockTraceRelReadyOpenBlockTraceResultReplayAboveAndTraceObservationOrFailureExistsOfReady :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openBlockTraceResult_replayAbove_and_traceObservationOrFailure_exists_of_ready
+
+abbrev openXBlockTraceRelReadyOpenBlockTraceResultCommittedSafeForAllGasOfReady :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openBlockTraceResult_committedSafeForAllGas_of_ready
+
+abbrev openXBlockTraceRelReadyOpenBlockTraceResultCommittedSafeForAllGasOfCurrentEmittedReadyCases :=
+  @Yul.OpenGasAware.OpenXBlockTraceRelReady.openBlockTraceResult_committedSafeForAllGas_of_current_emitted_ready_cases
+
 abbrev openXBlockTraceRelReadyOfTraceReadyForWithDoneContinuation :=
   @Yul.OpenGasAware.OpenXBlockTraceRelReady.of_traceReadyFor_with_done_continuation
 
@@ -1792,26 +4070,29 @@ abbrev recursiveBridgeTopToGasAwareEVMLiveLayoutOrAdaptiveSpillNoOutOfGas :=
 abbrev recursiveBridgeTopToGasAwareEVMLiveLayoutOrAdaptiveSpillExprResultNoOutOfGas :=
   @Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprResultContracts_sufficientGas_no_out_of_gas_X_of_liveLayoutOrScratchBoundary
 
-abbrev recursiveBridgeTopToGasAwareEVM :=
-  @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
-
 abbrev recursiveBridgeTopToGasAwareEVMExprResult :=
   @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprResultContracts_sufficientGas_X
 
-abbrev recursiveBridgeTopToGasAwareEVMNoOutOfGas :=
-  @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
+abbrev recursiveBridgeTopToGasAwareEVMStackGuardedPlannedPreallocEqSome :=
+  @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_eq_some
+
+abbrev recursiveBridgeTopToGasAwareEVMStackGuardedPlannedPreallocNoCallCreate :=
+  @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_noCallCreate
+
+abbrev recursiveBridgeTopToGasAwareEVMStackGuardedPlannedPreallocBlockReplayNoCallCreate :=
+  @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_blockReplayNoCallCreate
+
+abbrev recursiveBridgeTopToGasAwareEVMStackGuardedPlannedPreallocNoReturnDataCopy :=
+  @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_targetNoReturnDataCopy
+
+abbrev recursiveBridgeTopToGasAwareEVMStackGuardedPlannedPreallocBlockReplayNoReturnDataCopy :=
+  @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_blockReplayNoReturnDataCopy
 
 abbrev recursiveBridgeTopToGasAwareEVMExprResultNoOutOfGas :=
   @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprResultContracts_sufficientGas_no_out_of_gas_X
 
-abbrev recursiveBridgeTopToGasAwareEVMStackGuarded :=
-  @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
-
 abbrev recursiveBridgeTopToGasAwareEVMStackGuardedExprResult :=
   @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprResultContracts_sufficientGas_X
-
-abbrev recursiveBridgeTopToGasAwareEVMStackGuardedNoOutOfGas :=
-  @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
 
 abbrev recursiveBridgeTopToGasAwareEVMStackGuardedExprResultNoOutOfGas :=
   @Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprResultContracts_sufficientGas_no_out_of_gas_X
@@ -2424,74 +4705,6 @@ example
   recursiveBridgeTopToGasAwareEVMLiveLayoutOrAdaptiveSpillNoOutOfGas
     hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel hSourceFuelRun
     hCheckedCompileTarget hBoundary hInitialPerm
-
-example
-    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
-    {cfg : Yul.Reference.StateRelConfig}
-    {maxWords : Nat}
-    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
-    {program : Yul.Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {initial : Yul.EVMState}
-    {referenceResult : Yul.Reference.Result}
-    (hExprNoSuccessfulOutOfFuel :
-      Yul.Program.RecursiveBridgeExprNoOutOfFuelContracts cfg program)
-    (hInitialCodeImageRel :
-      Yul.Program.RecursiveBridgeInitialCodeImageRel cfg program target shared
-        initial)
-    (hSourceFuelRun :
-      ∃ sourceFuel,
-        Yul.Program.RecursiveBridgeSourceRun program shared store sourceFuel
-          referenceResult)
-    (hCheckedCompileTarget :
-      Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?
-          maxWords program =
-        some (range, asm, target))
-    (hInitialMemory :
-      Locals.SourceLowering.StateRel.SpillScratch.ScratchInitialMemoryEmpty
-        (Yul.Program.canonicalEntryState initial).toMachineState)
-    (hInitialPerm : initial.executionEnv.perm = true) :
-  StackGuardedSoundConclusion cfg range program asm target shared store initial
-      referenceResult :=
-  recursiveBridgeTopToGasAwareEVM hSpec
-    hExprNoSuccessfulOutOfFuel hInitialCodeImageRel hSourceFuelRun
-    hCheckedCompileTarget hInitialMemory hInitialPerm
-
-example
-    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
-    {cfg : Yul.Reference.StateRelConfig}
-    {maxWords : Nat}
-    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
-    {program : Yul.Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {initial : Yul.EVMState}
-    {referenceResult : Yul.Reference.Result}
-    (hExprNoSuccessfulOutOfFuel :
-      Yul.Program.RecursiveBridgeExprNoOutOfFuelContracts cfg program)
-    (hInitialCodeImageRel :
-      Yul.Program.RecursiveBridgeInitialCodeImageRel cfg program target shared
-        initial)
-    (hSourceFuelRun :
-      ∃ sourceFuel,
-        Yul.Program.RecursiveBridgeSourceRun program shared store sourceFuel
-          referenceResult)
-    (hCheckedCompileTarget :
-      Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?
-          maxWords program =
-        some (range, asm, target))
-    (hInitialMemory :
-      Locals.SourceLowering.StateRel.SpillScratch.ScratchInitialMemoryEmpty
-        (Yul.Program.canonicalEntryState initial).toMachineState)
-    (hInitialPerm : initial.executionEnv.perm = true) :
-  StackGuardedNoOutOfGasConclusion cfg range program asm target shared store
-      initial referenceResult :=
-  recursiveBridgeTopToGasAwareEVMNoOutOfGas hSpec
-    hExprNoSuccessfulOutOfFuel hInitialCodeImageRel hSourceFuelRun
-    hCheckedCompileTarget hInitialMemory hInitialPerm
 
 example
     {cfg : Yul.Reference.StateRelConfig}
@@ -3931,6 +6144,17 @@ example
     (ffi.ByteArray.zeroes n).data.toList = List.replicate n.toNat 0 :=
   Locals.SourceLowering.StateRel.SpillScratch.zeroPadding_data_toList
     hSpec n
+
+example :
+    Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec ↔
+      Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingToListSpec :=
+  Locals.SourceLowering.StateRel.SpillScratch.zeroPadding_iff_toList
+
+example
+    (hSpec :
+      Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingToListSpec) :
+    Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec :=
+  Locals.SourceLowering.StateRel.SpillScratch.zeroPadding_of_toList hSpec
 
 example (xs : List UInt8) :
     (List.toByteArray xs).data.toList = xs :=

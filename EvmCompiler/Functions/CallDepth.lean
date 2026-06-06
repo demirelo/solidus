@@ -491,6 +491,10 @@ def stackBudgetOk? (depth : Nat) : Bool :=
 def stackFrameWordSumBudgetOk? (frameWords : Nat) : Bool :=
   decide (16 + frameWords + 17 ≤ 1024)
 
+def stackFrameWordSumVisibleBudgetOk? (visibleWords frameWords : Nat) :
+    Bool :=
+  decide (visibleWords + frameWords + 17 ≤ 1024)
+
 structure StackDepthCheckResult (program : Program) : Type where
   depth : Nat
   checked : maxInternalCallDepth? program = some depth
@@ -500,6 +504,12 @@ structure StackFrameWordSumCheckResult (program : Program) : Type where
   frameWords : Nat
   checked : maxActiveFrameWords? program = some frameWords
   budget : 16 + frameWords + 17 ≤ 1024
+
+structure StackFrameWordSumVisibleCheckResult (program : Program)
+    (visibleWords : Nat) : Type where
+  frameWords : Nat
+  checked : maxActiveFrameWords? program = some frameWords
+  budget : visibleWords + frameWords + 17 ≤ 1024
 
 def stackDepthCheck? (program : Program) :
     Option (StackDepthCheckResult program) :=
@@ -527,6 +537,20 @@ def stackFrameWordSumCheck? (program : Program) :
       else
         none
 
+def stackFrameWordSumVisibleCheck? (program : Program)
+    (visibleWords : Nat) :
+    Option (StackFrameWordSumVisibleCheckResult program visibleWords) :=
+  match hFrameWords : maxActiveFrameWords? program with
+  | none => none
+  | some frameWords =>
+      if hBudget : visibleWords + frameWords + 17 ≤ 1024 then
+        some
+          { frameWords := frameWords
+            checked := hFrameWords
+            budget := hBudget }
+      else
+        none
+
 theorem stackDepthCheck?_eq_some
     {program : Program} {check : StackDepthCheckResult program}
     (_hCheck : stackDepthCheck? program = some check) :
@@ -541,6 +565,15 @@ theorem stackFrameWordSumCheck?_eq_some
       16 + check.frameWords + 17 ≤ 1024 := by
   exact ⟨check.checked, check.budget⟩
 
+theorem stackFrameWordSumVisibleCheck?_eq_some
+    {program : Program} {visibleWords : Nat}
+    {check : StackFrameWordSumVisibleCheckResult program visibleWords}
+    (_hCheck :
+      stackFrameWordSumVisibleCheck? program visibleWords = some check) :
+    maxActiveFrameWords? program = some check.frameWords ∧
+      visibleWords + check.frameWords + 17 ≤ 1024 := by
+  exact ⟨check.checked, check.budget⟩
+
 theorem StackDepthCheckResult.path_bound
     {program : Program} (check : StackDepthCheckResult program)
     {name : Name} {pathLen : Nat}
@@ -551,6 +584,15 @@ theorem StackDepthCheckResult.path_bound
 
 theorem StackFrameWordSumCheckResult.path_words_bound
     {program : Program} (check : StackFrameWordSumCheckResult program)
+    {name : Name} {pathWords : Nat}
+    (hRoot : name ∈ mainInternalCalls program)
+    (hPath : FunctionPathFrameWords program.functions name pathWords) :
+    pathWords ≤ check.frameWords :=
+  maxActiveFrameWords?_sound check.checked hRoot hPath
+
+theorem StackFrameWordSumVisibleCheckResult.path_words_bound
+    {program : Program} {visibleWords : Nat}
+    (check : StackFrameWordSumVisibleCheckResult program visibleWords)
     {name : Name} {pathWords : Nat}
     (hRoot : name ∈ mainInternalCalls program)
     (hPath : FunctionPathFrameWords program.functions name pathWords) :
@@ -762,6 +804,19 @@ theorem path {program : Program} :
 
 theorem words_le_check {program : Program}
     (check : StackFrameWordSumCheckResult program)
+    {active : List Name} {words : Nat}
+    (hWords : ActiveCallFrameWords program active words) :
+    words ≤ check.frameWords := by
+  rcases hWords.path with hEmpty | hPath
+  · rcases hEmpty with ⟨hActive, hWordsEq⟩
+    subst active
+    subst words
+    exact Nat.zero_le check.frameWords
+  · rcases hPath with ⟨root, _current, hRoot, _hLast, hPathTo⟩
+    exact check.path_words_bound hRoot hPathTo.toFunctionPathFrameWords
+
+theorem words_le_visible_check {program : Program} {visibleWords : Nat}
+    (check : StackFrameWordSumVisibleCheckResult program visibleWords)
     {active : List Name} {words : Nat}
     (hWords : ActiveCallFrameWords program active words) :
     words ≤ check.frameWords := by
@@ -1304,6 +1359,64 @@ theorem activeWordsBound {program : Program} :
             simpa [Structured.Preservation.Frame.returnStackWeight,
               Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hSum
 
+theorem returnStackWeight_le_check {program : Program}
+    {check : Program.StackFrameWordSumCheckResult program}
+    {active : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    (hContext :
+      ActiveHiddenFrameWordsContext program active hiddenReturns) :
+    Structured.Preservation.Frame.returnStackWeight hiddenReturns ≤
+      check.frameWords := by
+  rcases hContext.activeWordsBound with
+    ⟨words, hActiveWords, hReturnsWeight⟩
+  have hWordsLe :
+      words ≤ check.frameWords :=
+    Program.ActiveCallFrameWords.words_le_check check hActiveWords
+  exact Nat.le_trans hReturnsWeight hWordsLe
+
+theorem returnStackWeight_le_visible_check {program : Program}
+    {visibleWords : Nat}
+    {check : Program.StackFrameWordSumVisibleCheckResult program visibleWords}
+    {active : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    (hContext :
+      ActiveHiddenFrameWordsContext program active hiddenReturns) :
+    Structured.Preservation.Frame.returnStackWeight hiddenReturns ≤
+      check.frameWords := by
+  rcases hContext.activeWordsBound with
+    ⟨words, hActiveWords, hReturnsWeight⟩
+  have hWordsLe :
+      words ≤ check.frameWords :=
+    Program.ActiveCallFrameWords.words_le_visible_check check hActiveWords
+  exact Nat.le_trans hReturnsWeight hWordsLe
+
+theorem callersWordsLe_programMax {program : Program}
+    {active : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    (hContext :
+      ActiveHiddenFrameWordsContext program active hiddenReturns) :
+    ∀ frame, frame ∈ hiddenReturns →
+      frame.callerStack.length + 1 ≤
+        Program.maxSourceReturnFrameWords program := by
+  induction hContext with
+  | main =>
+      intro frame hMem
+      simp at hMem
+  | root _hRoot hCalleeFind hFrame =>
+      intro frame hMem
+      simp at hMem
+      subst frame
+      exact Nat.le_trans hFrame
+        (Program.sourceReturnFrameWords_le_max_of_find? hCalleeFind)
+  | call _hContext _hCaller _hCallerFind _hCall hCalleeFind hFrame ih =>
+      intro frame hMem
+      simp at hMem
+      rcases hMem with hHead | hTail
+      · subst frame
+        exact Nat.le_trans hFrame
+          (Program.sourceReturnFrameWords_le_max_of_find? hCalleeFind)
+      · exact ih frame hTail
+
 theorem afterReturn {program : Program}
     {active : List Name} {callee : Name}
     {frame : Structured.ReturnDest}
@@ -1365,6 +1478,29 @@ theorem sourceStackHeadroom {program : Program}
   have hBudget : 16 + check.frameWords + 17 ≤ 1024 := check.budget
   omega
 
+theorem sourceStackHeadroom_of_visible_check {program : Program}
+    {visibleWords : Nat}
+    {check : Program.StackFrameWordSumVisibleCheckResult program visibleWords}
+    {active : List Name} {source : Structured.RunState}
+    (hContext :
+      ActiveHiddenFrameWordsContext program active source.returns)
+    (hVisible : source.evm.stack.length ≤ visibleWords) :
+    Structured.Preservation.Frame.SourceStackHeadroom source := by
+  unfold Structured.Preservation.Frame.SourceStackHeadroom
+  unfold Structured.Preservation.Frame.sourceStackWeight
+  rcases hContext.activeWordsBound with
+    ⟨words, hActiveWords, hReturnsWeight⟩
+  have hWordsLe :
+      words ≤ check.frameWords :=
+    Program.ActiveCallFrameWords.words_le_visible_check check hActiveWords
+  have hReturnsLe :
+      Structured.Preservation.Frame.returnStackWeight source.returns ≤
+        check.frameWords :=
+    Nat.le_trans hReturnsWeight hWordsLe
+  have hBudget : visibleWords + check.frameWords + 17 ≤ 1024 :=
+    check.budget
+  omega
+
 theorem sourceStackHeadroom_of_sourceDirectStateRel {program : Program}
     {check : Program.StackFrameWordSumCheckResult program}
     {active layout : List Name}
@@ -1394,6 +1530,53 @@ theorem sourceStackHeadroom_of_sourceDirectStateRel {program : Program}
     Nat.le_trans hReturnsWeight hWordsLe
   have hBudget : 16 + check.frameWords + 17 ≤ 1024 := check.budget
   omega
+
+theorem sourceStackHeadroom_of_sourceDirectStateRel_visible_check
+    {program : Program} {visibleWords : Nat}
+    {check : Program.StackFrameWordSumVisibleCheckResult program visibleWords}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (hContext :
+      ActiveHiddenFrameWordsContext program active hiddenReturns)
+    (hLayout : layout.length ≤ visibleWords)
+    (hRel :
+      SourceDirect.StateRel layout hiddenReturns source target) :
+    Structured.Preservation.Frame.SourceStackHeadroom target := by
+  unfold Structured.Preservation.Frame.SourceStackHeadroom
+  unfold Structured.Preservation.Frame.sourceStackWeight
+  rw [hRel.2]
+  rcases hRel.1 with ⟨_hSharedRel, hStackRel⟩
+  rcases hContext.activeWordsBound with
+    ⟨words, hActiveWords, hReturnsWeight⟩
+  have hVisible : target.evm.stack.length ≤ visibleWords := by
+    rw [hStackRel.1]
+    exact hLayout
+  have hWordsLe :
+      words ≤ check.frameWords :=
+    Program.ActiveCallFrameWords.words_le_visible_check check hActiveWords
+  have hReturnsLe :
+      Structured.Preservation.Frame.returnStackWeight hiddenReturns ≤
+        check.frameWords :=
+    Nat.le_trans hReturnsWeight hWordsLe
+  have hBudget : visibleWords + check.frameWords + 17 ≤ 1024 :=
+    check.budget
+  omega
+
+theorem sourceStackHeadroom_of_sourceDirectStateRel_layout_check
+    {program : Program}
+    {active layout : List Name}
+    {check :
+      Program.StackFrameWordSumVisibleCheckResult program layout.length}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (hContext :
+      ActiveHiddenFrameWordsContext program active hiddenReturns)
+    (hRel :
+      SourceDirect.StateRel layout hiddenReturns source target) :
+    Structured.Preservation.Frame.SourceStackHeadroom target :=
+  sourceStackHeadroom_of_sourceDirectStateRel_visible_check
+    (check := check) hContext (Nat.le_refl layout.length) hRel
 
 end ActiveHiddenFrameWordsContext
 
@@ -2111,6 +2294,12 @@ theorem afterAttachReturns? {program : Program}
 
 end SourceDirectBaseContext
 
+/--
+Compatibility context for older proofs that only remember a uniform per-frame
+word bound.  Prefer `SourceDirectWeightedFrameContext` for new stack checks:
+it keeps the exact hidden-return frame accounting along the active source call
+path and only projects to this coarser shape when an older theorem needs it.
+-/
 structure SourceDirectFrameWordsContext (program : Program)
     (frameWords : Nat)
     (active layout : List Name)
@@ -2525,6 +2714,19 @@ structure SourceDirectWeightedFrameContext (program : Program)
 
 namespace SourceDirectWeightedFrameContext
 
+theorem toFrameWordsContextProgramMax {program : Program}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (hContext :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target) :
+    SourceDirectFrameWordsContext program
+      (Program.maxSourceReturnFrameWords program)
+      active layout hiddenReturns source target where
+  base := hContext.base
+  callersWordsLe := hContext.hidden.callersWordsLe_programMax
+
 theorem sourceStackWeight_le_layout_plus_activeWords {program : Program}
     {active layout : List Name}
     {hiddenReturns : List Structured.ReturnDest}
@@ -2545,6 +2747,49 @@ theorem sourceStackWeight_le_layout_plus_activeWords {program : Program}
   rw [hStackRel.1]
   exact Nat.add_le_add_left hReturnsWeight layout.length
 
+theorem returnStackWeight_le_checked_frameWords {program : Program}
+    {check : Program.StackFrameWordSumCheckResult program}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (hContext :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target) :
+    Structured.Preservation.Frame.returnStackWeight hiddenReturns ≤
+      check.frameWords :=
+  hContext.hidden.returnStackWeight_le_check (check := check)
+
+theorem returnStackWeight_le_visible_checked_frameWords
+    {program : Program} {visibleWords : Nat}
+    {check : Program.StackFrameWordSumVisibleCheckResult program visibleWords}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (hContext :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target) :
+    Structured.Preservation.Frame.returnStackWeight hiddenReturns ≤
+      check.frameWords :=
+  hContext.hidden.returnStackWeight_le_visible_check (check := check)
+
+theorem sourceStackWeight_le_layout_plus_checked_frameWords
+    {program : Program}
+    {check : Program.StackFrameWordSumCheckResult program}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (hContext :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target) :
+    Structured.Preservation.Frame.sourceStackWeight target ≤
+      layout.length + check.frameWords := by
+  rcases hContext.sourceStackWeight_le_layout_plus_activeWords with
+    ⟨words, hActiveWords, hWeight⟩
+  have hWordsLe :
+      words ≤ check.frameWords :=
+    Program.ActiveCallFrameWords.words_le_check check hActiveWords
+  omega
+
 theorem sourceStackWeight_le_checked_frameWords {program : Program}
     {check : Program.StackFrameWordSumCheckResult program}
     {active layout : List Name}
@@ -2555,12 +2800,28 @@ theorem sourceStackWeight_le_checked_frameWords {program : Program}
         source target) :
     Structured.Preservation.Frame.sourceStackWeight target ≤
       16 + check.frameWords := by
+  have hWeight :=
+    hContext.sourceStackWeight_le_layout_plus_checked_frameWords
+      (check := check)
+  have hLayoutLe : layout.length ≤ 16 := hContext.base.layoutLength
+  omega
+
+theorem sourceStackWeight_le_layout_plus_visible_checked_frameWords
+    {program : Program} {visibleWords : Nat}
+    {check : Program.StackFrameWordSumVisibleCheckResult program visibleWords}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (hContext :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target) :
+    Structured.Preservation.Frame.sourceStackWeight target ≤
+      layout.length + check.frameWords := by
   rcases hContext.sourceStackWeight_le_layout_plus_activeWords with
     ⟨words, hActiveWords, hWeight⟩
   have hWordsLe :
       words ≤ check.frameWords :=
-    Program.ActiveCallFrameWords.words_le_check check hActiveWords
-  have hLayoutLe : layout.length ≤ 16 := hContext.base.layoutLength
+    Program.ActiveCallFrameWords.words_le_visible_check check hActiveWords
   omega
 
 theorem sourceStackHeadroom {program : Program}
@@ -2575,6 +2836,59 @@ theorem sourceStackHeadroom {program : Program}
   ActiveHiddenFrameWordsContext.sourceStackHeadroom_of_sourceDirectStateRel
     (check := check) hContext.hidden hContext.base.layoutLength
     hContext.base.stateRel
+
+theorem sourceStackHeadroom_of_visible_check
+    {program : Program} {visibleWords : Nat}
+    {check : Program.StackFrameWordSumVisibleCheckResult program visibleWords}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (hContext :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target)
+    (hLayoutVisible : layout.length ≤ visibleWords) :
+    Structured.Preservation.Frame.SourceStackHeadroom target := by
+  unfold Structured.Preservation.Frame.SourceStackHeadroom
+  have hWeight :
+      Structured.Preservation.Frame.sourceStackWeight target ≤
+        layout.length + check.frameWords :=
+    hContext.sourceStackWeight_le_layout_plus_visible_checked_frameWords
+      (check := check)
+  have hBudget : visibleWords + check.frameWords + 17 ≤ 1024 :=
+    check.budget
+  omega
+
+theorem sourceStackHeadroom_of_layout_check
+    {program : Program}
+    {active layout : List Name}
+    {check :
+      Program.StackFrameWordSumVisibleCheckResult program layout.length}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (hContext :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target) :
+    Structured.Preservation.Frame.SourceStackHeadroom target :=
+  hContext.sourceStackHeadroom_of_visible_check (check := check)
+    (Nat.le_refl layout.length)
+
+theorem sourceStackHeadroom_of_layout_budget {program : Program}
+    {check : Program.StackFrameWordSumCheckResult program}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (hContext :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target)
+    (hBudget : layout.length + check.frameWords + 17 ≤ 1024) :
+    Structured.Preservation.Frame.SourceStackHeadroom target := by
+  unfold Structured.Preservation.Frame.SourceStackHeadroom
+  have hWeight :
+      Structured.Preservation.Frame.sourceStackWeight target ≤
+        layout.length + check.frameWords :=
+    hContext.sourceStackWeight_le_layout_plus_checked_frameWords
+      (check := check)
+  omega
 
 def main {program : Program}
     {layout : List Name}
@@ -2814,7 +3128,142 @@ theorem sourceStackHeadroom_of_weightedContext {program : Program}
   SourceDirectWeightedFrameContext.sourceStackHeadroom
     (check := bound.check) context
 
+theorem sourceStackHeadroom_of_weightedContext_layout_budget
+    {program : Program}
+    (bound : SourceFrameWordSumResourceBound program)
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (context :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target)
+    (hBudget : layout.length + bound.check.frameWords + 17 ≤ 1024) :
+    Structured.Preservation.Frame.SourceStackHeadroom target :=
+  SourceDirectWeightedFrameContext.sourceStackHeadroom_of_layout_budget
+    (check := bound.check) context hBudget
+
+theorem returnStackWeight_le_checked_frameWords_of_weightedContext
+    {program : Program}
+    (bound : SourceFrameWordSumResourceBound program)
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (context :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target) :
+    Structured.Preservation.Frame.returnStackWeight hiddenReturns ≤
+      bound.check.frameWords :=
+  SourceDirectWeightedFrameContext.returnStackWeight_le_checked_frameWords
+    (check := bound.check) context
+
+theorem sourceStackWeight_le_layout_plus_checked_frameWords_of_weightedContext
+    {program : Program}
+    (bound : SourceFrameWordSumResourceBound program)
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (context :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target) :
+    Structured.Preservation.Frame.sourceStackWeight target ≤
+      layout.length + bound.check.frameWords :=
+  SourceDirectWeightedFrameContext.sourceStackWeight_le_layout_plus_checked_frameWords
+    (check := bound.check) context
+
+theorem sourceStackWeight_le_checked_frameWords_of_weightedContext
+    {program : Program}
+    (bound : SourceFrameWordSumResourceBound program)
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (context :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target) :
+    Structured.Preservation.Frame.sourceStackWeight target ≤
+      16 + bound.check.frameWords :=
+  SourceDirectWeightedFrameContext.sourceStackWeight_le_checked_frameWords
+    (check := bound.check) context
+
 end SourceFrameWordSumResourceBound
+
+structure SourceFrameWordSumVisibleResourceBound (program : Program)
+    (visibleWords : Nat) : Type where
+  check : Program.StackFrameWordSumVisibleCheckResult program visibleWords
+
+namespace SourceFrameWordSumVisibleResourceBound
+
+theorem checked {program : Program} {visibleWords : Nat}
+    (bound :
+      SourceFrameWordSumVisibleResourceBound program visibleWords) :
+    Program.maxActiveFrameWords? program = some bound.check.frameWords :=
+  bound.check.checked
+
+theorem budget {program : Program} {visibleWords : Nat}
+    (bound :
+      SourceFrameWordSumVisibleResourceBound program visibleWords) :
+    visibleWords + bound.check.frameWords + 17 ≤ 1024 :=
+  bound.check.budget
+
+theorem sourceStackHeadroom_of_weightedContext
+    {program : Program} {visibleWords : Nat}
+    (bound :
+      SourceFrameWordSumVisibleResourceBound program visibleWords)
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (context :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target)
+    (hLayoutVisible : layout.length ≤ visibleWords) :
+    Structured.Preservation.Frame.SourceStackHeadroom target :=
+  SourceDirectWeightedFrameContext.sourceStackHeadroom_of_visible_check
+    (check := bound.check) context hLayoutVisible
+
+theorem sourceStackHeadroom_of_weightedContext_layout_check
+    {program : Program}
+    {active layout : List Name}
+    (bound :
+      SourceFrameWordSumVisibleResourceBound program layout.length)
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (context :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target) :
+    Structured.Preservation.Frame.SourceStackHeadroom target :=
+  SourceDirectWeightedFrameContext.sourceStackHeadroom_of_layout_check
+    (check := bound.check) context
+
+theorem returnStackWeight_le_checked_frameWords_of_weightedContext
+    {program : Program} {visibleWords : Nat}
+    (bound :
+      SourceFrameWordSumVisibleResourceBound program visibleWords)
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (context :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target) :
+    Structured.Preservation.Frame.returnStackWeight hiddenReturns ≤
+      bound.check.frameWords :=
+  SourceDirectWeightedFrameContext.returnStackWeight_le_visible_checked_frameWords
+    (check := bound.check) context
+
+theorem sourceStackWeight_le_layout_plus_checked_frameWords_of_weightedContext
+    {program : Program} {visibleWords : Nat}
+    (bound :
+      SourceFrameWordSumVisibleResourceBound program visibleWords)
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Source.State} {target : Structured.RunState}
+    (context :
+      SourceDirectWeightedFrameContext program active layout hiddenReturns
+        source target) :
+    Structured.Preservation.Frame.sourceStackWeight target ≤
+      layout.length + bound.check.frameWords :=
+  SourceDirectWeightedFrameContext.sourceStackWeight_le_layout_plus_visible_checked_frameWords
+    (check := bound.check) context
+
+end SourceFrameWordSumVisibleResourceBound
 
 namespace Program
 
@@ -2846,6 +3295,42 @@ theorem sourceFrameWordSumResourceBound?_sound
       16 + bound.check.frameWords + 17 ≤ 1024 := by
   have hCheck := sourceFrameWordSumResourceBound?_eq_some hBound
   exact stackFrameWordSumCheck?_eq_some hCheck
+
+def sourceFrameWordSumVisibleResourceBound? (program : Program)
+    (visibleWords : Nat) :
+    Option (SourceFrameWordSumVisibleResourceBound program visibleWords) :=
+  match stackFrameWordSumVisibleCheck? program visibleWords with
+  | none => none
+  | some check => some { check := check }
+
+theorem sourceFrameWordSumVisibleResourceBound?_eq_some
+    {program : Program} {visibleWords : Nat}
+    {bound : SourceFrameWordSumVisibleResourceBound program visibleWords}
+    (hBound :
+      sourceFrameWordSumVisibleResourceBound? program visibleWords =
+        some bound) :
+    stackFrameWordSumVisibleCheck? program visibleWords =
+      some bound.check := by
+  unfold sourceFrameWordSumVisibleResourceBound? at hBound
+  cases hCheck : stackFrameWordSumVisibleCheck? program visibleWords with
+  | none =>
+      simp [hCheck] at hBound
+  | some check =>
+      simp [hCheck] at hBound
+      cases hBound
+      rfl
+
+theorem sourceFrameWordSumVisibleResourceBound?_sound
+    {program : Program} {visibleWords : Nat}
+    {bound : SourceFrameWordSumVisibleResourceBound program visibleWords}
+    (hBound :
+      sourceFrameWordSumVisibleResourceBound? program visibleWords =
+        some bound) :
+    Program.maxActiveFrameWords? program = some bound.check.frameWords ∧
+      visibleWords + bound.check.frameWords + 17 ≤ 1024 := by
+  have hCheck :=
+    sourceFrameWordSumVisibleResourceBound?_eq_some hBound
+  exact stackFrameWordSumVisibleCheck?_eq_some hCheck
 
 end Program
 
