@@ -19,7 +19,7 @@ route is not vacuous with respect to terminal `H_return`.
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-06 15:26 CEST.
+Last updated: 2026-06-06 15:36 CEST.
 
 ### Current Assessment
 
@@ -33,14 +33,14 @@ It packages the exact final checked compiler result together with the source
 run, initial code-image relation, and target runtime, derives the older
 canonical CALL-family top assumptions from checked compilation, and exposes
 named final-observation / at-gas / outcome-safety / result-or-failure
-conclusion wrappers over the no-artificial-cap external-world carrier.
+conclusion wrappers over the external-world carrier.
 `LayerAudit` pins this stronger top package and wrappers, so the preferred
 audit surface no longer asks callers to traffic in route-local replay/layout
 proof artifacts.
 
 2026-06-06 15:22 CEST addendum: tightened the audit surface around that top
 package. `LayerAudit` no longer advertises the lower unbundled
-`compileChecked...openXContractLivenessAndSafety...NoArtificialCap...`
+`compileChecked...openXContractLivenessAndSafety...ExternalWorld...`
 endpoint aliases; the checked gas audit files now pin the top-package wrappers
 directly. The remaining wrapper inputs are classified as non-generated
 boundaries: `SourceOpenInternalUserCallBodyFuelAdequateUpTo` is a source-fuel
@@ -48,7 +48,7 @@ adequacy condition for selected internal user-call body clocks,
 `SourceOpenDispatcherTraceAccepted` selects a finite source-open trace whose
 responses preserve the shared-state relation, `initial.executionEnv.perm = true`
 is the canonical entry/static-mode permission condition, and
-`OpenXCallFamilyNoArtificialCapExternalWorldReadyFor` is the open-world
+`OpenXCallFamilyExternalWorldReadyFor` is the open-world
 response-gas/result-tracking contract. None is a route-local replay, layout,
 certificate, or compiler-generated table.
 
@@ -59,10 +59,23 @@ This is the current full cleanup pass before further deletion. The rule is:
 route records and replay adapters may remain in `OpenRuntime` only when they
 are still proof plumbing for the public top wrappers.
 
-- [x] Lower no-artificial-cap compiled endpoint aliases:
+- [x] Lower external-world compiled endpoint aliases:
   removed the four `LayerAudit` aliases pointing directly at the unbundled
-  `compileChecked...openXContractLivenessAndSafety...sourceBridgeNoArtificialCap...`
+  `compileChecked...openXContractLivenessAndSafety...sourceBridgeExternalWorld...`
   theorems, and repointed the gas audit files to the top-assumption wrappers.
+- [x] Lower external-world compiled endpoint declarations:
+  the same four unbundled `OpenRuntime` declarations are now only same-file
+  inputs to the top-package wrappers, plus historical doc mentions. Internalize
+  them as private proof plumbing so the public namespace presents the compact
+  top-assumption API instead of two parallel endpoint families.
+- [x] Historically contingent old gas-route naming:
+  renamed the live API to say what it proves rather than what failed route it
+  replaced: the `OpenRuntime` carrier/namespace is now
+  `OpenXCallFamilyExternalWorldReadyFor`, with matching `LayerAudit`
+  abbreviations, renamed gas audit artifacts, and private compiled endpoint
+  suffixes using `sourceBridgeExternalWorldReady`.
+  Keep old wording only in historical log entries that describe earlier route
+  changes.
 - [x] Remaining global-response-gas replay alias:
   `openXReplayAboveOfSourceOpenDispatcherCallFamilyAssemblyInferredBoundStackSafeNoReturnDataCopySourceBridgeGlobalResponseGasReadyNoReturnDataCopy`
   was a lower replay-only pin. Removed it from `LayerAudit`; the underlying
@@ -91,9 +104,9 @@ are still proof plumbing for the public top wrappers.
 - [x] Lower gas-ready/result-tracking wrapper families:
   the `sourceBridgeGasReady`, `sourceBridgeGasStrictReady`,
   `sourceBridgeGlobalResponseGasReady`, and result/outcome/committed-safety
-  theorem families in `OpenRuntime` are adapters beneath the no-artificial-cap
+  theorem families in `OpenRuntime` are adapters beneath the external-world
   endpoint. They are no longer pinned in `LayerAudit`; keep them internal
-  because the top no-artificial-cap wrappers still depend on this adapter chain.
+  because the top external-world wrappers still depend on this adapter chain.
 - [x] Raw generated-evidence terminal-prelude aliases:
   the terminal path already quarantines older helpers under explicit
   `RawGeneratedEvidence` names. Current search finds no live `LayerAudit` or
@@ -105,9 +118,9 @@ are still proof plumbing for the public top wrappers.
   roadmap object note already records the canonical-terminal `H_return` fact.
   Keep the generic theorem for custom observation relations.
 
-2026-06-06 13:08 CEST addendum: the no-artificial-cap CALL gas liveness/safety
+2026-06-06 13:08 CEST addendum: the external-world CALL gas liveness/safety
 goal is completion-audited. The public carrier
-`OpenXCallFamilyNoArtificialCapExternalWorldReadyFor` bundles response-gas
+`OpenXCallFamilyExternalWorldReadyFor` bundles response-gas
 admissibility with strict-or-all-forwarded-OOG result tracking. Ordinary
 continuing CALL responses must agree on success, return data, and opaque
 reentrant mutation; a non-equivalent response pair is allowed only through the
@@ -122,7 +135,7 @@ scoped `git diff --check` passed; the endpoint axiom audit reports only
 `[propext, Classical.choice, Quot.sound]`.
 
 2026-06-06 13:06 CEST addendum: CALL-family proof core is now at the wrap-up
-boundary. The canonical no-artificial-cap endpoints for final observation,
+boundary. The canonical external-world endpoints for final observation,
 gas-indexed replay/committed safety, outcome safety, and result-or-failure all
 typecheck after the CREATE/CREATE2 live-corridor changes and report only
 `[propext, Classical.choice, Quot.sound]`. The remaining visible premises are
@@ -131,12 +144,12 @@ classified as source/resource/open-world or target-entry inputs:
 `RecursiveBridgeSourceRun`, checked compile success, `RecursiveBridgeTargetRuntime`,
 `SourceOpenInternalUserCallBodyFuelAdequateUpTo`,
 `SourceOpenDispatcherTraceAccepted`, initial permission,
-`OpenXCallFamilyNoArtificialCapExternalWorldReadyFor`, and compiler/gas fuel
+`OpenXCallFamilyExternalWorldReadyFor`, and compiler/gas fuel
 bounds. `LayerAudit` no longer pins the CALL-family route-assumption records or
 their projection lemmas as public audit targets; the public surface starts at
-the no-artificial-cap endpoint family.
+the external-world endpoint family.
 
-2026-06-06 13:02 CEST addendum: the no-artificial-cap gas checkpoint now
+2026-06-06 13:02 CEST addendum: the external-world gas checkpoint now
 builds through the CREATE/CREATE2 recursive-bridge fallout. The repaired
 `RecursiveBridgeSupport` keeps CALL admissibility facts behind no-create event
 premises and threads explicit create branches through the open-result bind,
@@ -151,7 +164,7 @@ EvmCompiler.LayerAudit` both passed, the gas axiom audit reports only
 `RecursiveBridgeSupport` CREATE/CREATE2 as the active blocker is superseded.
 
 2026-06-06 12:17 CEST addendum: after the concurrent CREATE/CREATE2
-`OpenEvent` changes, the no-artificial-cap gas surface is coherent again.
+`OpenEvent` changes, the external-world gas surface is coherent again.
 Focused source checks pass for `EvmCompiler/Yul/OpenGasAware.lean`,
 `EvmCompiler/Yul/OpenRuntime.lean`, and `EvmCompiler/LayerAudit.lean`; the
 `OpenRuntime` olean was refreshed to remove stale `OpenEvent.mk` theorem-type
@@ -172,8 +185,8 @@ snapshot.
 
 2026-06-06 10:03 CEST addendum: added and pinned the direct arbitrary-gas
 outcome-safety endpoint
-`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyOutcomeSafetyAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy`.
-It consumes the no-artificial-cap external-world carrier and exposes, for any
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyOutcomeSafetyAtGas_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy`.
+It consumes the external-world carrier and exposes, for any
 UInt256 gas budget, an `OpenXOutcomeResult` whose outcome satisfies
 `XRunOutcomeSafelyMatches` the target final observation; this is the most direct
 formal statement of the low-gas safety side. Also added and pinned
@@ -191,7 +204,7 @@ the touched gas modules rebuild. Aristotle job
 
 2026-06-06 09:45 CEST addendum: added and pinned the direct compiled
 result-or-failure endpoint
-`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyResultOrFailureAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy`.
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyResultOrFailureAtGas_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy`.
 For every UInt256 gas budget, it returns either a successful gas-aware EVM
 result with the same committed final observation as the target result, or a
 revert/out-of-gas failure outcome. Verification: `lake build
@@ -202,8 +215,8 @@ EvmCompiler.LayerAudit`, scoped proof-hole/whitespace scans, scoped
 
 2026-06-06 09:30 CEST addendum: added and pinned the direct gas-indexed
 compiled endpoint
-`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy`.
-It consumes the single no-artificial-cap external-world carrier and returns the
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyAtGas_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy`.
+It consumes the single external-world carrier and returns the
 same full-contract witnesses as the canonical endpoint, plus immediate
 gas-indexed consequences: `gasBound <= gas` and `gas < UInt256.size` imply
 `OpenXReplayAt`, while `gas < UInt256.size` implies
@@ -228,14 +241,14 @@ scan, scoped `git diff --check`, and direct axiom audits passed; both
 projection lemmas report only `[propext, Classical.choice, Quot.sound]`.
 
 2026-06-06 09:15 CEST update: added and pinned
-`OpenXCallFamilyNoArtificialCapExternalWorldReadyFor`, a single external-world
+`OpenXCallFamilyExternalWorldReadyFor`, a single external-world
 carrier bundling global response-gas admissibility with
 strict-or-all-forwarded-child-OOG response result tracking. Added the compiled
 endpoint
-`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy`,
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy`,
 which consumes that carrier and returns the full-contract
 `OpenXContractLivenessAndSafetyFinalObservation` conclusion. This keeps the
-public theorem shape aligned with the no-artificial-cap strategy while still
+public theorem shape aligned with the external-world strategy while still
 making the open-world CALL assumption explicit. Aristotle job
 `9b27f621-5ae0-4b3b-977c-f79b7596bd5a` completed; disposition: no merge because
 the artifact is stale relative to the local carrier eliminators and compiled
@@ -281,14 +294,14 @@ advertised compiled CALL-family final-observation surface is now the packaged
 Lean check, `lake build EvmCompiler.LayerAudit`, removed-alias grep,
 contract-alias presence grep, and `git diff --check` passed.
 2026-06-06 09:22 CEST addendum: added and pinned constructors
-`OpenXCallFamilyNoArtificialCapExternalWorldReadyFor.of_strict`,
+`OpenXCallFamilyExternalWorldReadyFor.of_strict`,
 `.of_resultTracking`, `.of_outcome_tracking`, and
 `.of_committed_response_safety`, plus the bundled-carrier CALL response
 dichotomy projections. Then removed the older multi-premise compiled contract
 pins (`GlobalResponseGasStrictReady`, `ResultTrackingReady`,
 `OutcomeTrackingReady`, and `CommittedResponseSafetyReady`) from `LayerAudit`.
 The audit-visible final CALL-family endpoint is now the single
-`sourceBridgeNoArtificialCapExternalWorldReady` compiled theorem, with
+`sourceBridgeExternalWorldReady` compiled theorem, with
 constructors for common external-world response models and eliminators from the
 returned `OpenXContractLivenessAndSafetyFinalObservation`. Verification:
 `lake build EvmCompiler.Yul.OpenRuntime EvmCompiler.LayerAudit`, scoped
@@ -296,12 +309,12 @@ proof-hole scan, `git diff --check`, and direct axiom audits all passed; axiom
 audits report only `[propext, Classical.choice, Quot.sound]`.
 2026-06-06 09:23 CEST audit: the canonical compiled CALL-family endpoint is
 now
-`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy`.
+`compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy`.
 Its remaining inputs are source/open-world/resource boundary premises:
 semantic contracts, initial code-image relation, the source run, checked
 compile equality, target runtime entry facts, internal body-fuel adequacy,
 source trace acceptance, initial non-static permission, the single
-`OpenXCallFamilyNoArtificialCapExternalWorldReadyFor` external-world carrier,
+`OpenXCallFamilyExternalWorldReadyFor` external-world carrier,
 and `minimumCompilerFuel`. The canonical endpoint no longer exposes replay,
 current-instruction, layout, callback, per-trace response-gas, or
 multi-premise response-tracking proof artifacts.

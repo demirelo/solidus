@@ -27728,7 +27728,7 @@ theorem sourceOpenContractLivenessAndSafetyFinalObservationOrSpillOpenReplayConc
 end RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
 
 /--
-External-world package for the no-artificial-cap CALL gas theorem.
+External-world package for the CALL gas liveness/safety theorem.
 
 The gas field says source and target CALLs use a response-gas model that can
 produce enough caller gas when the enclosing execution has enough gas.  The
@@ -27737,7 +27737,7 @@ responses must agree on caller-visible committed effects, and the only
 asymmetric response case is all-forwarded child out-of-gas routed through the
 whole-run final-observation tracker.
 -/
-structure OpenXCallFamilyNoArtificialCapExternalWorldReadyFor
+structure OpenXCallFamilyExternalWorldReadyFor
     (asm : Assembly.Program) (target : Assembly.TargetProgram) : Prop where
   responseGasAdmissibleReady :
     OpenXCallFamilyResponseGasAdmissibleReadyFor asm target
@@ -27745,7 +27745,7 @@ structure OpenXCallFamilyNoArtificialCapExternalWorldReadyFor
     OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor
       asm target
 
-namespace OpenXCallFamilyNoArtificialCapExternalWorldReadyFor
+namespace OpenXCallFamilyExternalWorldReadyFor
 
 theorem of_strict
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -27754,7 +27754,7 @@ theorem of_strict
     (hResponseStrictOrAllGasOOGResultTrackingReady :
       OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor
         asm target) :
-    OpenXCallFamilyNoArtificialCapExternalWorldReadyFor asm target where
+    OpenXCallFamilyExternalWorldReadyFor asm target where
   responseGasAdmissibleReady := hResponseGasAdmissibleReady
   responseStrictOrAllGasOOGResultTrackingReady :=
     hResponseStrictOrAllGasOOGResultTrackingReady
@@ -27765,7 +27765,7 @@ theorem of_resultTracking
       OpenXCallFamilyResponseGasAdmissibleReadyFor asm target)
     (hResponseResultTrackingReady :
       OpenXCallFamilyResponseResultTrackingTraceReadyFor asm target) :
-    OpenXCallFamilyNoArtificialCapExternalWorldReadyFor asm target :=
+    OpenXCallFamilyExternalWorldReadyFor asm target :=
   of_strict hResponseGasAdmissibleReady
     (OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.of_resultTracking
       hResponseResultTrackingReady)
@@ -27776,7 +27776,7 @@ theorem of_outcome_tracking
       OpenXCallFamilyResponseGasAdmissibleReadyFor asm target)
     (hResponseOutcomeTrackingReady :
       OpenXCallFamilyResponseOutcomeTrackingTraceReadyFor asm target) :
-    OpenXCallFamilyNoArtificialCapExternalWorldReadyFor asm target :=
+    OpenXCallFamilyExternalWorldReadyFor asm target :=
   of_strict hResponseGasAdmissibleReady
     (OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.of_outcome_tracking
       hResponseOutcomeTrackingReady)
@@ -27787,7 +27787,7 @@ theorem of_committed_response_safety
       OpenXCallFamilyResponseGasAdmissibleReadyFor asm target)
     (hCommittedResponseSafetyReady :
       OpenXCallFamilyCommittedResponseSafetyTraceReadyFor asm target) :
-    OpenXCallFamilyNoArtificialCapExternalWorldReadyFor asm target :=
+    OpenXCallFamilyExternalWorldReadyFor asm target :=
   of_strict hResponseGasAdmissibleReady
     (OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor.of_committed_response_safety
       hCommittedResponseSafetyReady)
@@ -27795,7 +27795,7 @@ theorem of_committed_response_safety
 theorem committedSafe_or_allForwardedGasOutOfGas_tracks
     {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
     (hReady :
-      OpenXCallFamilyNoArtificialCapExternalWorldReadyFor program
+      OpenXCallFamilyExternalWorldReadyFor program
         targetProgram)
     {state mid : EVMState}
     {referenceTrace candidateTrace : OpenExternal.OpenTrace}
@@ -27844,7 +27844,7 @@ theorem committedSafe_or_allForwardedGasOutOfGas_tracks
 theorem committedSafe_of_not_outcome_safelyTracks_for_call
     {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
     (hReady :
-      OpenXCallFamilyNoArtificialCapExternalWorldReadyFor program
+      OpenXCallFamilyExternalWorldReadyFor program
         targetProgram)
     {state mid : EVMState}
     {referenceTrace candidateTrace : OpenExternal.OpenTrace}
@@ -27894,7 +27894,7 @@ theorem committedSafe_of_not_outcome_safelyTracks_for_call
 theorem allForwardedGasOutOfGas_and_outcomeTracks_of_not_committedSafe_for_call
     {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
     (hReady :
-      OpenXCallFamilyNoArtificialCapExternalWorldReadyFor program
+      OpenXCallFamilyExternalWorldReadyFor program
         targetProgram)
     {state mid : EVMState}
     {referenceTrace candidateTrace : OpenExternal.OpenTrace}
@@ -27944,7 +27944,7 @@ theorem allForwardedGasOutOfGas_and_outcomeTracks_of_not_committedSafe_for_call
     candidateForwardedGas candidateAvailableGas candidatePostCallGas
     candidateStatus hReferenceMem hCandidateMem hNotSafe
 
-end OpenXCallFamilyNoArtificialCapExternalWorldReadyFor
+end OpenXCallFamilyExternalWorldReadyFor
 
 theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeGasReady_noReturnDataCopy
     {cfg : Reference.StateRelConfig}
@@ -28646,7 +28646,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
         committedSafeForAllGas := hCommittedSafe },
       hWholeRel, hStorageRel⟩
 
-theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+private theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy
     {cfg : Reference.StateRelConfig}
     {outcomeRel : Reference.OutcomeRel}
     {program : Program} {functionProgram : Functions.Program}
@@ -28681,7 +28681,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
         sourceResult)
     (hInitialPerm : initial.executionEnv.perm = true)
     (hExternalWorldReady :
-      OpenXCallFamilyNoArtificialCapExternalWorldReadyFor asm target)
+      OpenXCallFamilyExternalWorldReadyFor asm target)
     (minimumCompilerFuel : Nat) :
     ∃ compilerFuel : Nat,
     ∃ sourceOutcome : Objects.Source.Outcome,
@@ -28724,7 +28724,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
     hExternalWorldReady.responseStrictOrAllGasOOGResultTrackingReady
     minimumCompilerFuel
 
-theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+private theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyAtGas_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy
     {cfg : Reference.StateRelConfig}
     {outcomeRel : Reference.OutcomeRel}
     {program : Program} {functionProgram : Functions.Program}
@@ -28759,7 +28759,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
         sourceResult)
     (hInitialPerm : initial.executionEnv.perm = true)
     (hExternalWorldReady :
-      OpenXCallFamilyNoArtificialCapExternalWorldReadyFor asm target)
+      OpenXCallFamilyExternalWorldReadyFor asm target)
     (minimumCompilerFuel : Nat) (gas : Nat) :
     ∃ compilerFuel : Nat,
     ∃ sourceOutcome : Objects.Source.Outcome,
@@ -28803,7 +28803,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
       SourceOpenTargetCommittedStorageImageRel shared initial sourceResult
         targetResult := by
   rcases
-      compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+      compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy
         hSemantics hInitialCodeImageRel hSourceRun hChecked hTargetRuntime
         hBodyFuelAdequate hTraceAccepted hInitialPerm
         hExternalWorldReady minimumCompilerFuel with
@@ -28825,7 +28825,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
       OpenXContractLivenessAndSafetyFinalObservation.committedSafeAt_of_gas_lt
         hContract hGasFits
 
-theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyOutcomeSafetyAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+private theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyOutcomeSafetyAtGas_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy
     {cfg : Reference.StateRelConfig}
     {outcomeRel : Reference.OutcomeRel}
     {program : Program} {functionProgram : Functions.Program}
@@ -28860,7 +28860,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
         sourceResult)
     (hInitialPerm : initial.executionEnv.perm = true)
     (hExternalWorldReady :
-      OpenXCallFamilyNoArtificialCapExternalWorldReadyFor asm target)
+      OpenXCallFamilyExternalWorldReadyFor asm target)
     (minimumCompilerFuel : Nat) (gas : Nat) :
     ∃ compilerFuel : Nat,
     ∃ sourceOutcome : Objects.Source.Outcome,
@@ -28908,7 +28908,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
       SourceOpenTargetCommittedStorageImageRel shared initial sourceResult
         targetResult := by
   rcases
-      compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+      compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyAtGas_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy
         hSemantics hInitialCodeImageRel hSourceRun hChecked hTargetRuntime
         hBodyFuelAdequate hTraceAccepted hInitialPerm hExternalWorldReady
         minimumCompilerFuel gas with
@@ -28925,7 +28925,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
   rcases hSafeAt hGasFits with ⟨_hGasFits, outcome, hOutcome, hMatches⟩
   exact ⟨outcome, hOutcome, hMatches⟩
 
-theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyResultOrFailureAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+private theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyResultOrFailureAtGas_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy
     {cfg : Reference.StateRelConfig}
     {outcomeRel : Reference.OutcomeRel}
     {program : Program} {functionProgram : Functions.Program}
@@ -28960,7 +28960,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
         sourceResult)
     (hInitialPerm : initial.executionEnv.perm = true)
     (hExternalWorldReady :
-      OpenXCallFamilyNoArtificialCapExternalWorldReadyFor asm target)
+      OpenXCallFamilyExternalWorldReadyFor asm target)
     (minimumCompilerFuel : Nat) (gas : Nat) :
     ∃ compilerFuel : Nat,
     ∃ sourceOutcome : Objects.Source.Outcome,
@@ -29016,7 +29016,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
       SourceOpenTargetCommittedStorageImageRel shared initial sourceResult
         targetResult := by
   rcases
-      compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+      compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyAtGas_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy
         hSemantics hInitialCodeImageRel hSourceRun hChecked hTargetRuntime
         hBodyFuelAdequate hTraceAccepted hInitialPerm hExternalWorldReady
         minimumCompilerFuel gas with
@@ -29318,11 +29318,11 @@ theorem openXContractLivenessAndSafetyFinalObservation
         sourceResult)
     (hInitialPerm : initial.executionEnv.perm = true)
     (hExternalWorldReady :
-      OpenXCallFamilyNoArtificialCapExternalWorldReadyFor asm target)
+      OpenXCallFamilyExternalWorldReadyFor asm target)
     (minimumCompilerFuel : Nat) :
     FinalObservationConclusion cfg program functionProgram asm target shared
       initial trace sourceResult minimumCompilerFuel :=
-  compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+  compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyFinalObservation_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy
     (cfg := cfg)
     (outcomeRel :=
       RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
@@ -29356,11 +29356,11 @@ theorem openXContractLivenessAndSafetyAtGas
         sourceResult)
     (hInitialPerm : initial.executionEnv.perm = true)
     (hExternalWorldReady :
-      OpenXCallFamilyNoArtificialCapExternalWorldReadyFor asm target)
+      OpenXCallFamilyExternalWorldReadyFor asm target)
     (minimumCompilerFuel gas : Nat) :
     AtGasConclusion cfg program functionProgram asm target shared initial trace
       sourceResult minimumCompilerFuel gas :=
-  compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+  compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyAtGas_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy
     (cfg := cfg)
     (outcomeRel :=
       RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
@@ -29394,11 +29394,11 @@ theorem openXContractLivenessAndSafetyOutcomeSafetyAtGas
         sourceResult)
     (hInitialPerm : initial.executionEnv.perm = true)
     (hExternalWorldReady :
-      OpenXCallFamilyNoArtificialCapExternalWorldReadyFor asm target)
+      OpenXCallFamilyExternalWorldReadyFor asm target)
     (minimumCompilerFuel gas : Nat) :
     OutcomeSafetyAtGasConclusion cfg program functionProgram asm target shared
       initial trace sourceResult minimumCompilerFuel gas :=
-  compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyOutcomeSafetyAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+  compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyOutcomeSafetyAtGas_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy
     (cfg := cfg)
     (outcomeRel :=
       RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
@@ -29432,11 +29432,11 @@ theorem openXContractLivenessAndSafetyResultOrFailureAtGas
         sourceResult)
     (hInitialPerm : initial.executionEnv.perm = true)
     (hExternalWorldReady :
-      OpenXCallFamilyNoArtificialCapExternalWorldReadyFor asm target)
+      OpenXCallFamilyExternalWorldReadyFor asm target)
     (minimumCompilerFuel gas : Nat) :
     ResultOrFailureAtGasConclusion cfg program functionProgram asm target shared
       initial trace sourceResult minimumCompilerFuel gas :=
-  compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyResultOrFailureAtGas_of_checked_traceAccepted_sourceBridgeNoArtificialCapExternalWorldReady_noReturnDataCopy
+  compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy_sourceOpenDispatcherBlockResult_openXContractLivenessAndSafetyResultOrFailureAtGas_of_checked_traceAccepted_sourceBridgeExternalWorldReady_noReturnDataCopy
     (cfg := cfg)
     (outcomeRel :=
       RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg

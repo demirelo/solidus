@@ -1,3 +1,15 @@
+## 2026-06-06 15:36 CEST - cleanup/call-family-external-world-rename
+
+Renamed the live CALL-family gas carrier from the historically contingent
+no-artificial-cap wording to `OpenXCallFamilyExternalWorldReadyFor`, along with
+the matching `LayerAudit` abbreviations, audit artifact filenames, completion
+audit checks, and the now-private compiled endpoint suffixes
+`sourceBridgeExternalWorldReady`. Also made the four lower unbundled
+external-world endpoint declarations private so the public surface starts at
+the top-assumption wrappers. Verification passed: source/build checks for
+`EvmCompiler.Yul.OpenRuntime` and `EvmCompiler.LayerAudit`, plus the renamed
+external-world gas axiom and completion audits.
+
 ## 2026-06-06 15:26 CEST - audit/call-family-stale-path-cleanup
 
 Completed the stale-path cleanup inventory for the CALL-family public proof surface. Removed `LayerAudit` pins for the remaining lower global-response-gas replay alias, old exact-CALL/lower CALL-family dispatcher trace aliases, exact-CALL route2 projection aliases, and the stale CALL-aware/no-CALL spill selector route aliases. Kept the lower gas-ready/result-tracking theorem families internal in `OpenRuntime`, confirmed no live `RawGeneratedEvidence` or object-runtime cleanup was needed in `LayerAudit`, and updated `ROADMAP.md` with the resolved checklist. Verification passed: `lake env lean EvmCompiler/LayerAudit.lean`, `lake build EvmCompiler.LayerAudit`, both no-artificial-cap gas audit Lean files, stale-name scan, touched-file proof-marker scan, and `git diff --check`.
@@ -9228,3 +9240,4 @@ runtime composition.
 2026-06-06 15:05 CEST - verification/final-checkpoint-before-commit: Full project build passed with `lake build` (`Build completed successfully (1185 jobs)`). Whole-diff whitespace check passed with `git diff --check`. Lean-tree proof-marker scan found no project proof holes; the only hit was prose in `EvmCompiler/Assembly/Syntax.lean`. Public axiom audit for the stronger CALL-family top wrappers reports only `[propext, Classical.choice, Quot.sound]`; canonical object wrappers report `[propext, Classical.choice, Lean.ofReduceBool, Lean.trustCompiler, Quot.sound]`, matching the executable-object wrapper route.
 
 2026-06-06 15:02 CEST - compaction-resume: Resumed after context compaction at the final-checkpoint phase. Current focus is to verify the stronger CALL-family public top package plus canonical object wrappers, inspect the full dirty tree, and commit all valid project work once the checks are clean.
+2026-06-06 - compaction-resume: resumed the CALL-family cleanup audit after context compaction; next step is to continue trimming stale/internal proof paths while preserving the checked public top corridor.
