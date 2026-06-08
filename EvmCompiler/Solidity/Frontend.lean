@@ -480,6 +480,10 @@ def findImmutableReferences? (context : ObjectBuiltinContext) (name : Name) :
   | [] => none
   | _ :: _ => some refs
 
+def immutableReferencesFor (context : ObjectBuiltinContext) (name : Name) :
+    List ImmutableReference :=
+  collectImmutableReferences context.immutableReferences name
+
 def findSelfSize? (context : ObjectBuiltinContext) (name : Name) :
     Option Word :=
   match context.selfSize? with
@@ -999,7 +1003,7 @@ mutual
         let name ← Expr.objectBuiltinNameArg? nameArg
         let base' ← base.resolveObjectBuiltinsIn? context
         let value' ← value.resolveObjectBuiltinsIn? context
-        let references ← context.findImmutableReferences? name
+        let references := context.immutableReferencesFor name
         let stmts ←
           ImmutableReference.List.patchStmts? references base' value'
         some (.block stmts)
@@ -1904,9 +1908,9 @@ def lowerCodeUnchecked? (object : Object) :
     Stmt.List.loweringFuel object.dispatcher +
       FunctionDef.List.loweringFuel object.functions + 1
   let (bodyStmts, state) ←
-    Yul.Stmt.List.toFunctionsFuel? fuel initial dispatcher
+    Yul.Stmt.List.toFunctionsUncheckedFuel? fuel initial dispatcher
   let (functions, _state) ←
-    Yul.FunctionList.toFunDefsFuel? fuel state functionsYul
+    Yul.FunctionList.toFunDefsUncheckedFuel? fuel state functionsYul
   some
     (FunctionPrep.Program.scopeLetLifetimes
       { functions := functions, body := { stmts := bodyStmts } })

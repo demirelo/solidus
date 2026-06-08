@@ -12,6 +12,7 @@ import unittest
 from types import SimpleNamespace
 
 import compare_contract_call_bytecode as compare_call
+import run_forge_project_compare as forge_project_compare
 import solc_lean_standard_json as solc_lean_wrapper
 import solidity_to_yul_lean as bridge
 import validate_bridge_json
@@ -3398,6 +3399,35 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertEqual(parsed["bytecode_bytes"], 12)
         self.assertEqual(parsed["bytecode"], "0x6000")
 
+    def test_parse_backend_check_output_records_locals_diagnostics(self):
+        parsed = bridge.parse_backend_check_output(
+            "lean_backend_check=fail\n"
+            "source=Simple.sol\n"
+            "contract=Simple\n"
+            "object=Simple_1_deployed\n"
+            "stage\tfunctions_to_locals\tnone\n"
+            "locals_body\tmain\tsome\n"
+            "locals_proc\tfinalize_allocation\tnone\n"
+            "locals_stmt\tfinalize_allocation\t2\tif\tnone\n"
+            "first_none=functions_to_locals\n"
+        )
+
+        self.assertEqual(parsed["localsBody"], "some")
+        self.assertEqual(
+            parsed["localsProcs"], {"finalize_allocation": "none"}
+        )
+        self.assertEqual(
+            parsed["localsStmtTrace"],
+            [
+                {
+                    "owner": "finalize_allocation",
+                    "index": 2,
+                    "kind": "if",
+                    "status": "none",
+                }
+            ],
+        )
+
     def test_bridge_json_input_round_trips_to_python_ast(self):
         runtime = bridge.YulObject(
             name="Simple_1_deployed",
@@ -6691,6 +6721,74 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIn("lean_backend_check=pass", output)
         self.assertIn("first_none=none", output)
         self.assertEqual(calls[0][0], "lake")
+
+    def test_bridge_json_input_backend_check_uses_root_object_by_default(self):
+        runtime = bridge.YulObject(
+            name="Simple_1_deployed",
+            dispatcher=[],
+            functions=[],
+            data=[],
+            subobjects=[],
+        )
+        root_object = bridge.YulObject(
+            name="Simple_1",
+            dispatcher=[],
+            functions=[],
+            data=[],
+            subobjects=[runtime],
+            items=[bridge.ObjectItemRef("object", 0)],
+        )
+        old_run_lake_backend_check = bridge.run_lake_backend_check
+        old_stdout = sys.stdout
+        try:
+            def fake_run_lake_backend_check(lake, source, cwd):
+                rendered_path = None
+                for line in source.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith('"/') and stripped.endswith('"'):
+                        rendered_path = Path(json.loads(stripped))
+                        break
+                self.assertIsNotNone(rendered_path)
+                rendered_json = json.loads(rendered_path.read_text())
+                self.assertEqual(rendered_json["selectedObject"]["name"], "Simple_1")
+                return (
+                    "lean_backend_check=pass\n"
+                    "source=Simple.sol\n"
+                    "contract=Simple\n"
+                    "object=Simple_1\n"
+                    "stage\tobject_image\tsome\n"
+                    "first_none=none\n"
+                    "bytecode_bytes=1\n"
+                )
+
+            bridge.run_lake_backend_check = fake_run_lake_backend_check
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path = root / "creation.bridge.json"
+                path.write_text(
+                    bridge.render_bridge_json(root_object, "Simple.sol", "Simple")
+                )
+                sys.stdout = io.StringIO()
+                result = bridge.main(
+                    [
+                        str(path),
+                        "--input-format",
+                        "bridge-json",
+                        "--format",
+                        "lean-backend-check",
+                        "--lake",
+                        "lake",
+                        "--lake-cwd",
+                        str(root),
+                    ]
+                )
+                output = sys.stdout.getvalue()
+        finally:
+            bridge.run_lake_backend_check = old_run_lake_backend_check
+            sys.stdout = old_stdout
+
+        self.assertEqual(result, 0)
+        self.assertIn("object=Simple_1", output)
 
     def test_standard_json_all_contracts_lean_json_check_decodes_ir_contracts(self):
         def raw_object(name, subobjects=None):
@@ -10959,6 +11057,68 @@ exit {full_status}
         self.assertIn("bridge_json_summary_unsupported_primitives=none", output_lines)
         self.assertIn("bridge_json_summary_object_builtins=datasize", output_lines)
         self.assertIn("bridge_json_summary_dialect_builtins=none", output_lines)
+
+    def test_forge_project_compare_runs_local_project_and_writes_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "project"
+            project.mkdir()
+            fake_compare = root / "compare.sh"
+            fake_compare.write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+printf 'forge_compare=pass\\n'
+printf 'bridge_json_backend_compatibility=ready\\n'
+printf 'bridge_json_summary_unsupported_primitives=none\\n'
+printf 'bridge_json_summary_object_builtins=none\\n'
+printf 'bridge_json_summary_dialect_builtins=none\\n'
+printf 'bridge_json_summary_objects=1\\n'
+printf 'bridge_json_summary_skipped_contracts=0\\n'
+"""
+            )
+            fake_compare.chmod(0o755)
+            out_dir = root / "out"
+            old_stdout = sys.stdout
+            try:
+                sys.stdout = io.StringIO()
+                result = forge_project_compare.main(
+                    [
+                        "--project-dir",
+                        str(project),
+                        "--out-dir",
+                        str(out_dir),
+                        "--compare-script",
+                        str(fake_compare),
+                        "--match-test",
+                        "testFoo",
+                        "--solc",
+                        "/bin/echo",
+                        "--lake",
+                        "/bin/echo",
+                        "--forge",
+                        "/bin/echo",
+                        "--python",
+                        sys.executable,
+                    ]
+                )
+                stdout = sys.stdout.getvalue()
+            finally:
+                sys.stdout = old_stdout
+
+            report = json.loads((out_dir / "report.json").read_text())
+
+        self.assertEqual(result, 0)
+        self.assertIn("forge_project_compare=pass", stdout)
+        self.assertEqual(report["schema"], forge_project_compare.REPORT_SCHEMA)
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["compare"]["status"], "pass")
+        self.assertEqual(
+            report["compare"]["keyValues"]["bridge_json_backend_compatibility"],
+            "ready",
+        )
+        compare_command = report["commands"][-1]["command"]
+        self.assertIn("--match-test", compare_command)
+        self.assertIn("testFoo", compare_command)
 
     def test_switch_default_is_separated_from_literal_cases(self):
         stmt = bridge.parse_stmt(

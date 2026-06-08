@@ -255,6 +255,20 @@ mutual
 end
 
 mutual
+  def pureAliasArgSafe? : AstExpr → Bool
+    | .Lit _value => true
+    | .Var _name => true
+    | .Call (.inl prim) args =>
+        pureAliasPrim? prim && List.pureAliasArgsSafe? args
+    | .Call (.inr _functionName) _args => false
+
+  def List.pureAliasArgsSafe? : List AstExpr → Bool
+    | [] => true
+    | expr :: rest =>
+        pureAliasArgSafe? expr && List.pureAliasArgsSafe? rest
+end
+
+mutual
   def lower? (results : Nat) (state : Fresh.State) :
       AstExpr →
         Option (List Functions.Stmt × Locals.Expr results × Fresh.State)
@@ -343,6 +357,84 @@ def lower1? (state : Fresh.State) (expr : AstExpr) :
 def lower0? (state : Fresh.State) (expr : AstExpr) :
     Option (List Functions.Stmt × Locals.Expr 0 × Fresh.State) :=
   lower? 0 state expr
+
+mutual
+  def lowerUnchecked? (results : Nat) (state : Fresh.State) :
+      AstExpr →
+        Option (List Functions.Stmt × Locals.Expr results × Fresh.State)
+    | .Lit value =>
+        if h : 1 = results then
+          some ([], cast h (.lit value), state)
+        else
+          none
+    | .Var name =>
+        if h : 1 = results then
+          some ([], cast h (.var (identName name)), state)
+        else
+          none
+    | .Call (.inr functionName) args =>
+        if ObjectBuiltin.unsupported? functionName then
+          none
+        else if h : 1 = results then do
+          let (preArgs, lowerArgs, state') ←
+            if List.directCallArgsSafe? args then do
+              let lowerArgs ← List.toLocals1? args
+              some ([], lowerArgs, state)
+            else
+              List.lowerBound1Unchecked? state args
+          let (tmp, state'') ← Fresh.fresh? state'
+          some
+            (preArgs ++
+              [Functions.Stmt.let_ tmp (.lit zero),
+                Functions.Stmt.call [tmp] functionName lowerArgs],
+              cast h (.var tmp),
+              state'')
+        else
+          none
+    | .Call (.inl prim) args => do
+        let op ← Prim.toBasicOp? prim
+        let (preArgs, argExprs, state') ←
+          if List.pureAliasArgsSafe? args then do
+            let argExprs ← List.toLocals1? args
+            some ([], argExprs, state)
+          else
+            List.lowerBound1Unchecked? state args
+        let seq ←
+          List.toStackSeq? argExprs (Expressions.Structured.BasicOp.inputs op)
+        if h : Expressions.Structured.BasicOp.outputs op = results then
+          some (preArgs, cast h (.prim op seq), state')
+        else
+          none
+
+  def List.lower1Unchecked? (state : Fresh.State) :
+      List AstExpr →
+        Option (List Functions.Stmt × List (Locals.Expr 1) × Fresh.State)
+    | [] => some ([], [], state)
+    | expr :: rest => do
+        let (preRest, lowerRest, state') ← List.lower1Unchecked? state rest
+        let (preHead, lowerHead, state'') ← lowerUnchecked? 1 state' expr
+        some (preRest ++ preHead, lowerHead :: lowerRest, state'')
+
+  def List.lowerBound1Unchecked? (state : Fresh.State) :
+      List AstExpr →
+        Option (List Functions.Stmt × List (Locals.Expr 1) × Fresh.State)
+    | [] => some ([], [], state)
+    | expr :: rest => do
+        let (preRest, lowerRest, state') ← List.lowerBound1Unchecked? state rest
+        let (preHead, lowerHead, state'') ← lowerUnchecked? 1 state' expr
+        let (tmp, state''') ← Fresh.fresh? state''
+        some
+          (preRest ++ preHead ++ [Functions.Stmt.let_ tmp lowerHead],
+            .var tmp :: lowerRest, state''')
+end
+
+def lower1Unchecked? (state : Fresh.State) (expr : AstExpr) :
+    Option (List Functions.Stmt × Locals.Expr 1 × Fresh.State) :=
+  lowerUnchecked? 1 state expr
+
+def lower0Unchecked? (state : Fresh.State) (expr : AstExpr) :
+    Option (List Functions.Stmt × Locals.Expr 0 × Fresh.State) :=
+  lowerUnchecked? 0 state expr
 
 theorem toLocals?_gas (results : Nat) :
     toLocals? results
@@ -1780,6 +1872,210 @@ mutual
         some ({ stmts := lower }, state')
 end
 
+mutual
+  def toFunctionsListUncheckedFuel? :
+      Nat → Fresh.State → AstStmt →
+        Option (List Functions.Stmt × Fresh.State)
+    | 0, _state, _stmt => none
+    | fuel + 1, state, .Block body => do
+        let (lower, state') ← List.toBlockUncheckedFuel? fuel state body
+        some ([Functions.Stmt.block lower], state')
+    | _fuel + 1, state, .Let names none =>
+        some (initNames (identNames names), state)
+    | _fuel + 1, state, .Let [] (some (.Call (.inr functionName) args)) =>
+        if ObjectBuiltin.unsupported? functionName then
+          none
+        else do
+          let (preArgs, lowerArgs, state') ←
+            if Expr.List.directCallArgsSafe? args then do
+              let lowerArgs ← Expr.List.toLocals1? args
+              some ([], lowerArgs, state)
+            else
+              Expr.List.lowerBound1Unchecked? state args
+          some
+            (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
+              state')
+    | _fuel + 1, state, .Let [name] (some (.Call (.inr functionName) args)) =>
+        if ObjectBuiltin.unsupported? functionName then
+          none
+        else do
+          let lowerNames := identNames [name]
+          let (preArgs, lowerArgs, state') ←
+            if Expr.List.directCallArgsSafe? args then do
+              let lowerArgs ← Expr.List.toLocals1? args
+              some ([], lowerArgs, state)
+            else
+              Expr.List.lowerBound1Unchecked? state args
+          some
+            (initNames lowerNames ++ preArgs ++
+              [Functions.Stmt.call lowerNames functionName lowerArgs],
+              state')
+    | _fuel + 1, state, .Let [name] (some value) => do
+        let (preValue, lowerValue, state') ← Expr.lower1Unchecked? state value
+        some (preValue ++ [Functions.Stmt.let_ (identName name) lowerValue],
+          state')
+    | _fuel + 1, state,
+        .Let (name :: next :: rest) (some (.Call (.inr functionName) args)) =>
+        if ObjectBuiltin.unsupported? functionName then
+          none
+        else do
+          let lowerNames := identNames (name :: next :: rest)
+          let (preArgs, lowerArgs, state') ←
+            if Expr.List.directCallArgsSafe? args then do
+              let lowerArgs ← Expr.List.toLocals1? args
+              some ([], lowerArgs, state)
+            else
+              Expr.List.lowerBound1Unchecked? state args
+          some
+            (initNames lowerNames ++ preArgs ++
+              [Functions.Stmt.call lowerNames functionName lowerArgs],
+              state')
+    | _fuel + 1, _state, .Let _names (some _value) =>
+        none
+    | _fuel + 1, state, .Assign [] (.Call (.inr functionName) args) =>
+        if ObjectBuiltin.unsupported? functionName then
+          none
+        else do
+          let (preArgs, lowerArgs, state') ←
+            if Expr.List.directCallArgsSafe? args then do
+              let lowerArgs ← Expr.List.toLocals1? args
+              some ([], lowerArgs, state)
+            else
+              Expr.List.lowerBound1Unchecked? state args
+          some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
+            state')
+    | _fuel + 1, state, .Assign [name] (.Call (.inr functionName) args) =>
+        if ObjectBuiltin.unsupported? functionName then
+          none
+        else do
+          let lowerNames := identNames [name]
+          let (preArgs, lowerArgs, state') ←
+            if Expr.List.directCallArgsSafe? args then do
+              let lowerArgs ← Expr.List.toLocals1? args
+              some ([], lowerArgs, state)
+            else
+              Expr.List.lowerBound1Unchecked? state args
+          some (preArgs ++ [Functions.Stmt.call lowerNames functionName lowerArgs],
+            state')
+    | _fuel + 1, state, .Assign [name] value => do
+        let (preValue, lowerValue, state') ← Expr.lower1Unchecked? state value
+        some (preValue ++ [Functions.Stmt.assign (identName name) lowerValue],
+          state')
+    | _fuel + 1, state,
+        .Assign (name :: next :: rest) (.Call (.inr functionName) args) =>
+        if ObjectBuiltin.unsupported? functionName then
+          none
+        else do
+          let lowerNames := identNames (name :: next :: rest)
+          let (preArgs, lowerArgs, state') ←
+            if Expr.List.directCallArgsSafe? args then do
+              let lowerArgs ← Expr.List.toLocals1? args
+              some ([], lowerArgs, state)
+            else
+              Expr.List.lowerBound1Unchecked? state args
+          some (preArgs ++ [Functions.Stmt.call lowerNames functionName lowerArgs],
+            state')
+    | _fuel + 1, _state, .Assign _names _value =>
+        none
+    | _fuel + 1, state, .ExprStmtCall (.Call (.inr functionName) args) =>
+        if ObjectBuiltin.unsupported? functionName then
+          none
+        else do
+          let (preArgs, lowerArgs, state') ←
+            if Expr.List.directCallArgsSafe? args then do
+              let lowerArgs ← Expr.List.toLocals1? args
+              some ([], lowerArgs, state)
+            else
+              Expr.List.lowerBound1Unchecked? state args
+          some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
+            state')
+    | _fuel + 1, state, .ExprStmtCall (.Call (.inl prim) args) =>
+        match Prim.terminal? prim with
+        | some kind => do
+            let (preArgs, lowerArgs, state') ←
+              Expr.List.lowerBound1Unchecked? state args
+            let seq ← Expr.List.toStackSeq? lowerArgs kind.argCount
+            some (preArgs ++ [Functions.Stmt.terminalArgs kind seq], state')
+        | none => do
+            let (pre, lower, state') ←
+              Expr.lower0Unchecked? state (.Call (.inl prim) args)
+            some (pre ++ [Functions.Stmt.expr lower], state')
+    | _fuel + 1, state, .ExprStmtCall expr => do
+        let (pre, lower, state') ← Expr.lower0Unchecked? state expr
+        some (pre ++ [Functions.Stmt.expr lower], state')
+    | fuel + 1, state, .Switch scrutinee cases defaultBody => do
+        let (preScrutinee, lowerScrutinee, state') ←
+          Expr.lower1Unchecked? state scrutinee
+        let (lowerCases, state'') ←
+          CaseList.toFunctionsUncheckedFuel? fuel state' cases
+        let (lowerDefault, state''') ←
+          match defaultBody with
+          | [] => some (none, state'')
+          | _ => do
+              let (body, stateDefault) ←
+                List.toBlockUncheckedFuel? fuel state'' defaultBody
+              some (some body, stateDefault)
+        some
+          (preScrutinee ++
+            [Functions.Stmt.switch lowerScrutinee lowerCases lowerDefault],
+            state''')
+    | fuel + 1, state, .For cond post body => do
+        let (preCond, lowerCond, state') ← Expr.lower1Unchecked? state cond
+        let (lowerPost, state'') ← List.toBlockUncheckedFuel? fuel state' post
+        let (lowerBody, state''') ← List.toBlockUncheckedFuel? fuel state'' body
+        let bodyWithCond : Functions.Block :=
+          { stmts :=
+              preCond ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] ++
+                lowerBody.stmts }
+        some
+          ([Functions.Stmt.for_ { stmts := [] } (.lit (EvmYul.UInt256.ofNat 1))
+            lowerPost bodyWithCond],
+            state''')
+    | fuel + 1, state, .If cond body => do
+        let (preCond, lowerCond, state') ← Expr.lower1Unchecked? state cond
+        let (lowerBody, state'') ← List.toBlockUncheckedFuel? fuel state' body
+        some (preCond ++ [Functions.Stmt.if_ lowerCond lowerBody], state'')
+    | _fuel + 1, state, .Continue =>
+        some ([.cont], state)
+    | _fuel + 1, state, .Break =>
+        some ([.brk], state)
+    | _fuel + 1, state, .Leave =>
+        some ([.leave], state)
+
+  def List.toFunctionsUncheckedFuel? :
+      Nat → Fresh.State → List AstStmt →
+        Option (List Functions.Stmt × Fresh.State)
+    | 0, _state, _stmts => none
+    | _fuel + 1, state, [] => some ([], state)
+    | fuel + 1, state, stmt :: rest => do
+        let (lowerStmt, state') ← toFunctionsListUncheckedFuel? fuel state stmt
+        let (lowerRest, state'') ←
+          List.toFunctionsUncheckedFuel? fuel state' rest
+        some (lowerStmt ++ lowerRest, state'')
+
+  def CaseList.toFunctionsUncheckedFuel? :
+      Nat → Fresh.State → List (Word × List AstStmt) →
+        Option (List (Word × Functions.Block) × Fresh.State)
+    | 0, _state, _cases => none
+    | _fuel + 1, state, [] => some ([], state)
+    | fuel + 1, state, (value, body) :: rest => do
+        let (lowerBody, state') ← List.toBlockUncheckedFuel? fuel state body
+        let (lowerRest, state'') ←
+          CaseList.toFunctionsUncheckedFuel? fuel state' rest
+        some ((value, lowerBody) :: lowerRest, state'')
+
+  def List.toBlockUncheckedFuel? :
+      Nat → Fresh.State → List AstStmt →
+        Option (Functions.Block × Fresh.State)
+    | 0, _state, _stmts => none
+    | fuel + 1, state, stmts => do
+        let (lower, state') ← List.toFunctionsUncheckedFuel? fuel state stmts
+        some ({ stmts := lower }, state')
+end
+
 noncomputable def toFunctionsList? (state : Fresh.State) (stmt : AstStmt) :
     Option (List Functions.Stmt × Fresh.State) :=
   toFunctionsListFuel? (fuel stmt) state stmt
@@ -2187,6 +2483,17 @@ def toFunDefFuel? (fuel : Nat) (state : Fresh.State) (name : Name) :
           body := lowerBody }
       some (lowerFn, state')
 
+def toFunDefUncheckedFuel? (fuel : Nat) (state : Fresh.State) (name : Name) :
+    AstFunctionDefinition → Option (Functions.FunDef × Fresh.State)
+  | .Def params returns body => do
+      let (lowerBody, state') ← Stmt.List.toBlockUncheckedFuel? fuel state body
+      let lowerFn : Functions.FunDef :=
+        { name := name
+          params := identNames params
+          returns := identNames returns
+          body := lowerBody }
+      some (lowerFn, state')
+
 noncomputable def toFunDef? (state : Fresh.State) (name : Name) :
     AstFunctionDefinition → Option (Functions.FunDef × Fresh.State)
   | fn => toFunDefFuel? (fuel fn) state name fn
@@ -2233,6 +2540,16 @@ def toFunDefsFuel? (fuel : Nat) :
   | state, (name, fn) :: rest => do
       let (lowerFn, state') ← FunctionDefinition.toFunDefFuel? fuel state name fn
       let (lowerRest, state'') ← toFunDefsFuel? fuel state' rest
+      some (lowerFn :: lowerRest, state'')
+
+def toFunDefsUncheckedFuel? (fuel : Nat) :
+    Fresh.State → List (Name × AstFunctionDefinition) →
+      Option (List Functions.FunDef × Fresh.State)
+  | state, [] => some ([], state)
+  | state, (name, fn) :: rest => do
+      let (lowerFn, state') ←
+        FunctionDefinition.toFunDefUncheckedFuel? fuel state name fn
+      let (lowerRest, state'') ← toFunDefsUncheckedFuel? fuel state' rest
       some (lowerFn :: lowerRest, state'')
 
 noncomputable def toFunDefs? :

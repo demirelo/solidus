@@ -5160,6 +5160,7 @@ def render_json_file_object_image_runner(
     )
     return f"""import EvmCompiler.Solidity.BridgeJson
 import EvmCompiler.Assembly.Bytecode
+import EvmCompiler.Functions.LiveLayout
 
 def evmCompilerRunnerBridgeJsonPath : String :=
   {lean_string(str(json_path))}
@@ -5248,6 +5249,58 @@ def evmCompilerRunnerPrintStage (name : String) (ok : Bool) : IO Unit := do
   IO.println
     ("stage\\t" ++ name ++ "\\t" ++ if ok then "some" else "none")
 
+def evmCompilerRunnerPrintLocalsProc
+    (proc : EvmCompiler.Locals.Proc) : IO Unit := do
+  IO.println
+    ("locals_proc\\t" ++ proc.name ++ "\\t" ++
+      if (proc.toExpressions?).isSome then "some" else "none")
+
+def evmCompilerRunnerLocalsStmtKind :
+    EvmCompiler.Locals.Stmt → String
+  | .expr _ => "expr"
+  | .exprs _ => "exprs"
+  | .let_ name _ => "let:" ++ name
+  | .assign name _ => "assign:" ++ name
+  | .assignTop name => "assignTop:" ++ name
+  | .assignTopWithOffset offset name =>
+      "assignTopWithOffset:" ++ toString offset ++ ":" ++ name
+  | .promoteName name => "promoteName:" ++ name
+  | .cleanupTo layout => "cleanupTo:" ++ toString layout.length
+  | .block _ => "block"
+  | .if_ _ _ => "if"
+  | .switch _ _ _ => "switch"
+  | .for_ _ _ _ _ => "for"
+  | .brk => "break"
+  | .cont => "continue"
+  | .leave => "leave"
+  | .call name => "call:" ++ name
+  | .terminal _ => "terminal"
+  | .terminalArgs _ _ => "terminalArgs"
+
+partial def evmCompilerRunnerPrintLocalsStmtTrace
+    (owner : String) (idx : Nat) (ctx : EvmCompiler.Locals.Ctx)
+    (stmts : List EvmCompiler.Locals.Stmt) : IO Unit := do
+  match stmts with
+  | [] => pure ()
+  | stmt :: rest =>
+      let result := EvmCompiler.Locals.Stmt.compile ctx stmt
+      IO.println
+        ("locals_stmt\\t" ++ owner ++ "\\t" ++ toString idx ++ "\\t" ++
+          evmCompilerRunnerLocalsStmtKind stmt ++ "\\t" ++
+          if result.isSome then "some" else "none")
+      match result with
+      | some (_code, nextCtx) =>
+          evmCompilerRunnerPrintLocalsStmtTrace owner (idx + 1) nextCtx rest
+      | none =>
+          match stmt with
+          | .block body =>
+              evmCompilerRunnerPrintLocalsStmtTrace
+                (owner ++ "/" ++ toString idx ++ ".block") 0 ctx body.stmts
+          | .if_ _ body =>
+              evmCompilerRunnerPrintLocalsStmtTrace
+                (owner ++ "/" ++ toString idx ++ ".if") 0 ctx body.stmts
+          | _ => pure ()
+
 def evmCompilerRunnerFirstNone :
     List (String × Bool) → String
   | [] => "none"
@@ -5295,6 +5348,33 @@ def main : IO Unit := do
   let functionsCompile? := do
     let lower ← lowerCodeUnchecked?
     EvmCompiler.Functions.Program.compile? lower
+  let functionsSourceAccepted? := do
+    let lower ← lowerCodeUnchecked?
+    if EvmCompiler.Functions.SourceAcceptedCheck.Program.sourceAccepted? lower then
+      some ()
+    else
+      none
+  let functionsToLocals? := do
+    let lower ← lowerCodeUnchecked?
+    EvmCompiler.Functions.Program.toLocals? lower
+  let localsToExpressions? := do
+    let locals ← functionsToLocals?
+    locals.toExpressions?
+  let localsCompile? := do
+    let locals ← functionsToLocals?
+    locals.compile?
+  let expressionsCompile? := do
+    let expressions ← localsToExpressions?
+    expressions.compile?
+  let liveLayoutToLocals? := do
+    let lower ← lowerCodeUnchecked?
+    EvmCompiler.Functions.LiveLayout.Lower.Program.toLocals? lower
+  let liveLayoutToExpressions? := do
+    let lower ← lowerCodeUnchecked?
+    EvmCompiler.Functions.LiveLayout.Lower.Program.toExpressions? lower
+  let liveLayoutCompile? := do
+    let lower ← lowerCodeUnchecked?
+    EvmCompiler.Functions.LiveLayout.Lower.Program.compile? lower
   let childImages? :=
     EvmCompiler.Solidity.Frontend.Object.List.bytecodeImagesUncheckedWithLinkerSymbols?
       object.objects evmCompilerRunnerLinkerSymbols
@@ -5412,7 +5492,15 @@ def main : IO Unit := do
   let stages :=
     [ ("to_yul_contract", evmCompilerRunnerStageSome toYulContract?)
     , ("lower_code_unchecked", evmCompilerRunnerStageSome lowerCodeUnchecked?)
+    , ("functions_source_accepted", evmCompilerRunnerStageSome functionsSourceAccepted?)
+    , ("functions_to_locals", evmCompilerRunnerStageSome functionsToLocals?)
+    , ("locals_to_expressions", evmCompilerRunnerStageSome localsToExpressions?)
+    , ("locals_compile", evmCompilerRunnerStageSome localsCompile?)
+    , ("expressions_compile", evmCompilerRunnerStageSome expressionsCompile?)
     , ("functions_compile", evmCompilerRunnerStageSome functionsCompile?)
+    , ("live_layout_to_locals", evmCompilerRunnerStageSome liveLayoutToLocals?)
+    , ("live_layout_to_expressions", evmCompilerRunnerStageSome liveLayoutToExpressions?)
+    , ("live_layout_compile", evmCompilerRunnerStageSome liveLayoutCompile?)
     , ("child_images", evmCompilerRunnerStageSome childImages?)
     , ("payload_items", evmCompilerRunnerStageSome items?)
     , ("data_sizes", evmCompilerRunnerStageSome dataSizes?)
@@ -5444,6 +5532,23 @@ def main : IO Unit := do
   IO.println ("object=" ++ object.name)
   for stage in stages do
     evmCompilerRunnerPrintStage stage.fst stage.snd
+  match functionsToLocals? with
+  | none => pure ()
+  | some locals =>
+      IO.println
+        ("locals_body\\tmain\\t" ++
+          if (EvmCompiler.Locals.Block.compile
+                EvmCompiler.Locals.Ctx.initial locals.body).isSome then
+            "some"
+          else
+            "none")
+      for proc in locals.procs do
+        evmCompilerRunnerPrintLocalsProc proc
+        evmCompilerRunnerPrintLocalsStmtTrace
+          proc.name 0
+          (EvmCompiler.Locals.Ctx.procEntryWithLayoutAndRetc
+            proc.entryLayout proc.retc)
+          proc.body.stmts
   IO.println ("first_none=" ++ firstNone)
   match objectImage? with
   | some image =>
@@ -5605,7 +5710,12 @@ def parse_backend_check_output(output: str) -> Json:
     status = lines[0].removeprefix("lean_backend_check=")
     if status not in {"pass", "fail"}:
         fail(f"Lean backend check runner produced invalid status: {status!r}")
-    summary: Json = {"status": status, "stages": {}}
+    summary: Json = {
+        "status": status,
+        "stages": {},
+        "localsProcs": {},
+        "localsStmtTrace": [],
+    }
     numeric_fields = {"bytecode_bytes"}
     for line in lines[1:]:
         if line.startswith("stage\t"):
@@ -5613,6 +5723,52 @@ def parse_backend_check_output(output: str) -> Json:
             if len(parts) != 3 or not parts[1] or parts[2] not in {"some", "none"}:
                 fail(f"Lean backend check runner produced malformed stage: {line!r}")
             summary["stages"][parts[1]] = parts[2]
+            continue
+        if line.startswith("locals_body\t"):
+            parts = line.split("\t")
+            if len(parts) != 3 or parts[1] != "main" or parts[2] not in {"some", "none"}:
+                fail(
+                    "Lean backend check runner produced malformed locals body: "
+                    f"{line!r}"
+                )
+            summary["localsBody"] = parts[2]
+            continue
+        if line.startswith("locals_proc\t"):
+            parts = line.split("\t")
+            if len(parts) != 3 or not parts[1] or parts[2] not in {"some", "none"}:
+                fail(
+                    "Lean backend check runner produced malformed locals proc: "
+                    f"{line!r}"
+                )
+            summary["localsProcs"][parts[1]] = parts[2]
+            continue
+        if line.startswith("locals_stmt\t"):
+            parts = line.split("\t")
+            if (
+                len(parts) != 5
+                or not parts[1]
+                or not parts[3]
+                or parts[4] not in {"some", "none"}
+            ):
+                fail(
+                    "Lean backend check runner produced malformed locals stmt: "
+                    f"{line!r}"
+                )
+            try:
+                index = int(parts[2])
+            except ValueError:
+                fail(
+                    "Lean backend check runner produced malformed locals stmt "
+                    f"index: {line!r}"
+                )
+            summary["localsStmtTrace"].append(
+                {
+                    "owner": parts[1],
+                    "index": index,
+                    "kind": parts[3],
+                    "status": parts[4],
+                }
+            )
             continue
         key, sep, value = line.partition("=")
         if not sep or not key:
@@ -6974,7 +7130,7 @@ def render_bridge_json_input_output(
         )
         return rendered, source_name, contract_name, selected_name
 
-    selected = select_object(root, args.object or "runtime")
+    selected = select_object(root, args.object) if args.object else root
     selected_name = selected.name
     bridge_json = render_bridge_json(
         selected,
@@ -6990,7 +7146,7 @@ def render_bridge_json_input_output(
                 selected,
                 source_name,
                 contract_name,
-                args.object or "runtime",
+                args.object or "selected",
                 merged_linker_symbol_entries(args.linker_symbol),
                 ast_output=frontend.get("ast") if frontend is not None else None,
             )
@@ -7039,7 +7195,7 @@ def render_bridge_json_input_output(
                 selected,
                 source_name,
                 contract_name,
-                args.object or "runtime",
+                args.object or "selected",
                 frontend,
             ),
             source_name,

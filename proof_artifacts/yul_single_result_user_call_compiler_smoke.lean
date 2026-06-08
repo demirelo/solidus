@@ -262,6 +262,14 @@ def smokeImmutableContext : Solidity.Frontend.ObjectBuiltinContext :=
   { smokeObjectContext with
     immutableValues := [("IMM", smokeOne)] }
 
+def smokeSetImmutableContext : Solidity.Frontend.ObjectBuiltinContext :=
+  { smokeObjectContext with
+    immutableReferences := [("IMM", [{ start := 7, length := 32 }])] }
+
+def smokeSetImmutableNoReferenceContext :
+    Solidity.Frontend.ObjectBuiltinContext :=
+  smokeObjectContext
+
 #guard ObjectBuiltin.unsupported? "f" = false
 #guard ObjectBuiltin.unsupported? "datasize" = true
 #guard ObjectBuiltin.unsupported? "dataoffset" = true
@@ -655,6 +663,37 @@ def smokeImmutableContext : Solidity.Frontend.ObjectBuiltinContext :=
           [.bytesLit smokeImmutableNameBytes])
         smokeImmutableContext >>= Solidity.Frontend.Expr.toYul? with
   | some (.Lit value) => value.toNat == smokeOne.toNat
+  | _ => false) = true
+
+#guard
+  (match
+      Solidity.Frontend.Stmt.resolveObjectBuiltinsIn?
+        (.exprStmt
+          (.call .objectBuiltin "setimmutable"
+            [ .var "base"
+            , .bytesLit smokeImmutableNameBytes
+            , .lit smokeOne ]))
+        smokeSetImmutableContext with
+  | some
+      (.block
+        [ .exprStmt
+            (.call .primitive "mstore"
+              [ .call .primitive "add"
+                  [.var "base", .lit offset]
+              , .lit value ]) ]) =>
+      offset.toNat == 7 && value.toNat == smokeOne.toNat
+  | _ => false) = true
+
+#guard
+  (match
+      Solidity.Frontend.Stmt.resolveObjectBuiltinsIn?
+        (.exprStmt
+          (.call .objectBuiltin "setimmutable"
+            [ .var "base"
+            , .bytesLit smokeImmutableNameBytes
+            , .lit smokeOne ]))
+        smokeSetImmutableNoReferenceContext with
+  | some (.block []) => true
   | _ => false) = true
 
 end

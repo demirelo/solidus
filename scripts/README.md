@@ -551,6 +551,24 @@ backend compatibility inventory for every normalized bridge file produced by
 that run, while many non-passing comparisons still carry the same preflight
 diagnostics.
 
+For real project checkouts, `scripts/run_forge_project_compare.py` wraps that
+same comparison in a repo-level pipeline.  It can reuse a local Foundry project
+or shallow-fetch a Git ref, run setup commands/submodule updates, run the
+two-compiler comparison, and write `report.json` plus stdout/stderr logs:
+
+```sh
+PYTHON=/path/to/python-with-jsonschema \
+  scripts/run_forge_project_compare.py \
+    --repo https://github.com/Uniswap/v4-core.git \
+    --ref 46c6834698c48bc4a463a86d8420f4eb1d7f3b75 \
+    --submodule lib/solmate \
+    --solc-version 0.8.26 \
+    --match-test test_getSqrtPriceTarget
+```
+
+Use `--project-dir /path/to/checkout` to test an existing repo, and pass extra
+Forge arguments after `--`.
+
 The runner normalizes Forge's `[PASS]`/`[FAIL]`/`[SKIP]` lines and final test
 summary from both runs, ignoring gas differences and result order, so a
 successful comparison means the selected test outcome set matched, not merely
