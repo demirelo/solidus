@@ -1,5 +1,17 @@
 # Progress Log
 
+## 2026-06-08 11:28 PDT - validation/famous-repo-aggregate-smokes
+Ran the aggregate `scripts/test_famous_repo_bridge_smokes.sh` batch across all
+10 pinned real-contract smokes: Uniswap v4 extload, Uniswap v4 core,
+Uniswap v4 Position, Universal Router, Permit2, Aave v3, Solmate, Solady,
+OpenZeppelin, and Chainlink. The batch passed end to end. New positive
+coverage includes Universal Router `Commands`, Uniswap v4 Position, Chainlink
+Aggregator, and Aave math backend-check/runtime compare slices. The remaining
+dominant backend blockers are now clearly grouped as deep-local
+`locals_to_expressions`/`live_layout_to_locals` failures, unresolved
+linker-symbol/object-resolution cases, and explicit resource-observer blockers
+such as `gas`.
+
 ## 2026-06-08 11:15 PDT - support/real-contract-backend-diagnostics-batch
 Hardened the real-contract bridge smokes around the current backend boundary:
 Universal Router `Commands` now backend-checks and compares successfully,
