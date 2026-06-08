@@ -73,11 +73,20 @@ def lookupFun? (name : Name) : List FunSlots → Option FunSlots
 def slotList (entries : List (Name × Nat)) : List Nat :=
   entries.map Prod.snd
 
+def functionEnv (slots : FunSlots) : SlotEnv :=
+  slots.returns ++ slots.params
+
 def EnvSlotsBounded (env : SlotEnv) (limit : Nat) : Prop :=
   ∀ entry, entry ∈ env → entry.2 < limit
 
 def StateSlotsBounded (state : CompileState) : Prop :=
   EnvSlotsBounded state.env state.nextSlot
+
+def FunSlotsBounded (slots : FunSlots) (limit : Nat) : Prop :=
+  EnvSlotsBounded (functionEnv slots) limit
+
+def FunSlotListBounded (functions : List FunSlots) (limit : Nat) : Prop :=
+  ∀ slots, slots ∈ functions → FunSlotsBounded slots limit
 
 def allocateName (name : Name) (state : CompileState) :
     Nat × CompileState :=
@@ -141,6 +150,21 @@ theorem lookupFun?_some_mem {name : Name} {slots : FunSlots}
         simp
       · simp [lookupFun?, hName] at hLookup
         exact List.mem_cons_of_mem _ (ih hLookup)
+
+theorem lookupFun?_bounded {name : Name} {slots : FunSlots}
+    {functions : List FunSlots} {limit : Nat}
+    (hBound : FunSlotListBounded functions limit)
+    (hLookup : lookupFun? name functions = some slots) :
+    FunSlotsBounded slots limit :=
+  hBound slots (lookupFun?_some_mem hLookup)
+
+theorem funSlotListBounded_mono {functions : List FunSlots}
+    {limit limit' : Nat}
+    (hBound : FunSlotListBounded functions limit)
+    (hLe : limit ≤ limit') :
+    FunSlotListBounded functions limit' := by
+  intro slots hMem entry hEntry
+  exact Nat.lt_of_lt_of_le (hBound slots hMem entry hEntry) hLe
 
 theorem allocateName_nextSlot (name : Name) (state : CompileState) :
     (allocateName name state).2.nextSlot = state.nextSlot + 1 := by
@@ -393,6 +417,25 @@ theorem allocateFunctionSignatures_slots_lt_final :
                         (finalState := stateAfterTail)
                         (slots := slots) (entry := entry)
                         hTail hTailMem hEntry
+
+theorem allocateFunctionSignatures_funSlotListBounded_final
+    {fns : List FunDef} {state : CompileState}
+    {functionSlots : List FunSlots} {finalState : CompileState}
+    (hAlloc :
+      allocateFunctionSignatures fns state =
+        (functionSlots, finalState)) :
+    FunSlotListBounded functionSlots finalState.nextSlot := by
+  intro slots hSlots entry hEntry
+  have hEntry' : entry ∈ slots.params ++ slots.returns := by
+    have hAppend := List.mem_append.mp hEntry
+    rcases hAppend with hReturn | hParam
+    · exact List.mem_append_right slots.params hReturn
+    · exact List.mem_append_left slots.returns hParam
+  exact
+    allocateFunctionSignatures_slots_lt_final
+      (fns := fns) (state := state)
+      (functionSlots := functionSlots) (finalState := finalState)
+      (slots := slots) (entry := entry) hAlloc hSlots hEntry'
 
 theorem allocateFunctionSignatures_lookup_of_find? :
     ∀ {fns : List FunDef} {state : CompileState}
@@ -2301,9 +2344,6 @@ mutual
                     · contradiction)
 end
 
-def functionEnv (slots : FunSlots) : SlotEnv :=
-  slots.returns ++ slots.params
-
 def compileFunction? (ctx : CompileCtx) (state : CompileState)
     (fn : FunDef) : Option (Expressions.Proc × CompileState) := do
   if (fn.returns ++ fn.params).Nodup then pure () else none
@@ -2398,6 +2438,97 @@ theorem compileFunction?_nextSlot_mono {ctx : CompileCtx}
     · simp [hRetBound] at hCompile
   · simp [hSigNodup] at hCompile
 
+theorem compileFunction?_stateSlotsBounded {ctx : CompileCtx}
+    {state : CompileState} {fn : FunDef}
+    {proc : Expressions.Proc} {state' : CompileState}
+    (hStateBound : StateSlotsBounded state)
+    (hFunctionBound :
+      FunSlotListBounded ctx.functions state.nextSlot)
+    (hCompile : compileFunction? ctx state fn = some (proc, state')) :
+    StateSlotsBounded state' := by
+  unfold compileFunction? at hCompile
+  by_cases hSigNodup : (fn.returns ++ fn.params).Nodup
+  · simp [hSigNodup] at hCompile
+    by_cases hRetBound : fn.returns.length < 16
+    · simp [hRetBound] at hCompile
+      cases hSlots : lookupFun? fn.name ctx.functions with
+      | none =>
+          simp [hSlots] at hCompile
+      | some slots =>
+          simp [hSlots] at hCompile
+          let bodyStart : CompileState :=
+            { env := functionEnv slots, nextSlot := state.nextSlot }
+          have hBodyStartBound : StateSlotsBounded bodyStart := by
+            simpa [bodyStart, StateSlotsBounded] using
+              lookupFun?_bounded hFunctionBound hSlots
+          cases hBodyPlan :
+              compileBlockOpen? ctx fn.returns bodyStart fn.body with
+          | none =>
+              simp [bodyStart, hBodyPlan] at hCompile
+          | some bodyPlan =>
+              cases hRetCode :
+                  compileReturnCode? bodyPlan.state.env fn.returns with
+              | none =>
+                  simp [bodyStart, hBodyPlan, hRetCode] at hCompile
+              | some retCode =>
+                  simp [bodyStart, hBodyPlan, hRetCode] at hCompile
+                  rcases hCompile with ⟨rfl, rfl⟩
+                  intro entry hMem
+                  exact Nat.lt_of_lt_of_le
+                    (hStateBound entry hMem)
+                    (compileBlockOpen?_nextSlot_mono
+                      (state := bodyStart) (plan := bodyPlan) hBodyPlan)
+    · simp [hRetBound] at hCompile
+  · simp [hSigNodup] at hCompile
+
+theorem compileFunction?_bodyPlan_stateSlotsBounded {ctx : CompileCtx}
+    {state : CompileState} {fn : FunDef}
+    {proc : Expressions.Proc} {state' : CompileState}
+    (hFunctionBound :
+      FunSlotListBounded ctx.functions state.nextSlot)
+    (hCompile : compileFunction? ctx state fn = some (proc, state')) :
+    ∃ slots bodyPlan retCode,
+      lookupFun? fn.name ctx.functions = some slots ∧
+        compileBlockOpen? ctx fn.returns
+          { env := functionEnv slots, nextSlot := state.nextSlot }
+          fn.body = some bodyPlan ∧
+        compileReturnCode? bodyPlan.state.env fn.returns = some retCode ∧
+        StateSlotsBounded bodyPlan.state := by
+  unfold compileFunction? at hCompile
+  by_cases hSigNodup : (fn.returns ++ fn.params).Nodup
+  · simp [hSigNodup] at hCompile
+    by_cases hRetBound : fn.returns.length < 16
+    · simp [hRetBound] at hCompile
+      cases hSlots : lookupFun? fn.name ctx.functions with
+      | none =>
+          simp [hSlots] at hCompile
+      | some slots =>
+          simp [hSlots] at hCompile
+          let bodyStart : CompileState :=
+            { env := functionEnv slots, nextSlot := state.nextSlot }
+          have hBodyStartBound : StateSlotsBounded bodyStart := by
+            simpa [bodyStart, StateSlotsBounded] using
+              lookupFun?_bounded hFunctionBound hSlots
+          cases hBodyPlan :
+              compileBlockOpen? ctx fn.returns bodyStart fn.body with
+          | none =>
+              simp [bodyStart, hBodyPlan] at hCompile
+          | some bodyPlan =>
+              cases hRetCode :
+                  compileReturnCode? bodyPlan.state.env fn.returns with
+              | none =>
+                  simp [bodyStart, hBodyPlan, hRetCode] at hCompile
+              | some retCode =>
+                  simp [bodyStart, hBodyPlan, hRetCode] at hCompile
+                  refine ⟨slots, bodyPlan, retCode, rfl, ?_, hRetCode, ?_⟩
+                  · simpa [bodyStart] using hBodyPlan
+                  · exact
+                      compileBlockOpen?_stateSlotsBounded
+                        (state := bodyStart) (plan := bodyPlan)
+                        hBodyStartBound hBodyPlan
+    · simp [hRetBound] at hCompile
+  · simp [hSigNodup] at hCompile
+
 theorem compileFunctions?_nextSlot_mono {ctx : CompileCtx} :
     ∀ {state : CompileState} {fns : List FunDef}
       {procs : List Expressions.Proc} {state' : CompileState},
@@ -2426,6 +2557,49 @@ theorem compileFunctions?_nextSlot_mono {ctx : CompileCtx} :
                 (compileFunction?_nextSlot_mono hHead)
                 (compileFunctions?_nextSlot_mono hTail)
 
+theorem compileFunctions?_stateSlotsBounded {ctx : CompileCtx} :
+    ∀ {state : CompileState} {fns : List FunDef}
+      {procs : List Expressions.Proc} {state' : CompileState},
+      StateSlotsBounded state →
+      FunSlotListBounded ctx.functions state.nextSlot →
+      compileFunctions? ctx state fns = some (procs, state') →
+        StateSlotsBounded state'
+  | state, [], procs, state', hStateBound, _hFunctionBound,
+      hCompile => by
+      simp [compileFunctions?] at hCompile
+      rcases hCompile with ⟨rfl, rfl⟩
+      exact hStateBound
+  | state, fn :: rest, procs, state', hStateBound, hFunctionBound,
+      hCompile => by
+      unfold compileFunctions? at hCompile
+      cases hHead : compileFunction? ctx state fn with
+      | none =>
+          simp [hHead] at hCompile
+      | some headResult =>
+          rcases headResult with ⟨proc, stateAfterHead⟩
+          cases hTail :
+              compileFunctions? ctx stateAfterHead rest with
+          | none =>
+              simp [hHead, hTail] at hCompile
+          | some tailResult =>
+              rcases tailResult with ⟨tailProcs, tailState⟩
+              simp [hHead, hTail] at hCompile
+              rcases hCompile with ⟨rfl, rfl⟩
+              have hHeadBound :
+                  StateSlotsBounded stateAfterHead :=
+                compileFunction?_stateSlotsBounded
+                  hStateBound hFunctionBound hHead
+              have hFunctionBoundTail :
+                  FunSlotListBounded ctx.functions
+                    stateAfterHead.nextSlot :=
+                funSlotListBounded_mono hFunctionBound
+                  (compileFunction?_nextSlot_mono hHead)
+              exact
+                compileFunctions?_stateSlotsBounded
+                  (fns := rest) (procs := tailProcs)
+                  (state' := tailState)
+                  hHeadBound hFunctionBoundTail hTail
+
 theorem compileMain?_nextSlot_mono {ctx : CompileCtx}
     {frameWords : Nat} {state : CompileState} {body : Block}
     {plan : Plan}
@@ -2446,6 +2620,28 @@ theorem compileMain?_nextSlot_mono {ctx : CompileCtx}
             compileStmtList?_nextSlot_mono
               (stmts := (splitPrelude stmts).2)
               (plan := listPlan) hList
+
+theorem compileMain?_stateSlotsBounded {ctx : CompileCtx}
+    {frameWords : Nat} {state : CompileState} {body : Block}
+    {plan : Plan}
+    (hStateBound : StateSlotsBounded state)
+    (hCompile : compileMain? ctx frameWords state body = some plan) :
+    StateSlotsBounded plan.state := by
+  unfold compileMain? at hCompile
+  cases body with
+  | mk stmts =>
+      simp at hCompile
+      cases hList :
+          compileStmtList? ctx [] state (splitPrelude stmts).2 with
+      | none =>
+          simp [hList] at hCompile
+      | some listPlan =>
+          simp [hList] at hCompile
+          cases hCompile
+          exact
+            compileStmtList?_stateSlotsBounded
+              (stmts := (splitPrelude stmts).2)
+              (plan := listPlan) hStateBound hList
 
 theorem compileExpressionsProgram?_signatures_nextSlot_le_maxFrameWords
     {maxFrameWords : Nat} {program : Program}
@@ -2526,6 +2722,23 @@ theorem compileExpressionsProgram?_signature_slot_lt_maxFrameWords
     compileExpressionsProgram?_signatures_nextSlot_le_maxFrameWords
       hSignatures hCompile
   exact Nat.lt_of_lt_of_le hSlotLt hFrameLe
+
+theorem compileExpressionsProgram?_functionSlotListBounded
+    {maxFrameWords : Nat} {program : Program}
+    {exprProgram : Expressions.Program}
+    {functionSlots : List FunSlots}
+    {stateAfterSignatures : CompileState}
+    (hSignatures :
+      allocateFunctionSignatures program.functions
+        ({ env := [], nextSlot := 0 } : CompileState) =
+          (functionSlots, stateAfterSignatures))
+    (hCompile :
+      compileExpressionsProgram? maxFrameWords program = some exprProgram) :
+    FunSlotListBounded functionSlots maxFrameWords :=
+  funSlotListBounded_mono
+    (allocateFunctionSignatures_funSlotListBounded_final hSignatures)
+    (compileExpressionsProgram?_signatures_nextSlot_le_maxFrameWords
+      hSignatures hCompile)
 
 theorem compilePreludeStmt?_noCallCreate {stmt : Stmt}
     {compiled : Expressions.Stmt}
