@@ -1,4 +1,5 @@
 import EvmCompiler.Functions.Compiler
+import EvmCompiler.Expressions.Preservation
 
 /-!
 Executable stack-too-deep fallback for imported function-layer programs.
@@ -426,10 +427,72 @@ def compileExpressionsProgram? (maxFrameWords : Nat)
   else
     none
 
+noncomputable def compileChecked? (maxFrameWords : Nat)
+    (program : Program) : Option (Expressions.Program × Assembly.Program) := do
+  let exprProgram ← compileExpressionsProgram? maxFrameWords program
+  let asm ← Expressions.Program.compileChecked? exprProgram
+  some (exprProgram, asm)
+
+theorem compileChecked?_eq_some
+    {maxFrameWords : Nat} {program : Program}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileChecked? maxFrameWords program = some (exprProgram, asm)) :
+    compileExpressionsProgram? maxFrameWords program = some exprProgram ∧
+      Expressions.Program.compileChecked? exprProgram = some asm := by
+  unfold compileChecked? at hCompile
+  cases hExpr : compileExpressionsProgram? maxFrameWords program with
+  | none =>
+      simp [hExpr] at hCompile
+  | some exprProgram' =>
+      simp [hExpr] at hCompile
+      cases hAsm : Expressions.Program.compileChecked? exprProgram' with
+      | none =>
+          simp [hAsm] at hCompile
+      | some asm' =>
+          simp [hAsm] at hCompile
+          rcases hCompile with ⟨rfl, rfl⟩
+          exact ⟨rfl, hAsm⟩
+
+noncomputable def compileCheckedAssembly? (maxFrameWords : Nat)
+    (program : Program) : Option Assembly.Program := do
+  let (_exprProgram, asm) ← compileChecked? maxFrameWords program
+  some asm
+
+theorem compileCheckedAssembly?_eq_some
+    {maxFrameWords : Nat} {program : Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedAssembly? maxFrameWords program = some asm) :
+    ∃ exprProgram : Expressions.Program,
+      compileExpressionsProgram? maxFrameWords program = some exprProgram ∧
+        Expressions.Program.compileChecked? exprProgram = some asm := by
+  unfold compileCheckedAssembly? at hCompile
+  cases hChecked : compileChecked? maxFrameWords program with
+  | none =>
+      simp [hChecked] at hCompile
+  | some result =>
+      rcases result with ⟨exprProgram, asm'⟩
+      simp [hChecked] at hCompile
+      cases hCompile
+      exact ⟨exprProgram, compileChecked?_eq_some hChecked⟩
+
 def compileTarget? (maxFrameWords : Nat)
     (program : Program) : Option Assembly.TargetProgram := do
   let exprProgram ← compileExpressionsProgram? maxFrameWords program
-  Expressions.Program.compile? exprProgram
+  Expressions.Program.compileExecutable? exprProgram
+
+theorem compileTarget?_eq_standard (maxFrameWords : Nat)
+    (program : Program) :
+    compileTarget? maxFrameWords program =
+      (do
+        let exprProgram ← compileExpressionsProgram? maxFrameWords program
+        Expressions.Program.compile? exprProgram) := by
+  unfold compileTarget?
+  cases hExpr : compileExpressionsProgram? maxFrameWords program with
+  | none =>
+      simp [hExpr]
+  | some exprProgram =>
+      simp [hExpr, Expressions.Program.compileExecutable?_eq_compile?]
 
 end ScratchFrameSpill
 end Functions

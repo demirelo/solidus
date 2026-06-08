@@ -5566,7 +5566,7 @@ def main : IO Unit := do
   let scratchFrameSpillCompile? ←
     evmCompilerRunnerTimedPure "scratch_frame_spill_compile" (fun _ => do
     let expressions ← scratchFrameSpillToExpressions?
-    expressions.compile?)
+    expressions.compileExecutable?)
   let childImages? ←
     evmCompilerRunnerTimedPure "child_images" (fun _ =>
     EvmCompiler.Solidity.Frontend.Object.List.bytecodeImagesUncheckedWithLinkerSymbols?

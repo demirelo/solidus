@@ -48,7 +48,7 @@ def compileScratchFrameSpillFallback? (program : Program) :
 
 def compile? (program : Program) :
     Option Assembly.TargetProgram :=
-  match Functions.Inline.Program.compile? program.toFunctions with
+  match Functions.Inline.Program.compileExecutable? program.toFunctions with
   | some target => some target
   | none =>
       match compileCallAwareSpillFallback? program with

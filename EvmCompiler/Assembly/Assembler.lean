@@ -135,6 +135,54 @@ def assemble? (program : Program) : Option TargetProgram := do
   let code ← emit? program
   some { code := code }
 
+def emitFromRev? (program : Program) :
+    Program → Nat → List LocatedTarget → Option (List LocatedTarget)
+  | [], _, acc => some acc.reverse
+  | instr :: rest, pc, acc => do
+      let here ← emitInstr? program pc instr
+      emitFromRev? program rest (pc + instr.byteSize)
+        (here.reverse ++ acc)
+
+def emitExecutable? (program : Program) : Option (List LocatedTarget) :=
+  emitFromRev? program program 0 []
+
+def assembleExecutable? (program : Program) : Option TargetProgram := do
+  let code ← emitExecutable? program
+  some { code := code }
+
+theorem emitFromRev?_eq_emitFrom?_append (program : Program) :
+    ∀ rest pc acc,
+      emitFromRev? program rest pc acc =
+        match emitFrom? program rest pc with
+        | some code => some (acc.reverse ++ code)
+        | none => none
+  | [], _pc, acc => by
+      simp [emitFromRev?, emitFrom?]
+  | instr :: rest, pc, acc => by
+      simp [emitFromRev?, emitFrom?]
+      cases hHere : emitInstr? program pc instr with
+      | none =>
+          simp [hHere]
+      | some here =>
+          simp [hHere]
+          rw [emitFromRev?_eq_emitFrom?_append program rest
+            (pc + instr.byteSize) (here.reverse ++ acc)]
+          cases hRest : emitFrom? program rest (pc + instr.byteSize) with
+          | none =>
+              simp [hRest]
+          | some there =>
+              simp [hRest, List.reverse_append, List.append_assoc]
+
+theorem emitExecutable?_eq_emit? (program : Program) :
+    emitExecutable? program = emit? program := by
+  simp [emitExecutable?, emit?,
+    emitFromRev?_eq_emitFrom?_append program program 0 []]
+  cases emitFrom? program program 0 <;> rfl
+
+theorem assembleExecutable?_eq_assemble? (program : Program) :
+    assembleExecutable? program = assemble? program := by
+  simp [assembleExecutable?, assemble?, emitExecutable?_eq_emit? program]
+
 namespace TargetProgram
 
 def fetch (target : TargetProgram) (pc : Nat) : Option TargetInstr :=

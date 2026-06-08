@@ -207,6 +207,15 @@ def compile? (program : Program) :
     Option Assembly.TargetProgram :=
   program.toLocals.compile?
 
+def compileExecutable? (program : Program) :
+    Option Assembly.TargetProgram :=
+  program.toLocals.compileExecutable?
+
+theorem compileExecutable?_eq_compile? (program : Program) :
+    compileExecutable? program = compile? program := by
+  simp [compileExecutable?, compile?,
+    Locals.Program.compileExecutable?_eq_compile?]
+
 def Accepted (program : Program) : Prop :=
   program.WF ∧ program.Scoped ∧ program.toLocals.Accepted
 
@@ -1123,6 +1132,15 @@ def toExpressions? (program : Functions.Program) : Option Expressions.Program :=
 def compile? (program : Functions.Program) :
     Option Assembly.TargetProgram :=
   Functions.Program.compile? program
+
+def compileExecutable? (program : Functions.Program) :
+    Option Assembly.TargetProgram :=
+  Functions.Program.compileExecutable? program
+
+theorem compileExecutable?_eq_compile? (program : Functions.Program) :
+    compileExecutable? program = compile? program := by
+  simp [compileExecutable?, compile?,
+    Functions.Program.compileExecutable?_eq_compile?]
 
 def Accepted (program : Functions.Program) : Prop :=
   Functions.Program.Accepted program

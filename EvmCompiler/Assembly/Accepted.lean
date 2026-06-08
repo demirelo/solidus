@@ -232,6 +232,16 @@ def compile? (program : Program) : Option TargetProgram :=
   else
     none
 
+def compileExecutable? (program : Program) : Option TargetProgram :=
+  if Program.accepted program then
+    assembleExecutable? program
+  else
+    none
+
+theorem compileExecutable?_eq_compile? (program : Program) :
+    compileExecutable? program = compile? program := by
+  simp [compileExecutable?, compile?, assembleExecutable?_eq_assemble? program]
+
 /--
 Out-of-gas policy boundary for the full EVM runner.
 

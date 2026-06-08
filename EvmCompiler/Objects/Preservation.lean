@@ -2,6 +2,7 @@ import EvmCompiler.Objects.Semantics
 import EvmCompiler.Objects.SourceSemantics
 import EvmCompiler.Functions.Preservation
 import EvmCompiler.Functions.LiveLayoutPreservation
+import EvmCompiler.Functions.ScratchFrameSpill
 
 namespace EvmCompiler
 namespace Objects
@@ -198,6 +199,19 @@ noncomputable def compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?
       Assembly.Program) :=
   Functions.Source.Program.compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?
     maxWords program.toFunctions
+
+noncomputable def compileCheckedWithScratchFrameSpill?
+    (maxFrameWords : Nat) (program : Objects.Program) :
+    Option (Expressions.Program × Assembly.Program) :=
+  Functions.ScratchFrameSpill.compileChecked? maxFrameWords
+    program.toFunctions
+
+noncomputable def compileCheckedAssemblyWithScratchFrameSpill?
+    (maxFrameWords : Nat) (program : Objects.Program) :
+    Option Assembly.Program := do
+  let (_exprProgram, asm) ←
+    compileCheckedWithScratchFrameSpill? maxFrameWords program
+  some asm
 
 theorem compileChecked?_eq_some {program : Objects.Program}
     {asm : Assembly.Program}
@@ -449,6 +463,44 @@ theorem compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_eq_some
       some (range, asm) := by
   simpa [compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?]
     using hCompile
+
+theorem compileCheckedWithScratchFrameSpill?_eq_some
+    {maxFrameWords : Nat} {program : Objects.Program}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithScratchFrameSpill? maxFrameWords program =
+        some (exprProgram, asm)) :
+    Functions.ScratchFrameSpill.compileExpressionsProgram? maxFrameWords
+        program.toFunctions =
+      some exprProgram ∧
+      Expressions.Program.compileChecked? exprProgram = some asm := by
+  exact
+    Functions.ScratchFrameSpill.compileChecked?_eq_some
+      (by
+        simpa [compileCheckedWithScratchFrameSpill?] using hCompile)
+
+theorem compileCheckedAssemblyWithScratchFrameSpill?_eq_some
+    {maxFrameWords : Nat} {program : Objects.Program}
+    {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedAssemblyWithScratchFrameSpill? maxFrameWords program =
+        some asm) :
+    ∃ exprProgram : Expressions.Program,
+      Functions.ScratchFrameSpill.compileExpressionsProgram? maxFrameWords
+          program.toFunctions =
+        some exprProgram ∧
+        Expressions.Program.compileChecked? exprProgram = some asm := by
+  unfold compileCheckedAssemblyWithScratchFrameSpill? at hCompile
+  cases hScratch :
+      compileCheckedWithScratchFrameSpill? maxFrameWords program with
+  | none =>
+      simp [hScratch] at hCompile
+  | some result =>
+      rcases result with ⟨exprProgram, asm'⟩
+      simp [hScratch] at hCompile
+      cases hCompile
+      exact ⟨exprProgram,
+        compileCheckedWithScratchFrameSpill?_eq_some hScratch⟩
 
 theorem compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_noCallCreate
     {maxWords : Nat} {program : Objects.Program}

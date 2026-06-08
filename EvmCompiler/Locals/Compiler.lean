@@ -445,6 +445,20 @@ def compile? (program : Program) :
   let lower ← toExpressions? program
   lower.compile?
 
+def compileExecutable? (program : Program) :
+    Option Assembly.TargetProgram := do
+  let lower ← toExpressions? program
+  lower.compileExecutable?
+
+theorem compileExecutable?_eq_compile? (program : Program) :
+    compileExecutable? program = compile? program := by
+  unfold compileExecutable? compile?
+  cases hLower : toExpressions? program with
+  | none =>
+      simp [hLower]
+  | some lower =>
+      simp [hLower, Expressions.Program.compileExecutable?_eq_compile?]
+
 def Accepted (program : Program) : Prop :=
   ∃ lower : Expressions.Program, toExpressions? program = some lower ∧
     lower.Accepted

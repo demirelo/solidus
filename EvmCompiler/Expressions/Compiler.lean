@@ -144,6 +144,13 @@ def compile (program : Program) : Assembly.Program :=
 def compile? (program : Program) : Option Assembly.TargetProgram :=
   Assembly.compile? program.compile
 
+def compileExecutable? (program : Program) : Option Assembly.TargetProgram :=
+  Assembly.compileExecutable? program.compile
+
+theorem compileExecutable?_eq_compile? (program : Program) :
+    compileExecutable? program = compile? program := by
+  simp [compileExecutable?, compile?, Assembly.compileExecutable?_eq_compile?]
+
 def Accepted (program : Program) : Prop :=
   Structured.Preservation.Program.Accepted program.toStructured
 
