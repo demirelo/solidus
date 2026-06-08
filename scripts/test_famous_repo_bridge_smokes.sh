@@ -10,6 +10,7 @@ SMOKES=(
   test_uniswap_universal_router_smoke.sh
   test_uniswap_permit2_bridge_smoke.sh
   test_aave_v3_bridge_smoke.sh
+  test_compound_comet_bridge_smoke.sh
   test_solmate_bridge_smoke.sh
   test_solady_bridge_smoke.sh
   test_openzeppelin_bridge_smoke.sh

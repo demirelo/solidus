@@ -997,6 +997,27 @@ The script defaults to Aave v3 Core commit
 `AAVE_V3_DIR=/path/to/aave-v3-core` to reuse a local checkout or `KEEP_TMP=1`
 to keep the generated bridge JSON files.
 
+A networked smoke targets a pinned Compound v3 Comet checkout.  It builds an
+ABI-shaped wrapper around the real `CometMath` internal functions and compares
+safe-cast, signed/unsigned conversion, boolean conversion, and custom-error
+revert paths against full solc bytecode through Forge.  The smoke also runs
+Lean decode, bridge-summary validation, and backend-check preflight before the
+Forge comparison.  Because the pinned Comet source uses exact pragma
+`0.8.15`, and solc 0.8.15 does not emit the structured Yul AST fields consumed
+by this bridge, the smoke copies `CometMath.sol` into the temporary fixture with
+only the pragma relaxed and then compiles it with structured-AST solc `0.8.26`:
+
+```sh
+SOLC=/Users/dan/.local/bin/solc LAKE=/Users/dan/.elan/bin/lake \
+  FORGE=/Users/dan/.foundry/bin/forge INSTALL_SOLC=0 \
+  scripts/test_compound_comet_bridge_smoke.sh
+```
+
+The script defaults to Comet commit
+`d5a30b0aaeff7755f1431e87f818990902237b03`, bridge solc `0.8.26`, and Forge
+EVM version `cancun`.  Pass `COMPOUND_COMET_DIR=/path/to/comet` to reuse a
+local checkout or `KEEP_TMP=1` to keep the generated bridge JSON files.
+
 A networked smoke also targets a pinned Solmate checkout.  It builds a local
 `SolmateHarness` fixture against Solmate's `ERC20`, `Owned`, and
 `SafeTransferLib`, covering compact inheritance, immutables, receive handlers,
@@ -1104,8 +1125,8 @@ or `KEEP_TMP=1` to keep the generated bridge JSON files.
 
 The famous-repo smoke runner executes the pinned Uniswap v4 extload summary,
 Uniswap v4 bridge, Uniswap v4 Position, Uniswap Universal Router, Uniswap
-Permit2, Aave v3, Solmate, Solady, OpenZeppelin, and Chainlink bridge smokes in
-one pass:
+Permit2, Aave v3, Compound Comet, Solmate, Solady, OpenZeppelin, and Chainlink
+bridge smokes in one pass:
 
 ```sh
 SOLC=/Users/dan/.local/bin/solc LAKE=/Users/dan/.elan/bin/lake \

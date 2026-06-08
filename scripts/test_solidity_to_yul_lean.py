@@ -10542,8 +10542,11 @@ class SolidityToYulLeanTests(unittest.TestCase):
                 output_path.write_text("0x6001\n")
                 return "0x6001"
 
-            def fake_run_forge_harness(_forge, _solc, _outdir, harness):
+            def fake_run_forge_harness(
+                _forge, _solc, _outdir, harness, evm_version
+            ):
                 self.assertIn("testRuntimeBytecodeCallResultsMatch", harness)
+                self.assertEqual(evm_version, "london")
 
             compare_call.load_bridge = fake_load_bridge
             compare_call.load_full_solc_bytecode = fake_load_full_solc_bytecode
@@ -10565,6 +10568,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
                     "/tmp/lake",
                     "--forge",
                     "/tmp/forge",
+                    "--forge-evm-version",
+                    "london",
                 ]
             )
             output_lines = set(sys.stdout.getvalue().splitlines())
@@ -10608,7 +10613,10 @@ class SolidityToYulLeanTests(unittest.TestCase):
                 self.assertEqual(object_selector, "runtime")
                 return "0x6001"
 
-            def fake_run_forge_harness(_forge, _solc, _outdir, _harness):
+            def fake_run_forge_harness(
+                _forge, _solc, _outdir, _harness, evm_version
+            ):
+                self.assertEqual(evm_version, "cancun")
                 return None
 
             compare_call.load_bridge = fake_load_bridge

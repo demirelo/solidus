@@ -673,6 +673,7 @@ def run_forge_harness(
     solc: str,
     outdir: Path,
     harness: str,
+    evm_version: str,
 ) -> None:
     project = outdir / "forge"
     (project / "test").mkdir(parents=True)
@@ -685,7 +686,7 @@ def run_forge_harness(
                 'test = "test"',
                 'out = "out"',
                 'cache_path = "cache"',
-                'evm_version = "cancun"',
+                f'evm_version = "{evm_version}"',
                 "",
             ]
         )
@@ -774,6 +775,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lake", default=os.environ.get("LAKE", "/Users/dan/.elan/bin/lake"))
     parser.add_argument("--lake-cwd", type=Path, default=Path.cwd())
     parser.add_argument("--forge", default=os.environ.get("FORGE", "forge"))
+    parser.add_argument(
+        "--forge-evm-version",
+        default="cancun",
+        help=(
+            "EVM version used to compile the generated Forge comparison harness. "
+            "Older pinned solc versions may need values such as london."
+        ),
+    )
     parser.add_argument("--optimized", action="store_true")
     parser.add_argument("--no-via-ir", dest="via_ir", action="store_false")
     parser.add_argument("--no-experimental", dest="experimental", action="store_false")
@@ -863,7 +872,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             compare_creation=not args.runtime_only,
             compare_runtime=not args.creation_only,
         )
-        run_forge_harness(args.forge, args.solc, outdir, harness)
+        run_forge_harness(
+            args.forge,
+            args.solc,
+            outdir,
+            harness,
+            args.forge_evm_version,
+        )
         summary_paths = require_bridge_summary_paths(outdir)
         print("contract_call_compare=pass")
         print(f"source={source_name}")
