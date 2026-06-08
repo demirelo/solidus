@@ -207,6 +207,22 @@ theorem allocateNames_nextSlot_mono (names : List Name)
   rw [allocateNames_nextSlot]
   omega
 
+theorem allocateNames_stateSlotsBounded :
+    ∀ (names : List Name) (state : CompileState),
+      StateSlotsBounded state →
+        StateSlotsBounded (allocateNames names state).2
+  | [], state, hBound => by
+      simpa [allocateNames] using hBound
+  | name :: rest, state, hBound => by
+      cases hAlloc : allocateName name state with
+      | mk slot stateAfterHead =>
+          have hHeadBound :
+              StateSlotsBounded stateAfterHead := by
+            simpa [hAlloc] using
+              allocateName_stateSlotsBounded name state hBound
+          simpa [allocateNames, hAlloc] using
+            allocateNames_stateSlotsBounded rest stateAfterHead hHeadBound
+
 theorem allocateNames_entries_length :
     ∀ (names : List Name) (state : CompileState),
       (allocateNames names state).1.length = names.length
@@ -343,6 +359,34 @@ theorem allocateFunctionSignatures_nextSlot_mono :
                   simp [allocateFunctionSignatures, hParams, hReturns, hTail]
                   exact Nat.le_trans hParamsLe
                     (Nat.le_trans hReturnsLe hTailLe)
+
+theorem allocateFunctionSignatures_stateSlotsBounded :
+    ∀ (fns : List FunDef) (state : CompileState),
+      StateSlotsBounded state →
+        StateSlotsBounded (allocateFunctionSignatures fns state).2
+  | [], state, hBound => by
+      simpa [allocateFunctionSignatures] using hBound
+  | fn :: rest, state, hBound => by
+      cases hParams : allocateNames fn.params state with
+      | mk params stateAfterParams =>
+          have hParamsBound :
+              StateSlotsBounded stateAfterParams := by
+            simpa [hParams] using
+              allocateNames_stateSlotsBounded fn.params state hBound
+          cases hReturns : allocateNames fn.returns stateAfterParams with
+          | mk returns stateAfterReturns =>
+              have hReturnsBound :
+                  StateSlotsBounded stateAfterReturns := by
+                simpa [hReturns] using
+                  allocateNames_stateSlotsBounded fn.returns
+                    stateAfterParams hParamsBound
+              cases hTail :
+                  allocateFunctionSignatures rest stateAfterReturns with
+              | mk tailSlots stateAfterTail =>
+                  simp [allocateFunctionSignatures, hParams, hReturns, hTail]
+                  simpa [hTail] using
+                    allocateFunctionSignatures_stateSlotsBounded rest
+                      stateAfterReturns hReturnsBound
 
 theorem allocateFunctionSignatures_slots_lt_final :
     ∀ {fns : List FunDef} {state : CompileState}
@@ -2739,6 +2783,207 @@ theorem compileExpressionsProgram?_functionSlotListBounded
     (allocateFunctionSignatures_funSlotListBounded_final hSignatures)
     (compileExpressionsProgram?_signatures_nextSlot_le_maxFrameWords
       hSignatures hCompile)
+
+theorem compileExpressionsProgram?_bounded_passes
+    {maxFrameWords : Nat} {program : Program}
+    {exprProgram : Expressions.Program}
+    (hCompile :
+      compileExpressionsProgram? maxFrameWords program = some exprProgram) :
+    ∃ functionSlots stateAfterSignatures probeProcs
+        stateAfterFunctions mainProbe procs stateAfterFunctionsFinal main,
+      allocateFunctionSignatures program.functions
+        ({ env := [], nextSlot := 0 } : CompileState) =
+          (functionSlots, stateAfterSignatures) ∧
+      FunSlotListBounded functionSlots maxFrameWords ∧
+      StateSlotsBounded stateAfterSignatures ∧
+      compileFunctions?
+          { functions := functionSlots, frameWords := 0 }
+          stateAfterSignatures program.functions =
+            some (probeProcs, stateAfterFunctions) ∧
+      StateSlotsBounded stateAfterFunctions ∧
+      compileMain?
+          { functions := functionSlots, frameWords := 0 }
+          0 { env := [], nextSlot := stateAfterFunctions.nextSlot }
+          program.body = some mainProbe ∧
+      StateSlotsBounded mainProbe.state ∧
+      mainProbe.state.nextSlot ≤ maxFrameWords ∧
+      compileFunctions?
+          { functions := functionSlots,
+            frameWords := mainProbe.state.nextSlot }
+          stateAfterSignatures program.functions =
+            some (procs, stateAfterFunctionsFinal) ∧
+      StateSlotsBounded stateAfterFunctionsFinal ∧
+      compileMain?
+          { functions := functionSlots,
+            frameWords := mainProbe.state.nextSlot }
+          mainProbe.state.nextSlot
+          { env := [], nextSlot := stateAfterFunctions.nextSlot }
+          program.body = some main ∧
+      StateSlotsBounded main.state ∧
+      exprProgram = { procs := procs, body := main.block } := by
+  unfold compileExpressionsProgram? at hCompile
+  by_cases hNames : (program.functions.map FunDef.name).Nodup
+  · simp [hNames] at hCompile
+    let initial : CompileState := { env := [], nextSlot := 0 }
+    have hInitialBound : StateSlotsBounded initial := by
+      intro entry hMem
+      simp [initial] at hMem
+    cases hSignatures :
+        allocateFunctionSignatures program.functions initial with
+    | mk functionSlots stateAfterSignatures =>
+        simp [initial, hSignatures] at hCompile
+        have hSignatures' :
+            allocateFunctionSignatures program.functions
+              ({ env := [], nextSlot := 0 } : CompileState) =
+                (functionSlots, stateAfterSignatures) := by
+          simpa [initial] using hSignatures
+        have hSignatureStateBound :
+            StateSlotsBounded stateAfterSignatures := by
+          simpa [hSignatures] using
+            allocateFunctionSignatures_stateSlotsBounded
+              program.functions initial hInitialBound
+        have hFunctionBoundSig :
+            FunSlotListBounded functionSlots
+              stateAfterSignatures.nextSlot := by
+          exact
+            allocateFunctionSignatures_funSlotListBounded_final
+              hSignatures'
+        let ctx0 : CompileCtx := { functions := functionSlots, frameWords := 0 }
+        cases hProbeFunctions :
+            compileFunctions? ctx0 stateAfterSignatures
+              program.functions with
+        | none =>
+            simp [ctx0, hProbeFunctions] at hCompile
+        | some probeResult =>
+            rcases probeResult with ⟨probeProcs, stateAfterFunctions⟩
+            have hProbeFunctionsBound :
+                StateSlotsBounded stateAfterFunctions :=
+              compileFunctions?_stateSlotsBounded
+                (ctx := ctx0) (state := stateAfterSignatures)
+                (fns := program.functions)
+                hSignatureStateBound hFunctionBoundSig hProbeFunctions
+            let mainStart : CompileState :=
+              { env := [], nextSlot := stateAfterFunctions.nextSlot }
+            have hMainStartBound : StateSlotsBounded mainStart := by
+              intro entry hMem
+              simp [mainStart] at hMem
+            cases hMainProbe :
+                compileMain? ctx0 0 mainStart program.body with
+            | none =>
+                simp [ctx0, mainStart, hProbeFunctions, hMainProbe]
+                  at hCompile
+            | some mainProbe =>
+                have hMainProbeBound : StateSlotsBounded mainProbe.state :=
+                  compileMain?_stateSlotsBounded
+                    (ctx := ctx0) (frameWords := 0)
+                    (state := mainStart) (body := program.body)
+                    (plan := mainProbe) hMainStartBound hMainProbe
+                by_cases hBound :
+                    mainProbe.state.nextSlot ≤ maxFrameWords
+                · simp [ctx0, mainStart, hProbeFunctions, hMainProbe,
+                    hBound] at hCompile
+                  let frameWords := mainProbe.state.nextSlot
+                  let ctxFinal : CompileCtx :=
+                    { functions := functionSlots, frameWords := frameWords }
+                  cases hFinalFunctions :
+                      compileFunctions? ctxFinal stateAfterSignatures
+                        program.functions with
+                  | none =>
+                      have hFinalFunctions' :
+                          compileFunctions?
+                              { functions := functionSlots,
+                                frameWords := mainProbe.state.nextSlot }
+                              stateAfterSignatures program.functions =
+                            none := by
+                        simpa [frameWords, ctxFinal] using hFinalFunctions
+                      simp [hFinalFunctions'] at hCompile
+                  | some finalResult =>
+                      rcases finalResult with
+                        ⟨procs, stateAfterFunctionsFinal⟩
+                      have hFinalFunctions' :
+                          compileFunctions?
+                              { functions := functionSlots,
+                                frameWords := mainProbe.state.nextSlot }
+                              stateAfterSignatures program.functions =
+                            some (procs, stateAfterFunctionsFinal) := by
+                        simpa [frameWords, ctxFinal] using hFinalFunctions
+                      have hFinalFunctionsBound :
+                          StateSlotsBounded stateAfterFunctionsFinal :=
+                        compileFunctions?_stateSlotsBounded
+                          (ctx := ctxFinal) (state := stateAfterSignatures)
+                          (fns := program.functions)
+                          hSignatureStateBound hFunctionBoundSig
+                          hFinalFunctions
+                      cases hMain :
+                          compileMain? ctxFinal frameWords mainStart
+                            program.body with
+                      | none =>
+                          have hMain' :
+                              compileMain?
+                                  { functions := functionSlots,
+                                    frameWords := mainProbe.state.nextSlot }
+                                  mainProbe.state.nextSlot
+                                  { env := [],
+                                    nextSlot := stateAfterFunctions.nextSlot }
+                                  program.body = none := by
+                            simpa [frameWords, ctxFinal, mainStart] using hMain
+                          simp [hFinalFunctions', hMain'] at hCompile
+                      | some main =>
+                          have hMain' :
+                              compileMain?
+                                  { functions := functionSlots,
+                                    frameWords := mainProbe.state.nextSlot }
+                                  mainProbe.state.nextSlot
+                                  { env := [],
+                                    nextSlot := stateAfterFunctions.nextSlot }
+                                  program.body = some main := by
+                            simpa [frameWords, ctxFinal, mainStart] using hMain
+                          have hMainBound : StateSlotsBounded main.state :=
+                            compileMain?_stateSlotsBounded
+                              (ctx := ctxFinal) (frameWords := frameWords)
+                              (state := mainStart) (body := program.body)
+                              (plan := main) hMainStartBound hMain
+                          simp [hFinalFunctions', hMain'] at hCompile
+                          cases hCompile
+                          have hFunctionsLe :
+                              stateAfterSignatures.nextSlot ≤
+                                stateAfterFunctions.nextSlot :=
+                            compileFunctions?_nextSlot_mono
+                              (ctx := ctx0)
+                              (state := stateAfterSignatures)
+                              (fns := program.functions)
+                              hProbeFunctions
+                          have hMainLe :
+                              stateAfterFunctions.nextSlot ≤
+                                mainProbe.state.nextSlot := by
+                            simpa [mainStart] using
+                              compileMain?_nextSlot_mono
+                                (ctx := ctx0) (frameWords := 0)
+                                (state := mainStart)
+                                (body := program.body)
+                                (plan := mainProbe) hMainProbe
+                          have hSignaturesLeMax :
+                              stateAfterSignatures.nextSlot ≤
+                                maxFrameWords :=
+                            Nat.le_trans hFunctionsLe
+                              (Nat.le_trans hMainLe hBound)
+                          refine
+                            ⟨functionSlots, stateAfterSignatures,
+                              probeProcs, stateAfterFunctions, mainProbe,
+                              procs, stateAfterFunctionsFinal, main,
+                              rfl, ?_, hSignatureStateBound,
+                              ?_, hProbeFunctionsBound, ?_,
+                              hMainProbeBound, hBound, hFinalFunctions',
+                              hFinalFunctionsBound, hMain', hMainBound,
+                              rfl⟩
+                          · exact
+                              funSlotListBounded_mono
+                                hFunctionBoundSig hSignaturesLeMax
+                          · simpa [ctx0] using hProbeFunctions
+                          · simpa [ctx0, mainStart] using hMainProbe
+                · simp [ctx0, mainStart, hProbeFunctions, hMainProbe,
+                    hBound] at hCompile
+  · simp [hNames] at hCompile
 
 theorem compilePreludeStmt?_noCallCreate {stmt : Stmt}
     {compiled : Expressions.Stmt}
