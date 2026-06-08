@@ -986,6 +986,327 @@ mutual
                 { stmts := [Expressions.Stmt.terminal kind] } ] }
 end
 
+set_option linter.unusedSimpArgs false in
+mutual
+  theorem compileBlockOpen?_nextSlot_mono
+      {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} {block : Block} {plan : Plan}
+      (hCompile :
+        compileBlockOpen? ctx returns state block = some plan) :
+      state.nextSlot ≤ plan.state.nextSlot := by
+    cases block with
+    | mk stmts =>
+        exact compileStmtList?_nextSlot_mono
+          (by simpa [compileBlockOpen?] using hCompile)
+
+  theorem compileBlockScoped?_nextSlot_mono
+      {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} {block : Block} {plan : Plan}
+      (hCompile :
+        compileBlockScoped? ctx returns state block = some plan) :
+      state.nextSlot ≤ plan.state.nextSlot := by
+    unfold compileBlockScoped? at hCompile
+    cases hOpen : compileBlockOpen? ctx returns state block with
+    | none =>
+        simp [hOpen] at hCompile
+    | some openPlan =>
+        simp [hOpen] at hCompile
+        cases hCompile
+        exact (compileBlockOpen?_nextSlot_mono (plan := openPlan) hOpen)
+
+  theorem compileStmtList?_nextSlot_mono
+      {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} :
+      ∀ {stmts : List Stmt} {plan : Plan},
+        compileStmtList? ctx returns state stmts = some plan →
+          state.nextSlot ≤ plan.state.nextSlot
+  | [], plan, hCompile => by
+      simp [compileStmtList?] at hCompile
+      cases hCompile
+      rfl
+  | stmt :: rest, plan, hCompile => by
+      unfold compileStmtList? at hCompile
+      cases hHead : compileStmt? ctx returns state stmt with
+      | none =>
+          simp [hHead] at hCompile
+      | some head =>
+          cases hTail :
+              compileStmtList? ctx returns head.state rest with
+          | none =>
+              simp [hHead, hTail] at hCompile
+          | some tail =>
+              simp [hHead, hTail] at hCompile
+              cases hCompile
+              exact Nat.le_trans
+                (compileStmt?_nextSlot_mono (plan := head) hHead)
+                (compileStmtList?_nextSlot_mono
+                  (stmts := rest) (plan := tail) hTail)
+
+  theorem compileCases?_nextSlot_mono
+      {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} :
+      ∀ {cases : List (Word × Block)}
+        {compiled : List (Word × Expressions.Block)}
+        {state' : CompileState},
+        compileCases? ctx returns state cases = some (compiled, state') →
+          state.nextSlot ≤ state'.nextSlot
+  | [], compiled, state', hCompile => by
+      simp [compileCases?] at hCompile
+      rcases hCompile with ⟨rfl, rfl⟩
+      rfl
+  | (value, body) :: rest, compiled, state', hCompile => by
+      unfold compileCases? at hCompile
+      cases hBody : compileBlockScoped? ctx returns state body with
+      | none =>
+          simp [hBody] at hCompile
+      | some bodyPlan =>
+          cases hTail :
+              compileCases? ctx returns bodyPlan.state rest with
+          | none =>
+              simp [hBody, hTail] at hCompile
+          | some tail =>
+              rcases tail with ⟨tailCases, tailState⟩
+              simp [hBody, hTail] at hCompile
+              rcases hCompile with ⟨rfl, rfl⟩
+              exact Nat.le_trans
+                (compileBlockScoped?_nextSlot_mono (plan := bodyPlan) hBody)
+                (compileCases?_nextSlot_mono
+                  (cases := rest) (compiled := tailCases)
+                  (state' := tailState) hTail)
+
+  theorem compileDefault?_nextSlot_mono
+      {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} :
+      ∀ {defaultBody : Option Block}
+        {compiled : Option Expressions.Block} {state' : CompileState},
+        compileDefault? ctx returns state defaultBody =
+            some (compiled, state') →
+          state.nextSlot ≤ state'.nextSlot
+  | none, compiled, state', hCompile => by
+      simp [compileDefault?] at hCompile
+      rcases hCompile with ⟨rfl, rfl⟩
+      rfl
+  | some body, compiled, state', hCompile => by
+      unfold compileDefault? at hCompile
+      cases hPlan : compileBlockScoped? ctx returns state body with
+      | none =>
+          simp [hPlan] at hCompile
+      | some plan =>
+          simp [hPlan] at hCompile
+          rcases hCompile with ⟨rfl, rfl⟩
+          exact (compileBlockScoped?_nextSlot_mono (plan := plan) hPlan)
+
+  theorem compileStmt?_nextSlot_mono
+      {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} {stmt : Stmt} {plan : Plan}
+      (hCompile :
+        compileStmt? ctx returns state stmt = some plan) :
+      state.nextSlot ≤ plan.state.nextSlot := by
+    cases stmt with
+    | expr expr =>
+        simp [compileStmt?] at hCompile
+        cases hCode : compileExprCode? state.env 0 expr with
+        | none =>
+            simp [hCode] at hCompile
+        | some code =>
+            simp [hCode] at hCompile
+            cases hCompile
+            rfl
+    | let_ name value =>
+        simp [compileStmt?] at hCompile
+        cases hCode : compileExprCode? state.env 0 value with
+        | none =>
+            simp [hCode] at hCompile
+        | some code =>
+            cases hAlloc : allocateName name state with
+            | mk slot state' =>
+                cases hStore : storeTopSlotCode? 1 slot with
+                | none =>
+                    simp [hCode, hAlloc, hStore] at hCompile
+                | some store =>
+                    simp [hCode, hAlloc, hStore] at hCompile
+                    cases hCompile
+                    have hNext :
+                        state'.nextSlot = state.nextSlot + 1 := by
+                      simpa [hAlloc] using
+                        allocateName_nextSlot name state
+                    simp [hNext]
+    | assign name value =>
+        simp [compileStmt?] at hCompile
+        cases hSlot : lookupSlot? name state.env with
+        | none =>
+            simp [hSlot] at hCompile
+        | some slot =>
+            cases hCode : compileExprCode? state.env 0 value with
+            | none =>
+                simp [hSlot, hCode] at hCompile
+            | some code =>
+                cases hStore : storeTopSlotCode? 1 slot with
+                | none =>
+                    simp [hSlot, hCode, hStore] at hCompile
+                | some store =>
+                    simp [hSlot, hCode, hStore] at hCompile
+                    cases hCompile
+                    rfl
+    | block body =>
+        exact
+          compileBlockScoped?_nextSlot_mono
+            (plan := plan)
+            (by simpa [compileStmt?] using hCompile)
+    | if_ cond body =>
+        simp [compileStmt?] at hCompile
+        cases hCond : compileExprCode? state.env 0 cond with
+        | none =>
+            simp [hCond] at hCompile
+        | some condCode =>
+            cases hBody : compileBlockScoped? ctx returns state body with
+            | none =>
+                simp [hCond, hBody] at hCompile
+            | some bodyPlan =>
+                simp [hCond, hBody] at hCompile
+                cases hCompile
+                exact (compileBlockScoped?_nextSlot_mono
+                  (plan := bodyPlan) hBody)
+    | switch scrutinee cases defaultBody =>
+        simp [compileStmt?] at hCompile
+        cases hScrutinee : compileExprCode? state.env 0 scrutinee with
+        | none =>
+            simp [hScrutinee] at hCompile
+        | some scrutineeCode =>
+            cases hCases : compileCases? ctx returns state cases with
+            | none =>
+                simp [hScrutinee, hCases] at hCompile
+            | some casesResult =>
+                rcases casesResult with ⟨compiledCases, stateAfterCases⟩
+                cases hDefault :
+                    compileDefault? ctx returns stateAfterCases defaultBody with
+                | none =>
+                    simp [hScrutinee, hCases, hDefault] at hCompile
+                | some defaultResult =>
+                    rcases defaultResult with
+                      ⟨compiledDefault, stateAfterDefault⟩
+                    simp [hScrutinee, hCases, hDefault] at hCompile
+                    cases hCompile
+                    exact Nat.le_trans
+                      (compileCases?_nextSlot_mono
+                        (cases := cases) (compiled := compiledCases)
+                        (state' := stateAfterCases) hCases)
+                      (compileDefault?_nextSlot_mono
+                        (defaultBody := defaultBody)
+                        (compiled := compiledDefault)
+                        (state' := stateAfterDefault) hDefault)
+    | for_ init cond post body =>
+        simp [compileStmt?] at hCompile
+        cases hInit : compileBlockOpen? ctx returns state init with
+        | none =>
+            simp [hInit] at hCompile
+        | some initPlan =>
+            cases hCond :
+                compileExprCode? initPlan.state.env 0 cond with
+            | none =>
+                simp [hInit, hCond] at hCompile
+            | some condCode =>
+                cases hPost :
+                    compileBlockScoped? ctx returns initPlan.state post with
+                | none =>
+                    simp [hInit, hCond, hPost] at hCompile
+                | some postPlan =>
+                    cases hBody :
+                        compileBlockScoped? ctx returns postPlan.state body with
+                    | none =>
+                        simp [hInit, hCond, hPost, hBody] at hCompile
+                    | some bodyPlan =>
+                        simp [hInit, hCond, hPost, hBody] at hCompile
+                        cases hCompile
+                        exact Nat.le_trans
+                          (compileBlockOpen?_nextSlot_mono
+                            (plan := initPlan) hInit)
+                          (Nat.le_trans
+                            (compileBlockScoped?_nextSlot_mono
+                              (plan := postPlan) hPost)
+                            (compileBlockScoped?_nextSlot_mono
+                              (plan := bodyPlan) hBody))
+    | brk =>
+        simp [compileStmt?] at hCompile
+        cases hCompile
+        rfl
+    | cont =>
+        simp [compileStmt?] at hCompile
+        cases hCompile
+        rfl
+    | leave =>
+        simp [compileStmt?] at hCompile
+        cases hCode : compileReturnCode? state.env returns with
+        | none =>
+            simp [hCode] at hCompile
+        | some code =>
+            simp [hCode] at hCompile
+            cases hCompile
+            rfl
+    | call targets functionName args =>
+        simp [compileStmt?] at hCompile
+        cases hFn : lookupFun? functionName ctx.functions with
+        | none =>
+            simp [hFn] at hCompile
+        | some fn =>
+            by_cases hArgsLen : args.length = fn.params.length
+            · simp [hFn, hArgsLen] at hCompile
+              by_cases hTargetsLen : targets.length = fn.returns.length
+              · simp [hTargetsLen] at hCompile
+                by_cases hTargetsNodup : targets.Nodup
+                · simp [hTargetsNodup] at hCompile
+                  cases hCallerBase : swapTopTwoCode? with
+                  | none =>
+                      simp [hCallerBase] at hCompile
+                  | some callerBaseTop =>
+                      cases hArgsCode :
+                          compileCallArgsToSlots? state.env args fn.params with
+                      | none =>
+                          simp [hCallerBase, hArgsCode] at hCompile
+                      | some argCode =>
+                          cases hCalleeBase : swapTopTwoCode? with
+                          | none =>
+                              simp [hCallerBase] at hCalleeBase
+                          | some calleeBaseTop =>
+                              cases hTargetSlots :
+                                  targets.mapM
+                                    (fun name => lookupSlot? name state.env) with
+                              | none =>
+                                  simp [hCallerBase, hArgsCode, hCalleeBase,
+                                    hTargetSlots] at hCompile
+                              | some targetSlots =>
+                                  cases hStoreReturns :
+                                      compileStoreTopSlots? fn.returns.length
+                                        targetSlots.reverse with
+                                  | none =>
+                                      simp [hCallerBase, hArgsCode,
+                                        hCalleeBase, hTargetSlots,
+                                        hStoreReturns] at hCompile
+                                  | some storeReturns =>
+                                      simp [hCallerBase, hArgsCode,
+                                        hCalleeBase, hTargetSlots,
+                                        hStoreReturns] at hCompile
+                                      cases hCompile
+                                      rfl
+                · simp [hFn, hArgsLen, hTargetsLen, hTargetsNodup]
+                    at hCompile
+              · simp [hFn, hArgsLen, hTargetsLen] at hCompile
+            · simp [hFn, hArgsLen] at hCompile
+    | terminal kind =>
+        simp [compileStmt?] at hCompile
+        cases hCompile
+        rfl
+    | terminalArgs kind args =>
+        simp [compileStmt?] at hCompile
+        cases hCode : compileExprSeqCode? state.env 0 args with
+        | none =>
+            simp [hCode] at hCompile
+        | some code =>
+            simp [hCode] at hCompile
+            cases hCompile
+            rfl
+end
+
 theorem expressionsStmtList_append_noCallCreate
     {left right : List Expressions.Stmt}
     (hLeft : Expressions.StmtList.usesCallCreate left = false)
@@ -1553,6 +1874,90 @@ def compileExpressionsProgram? (maxFrameWords : Nat)
     some { procs := procs, body := main.block }
   else
     none
+
+theorem compileFunction?_nextSlot_mono {ctx : CompileCtx}
+    {state : CompileState} {fn : FunDef}
+    {proc : Expressions.Proc} {state' : CompileState}
+    (hCompile : compileFunction? ctx state fn = some (proc, state')) :
+    state.nextSlot ≤ state'.nextSlot := by
+  unfold compileFunction? at hCompile
+  by_cases hSigNodup : (fn.returns ++ fn.params).Nodup
+  · simp [hSigNodup] at hCompile
+    by_cases hRetBound : fn.returns.length < 16
+    · simp [hRetBound] at hCompile
+      cases hSlots : lookupFun? fn.name ctx.functions with
+      | none =>
+          simp [hSlots] at hCompile
+      | some slots =>
+          simp [hSlots] at hCompile
+          let bodyStart : CompileState :=
+            { env := functionEnv slots, nextSlot := state.nextSlot }
+          cases hBodyPlan :
+              compileBlockOpen? ctx fn.returns bodyStart fn.body with
+          | none =>
+              simp [bodyStart, hBodyPlan] at hCompile
+          | some bodyPlan =>
+              cases hRetCode :
+                  compileReturnCode? bodyPlan.state.env fn.returns with
+              | none =>
+                  simp [bodyStart, hBodyPlan, hRetCode] at hCompile
+              | some retCode =>
+                  simp [bodyStart, hBodyPlan, hRetCode] at hCompile
+                  rcases hCompile with ⟨rfl, rfl⟩
+                  exact
+                    compileBlockOpen?_nextSlot_mono
+                      (state := bodyStart) (plan := bodyPlan) hBodyPlan
+    · simp [hRetBound] at hCompile
+  · simp [hSigNodup] at hCompile
+
+theorem compileFunctions?_nextSlot_mono {ctx : CompileCtx} :
+    ∀ {state : CompileState} {fns : List FunDef}
+      {procs : List Expressions.Proc} {state' : CompileState},
+      compileFunctions? ctx state fns = some (procs, state') →
+        state.nextSlot ≤ state'.nextSlot
+  | state, [], procs, state', hCompile => by
+      simp [compileFunctions?] at hCompile
+      rcases hCompile with ⟨rfl, rfl⟩
+      rfl
+  | state, fn :: rest, procs, state', hCompile => by
+      unfold compileFunctions? at hCompile
+      cases hHead : compileFunction? ctx state fn with
+      | none =>
+          simp [hHead] at hCompile
+      | some headResult =>
+          rcases headResult with ⟨proc, stateAfterHead⟩
+          cases hTail :
+              compileFunctions? ctx stateAfterHead rest with
+          | none =>
+              simp [hHead, hTail] at hCompile
+          | some tailResult =>
+              rcases tailResult with ⟨tailProcs, tailState⟩
+              simp [hHead, hTail] at hCompile
+              rcases hCompile with ⟨rfl, rfl⟩
+              exact Nat.le_trans
+                (compileFunction?_nextSlot_mono hHead)
+                (compileFunctions?_nextSlot_mono hTail)
+
+theorem compileMain?_nextSlot_mono {ctx : CompileCtx}
+    {frameWords : Nat} {state : CompileState} {body : Block}
+    {plan : Plan}
+    (hCompile : compileMain? ctx frameWords state body = some plan) :
+    state.nextSlot ≤ plan.state.nextSlot := by
+  unfold compileMain? at hCompile
+  cases body with
+  | mk stmts =>
+      simp at hCompile
+      cases hList :
+          compileStmtList? ctx [] state (splitPrelude stmts).2 with
+      | none =>
+          simp [hList] at hCompile
+      | some listPlan =>
+          simp [hList] at hCompile
+          cases hCompile
+          exact
+            compileStmtList?_nextSlot_mono
+              (stmts := (splitPrelude stmts).2)
+              (plan := listPlan) hList
 
 theorem compilePreludeStmt?_noCallCreate {stmt : Stmt}
     {compiled : Expressions.Stmt}
