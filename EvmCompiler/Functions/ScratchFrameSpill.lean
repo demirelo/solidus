@@ -114,6 +114,21 @@ theorem lookupSlot?_some_mem {name : Name} {slot : Nat}
       · simp [lookupSlot?, hName] at hLookup
         exact List.mem_cons_of_mem _ (ih hLookup)
 
+theorem lookupFun?_some_mem {name : Name} {slots : FunSlots}
+    {functions : List FunSlots}
+    (hLookup : lookupFun? name functions = some slots) :
+    slots ∈ functions := by
+  induction functions with
+  | nil =>
+      simp [lookupFun?] at hLookup
+  | cons head rest ih =>
+      by_cases hName : head.name = name
+      · simp [lookupFun?, hName] at hLookup
+        cases hLookup
+        simp
+      · simp [lookupFun?, hName] at hLookup
+        exact List.mem_cons_of_mem _ (ih hLookup)
+
 theorem allocateName_nextSlot (name : Name) (state : CompileState) :
     (allocateName name state).2.nextSlot = state.nextSlot + 1 := by
   simp [allocateName]
@@ -137,6 +152,12 @@ theorem allocateNames_nextSlot :
       simp [state1] at hTail
       simp [allocateNames, allocateName]
       omega
+
+theorem allocateNames_nextSlot_mono (names : List Name)
+    (state : CompileState) :
+    state.nextSlot ≤ (allocateNames names state).2.nextSlot := by
+  rw [allocateNames_nextSlot]
+  omega
 
 theorem allocateNames_entries_length :
     ∀ (names : List Name) (state : CompileState),
@@ -241,6 +262,113 @@ theorem allocateFunctionSignatures_names :
               have hTail :=
                 allocateFunctionSignatures_names rest stateAfterReturns
               simp [allocateFunctionSignatures, hParams, hReturns, hTail]
+
+theorem allocateFunctionSignatures_nextSlot_mono :
+    ∀ (fns : List FunDef) (state : CompileState),
+      state.nextSlot ≤ (allocateFunctionSignatures fns state).2.nextSlot
+  | [], state => by
+      simp [allocateFunctionSignatures]
+  | fn :: rest, state => by
+      cases hParams : allocateNames fn.params state with
+      | mk params stateAfterParams =>
+          cases hReturns : allocateNames fn.returns stateAfterParams with
+          | mk returns stateAfterReturns =>
+              cases hTail :
+                  allocateFunctionSignatures rest stateAfterReturns with
+              | mk tailSlots stateAfterTail =>
+                  have hParamsLe :
+                      state.nextSlot ≤ stateAfterParams.nextSlot := by
+                    simpa [hParams] using
+                      allocateNames_nextSlot_mono fn.params state
+                  have hReturnsLe :
+                      stateAfterParams.nextSlot ≤
+                        stateAfterReturns.nextSlot := by
+                    simpa [hReturns] using
+                      allocateNames_nextSlot_mono fn.returns
+                        stateAfterParams
+                  have hTailLe :
+                      stateAfterReturns.nextSlot ≤
+                        stateAfterTail.nextSlot := by
+                    simpa [hTail] using
+                      allocateFunctionSignatures_nextSlot_mono rest
+                        stateAfterReturns
+                  simp [allocateFunctionSignatures, hParams, hReturns, hTail]
+                  exact Nat.le_trans hParamsLe
+                    (Nat.le_trans hReturnsLe hTailLe)
+
+theorem allocateFunctionSignatures_slots_lt_final :
+    ∀ {fns : List FunDef} {state : CompileState}
+      {functionSlots : List FunSlots} {finalState : CompileState}
+      {slots : FunSlots} {entry : Name × Nat},
+      allocateFunctionSignatures fns state =
+          (functionSlots, finalState) →
+      slots ∈ functionSlots →
+      entry ∈ slots.params ++ slots.returns →
+        entry.2 < finalState.nextSlot
+  | [], state, functionSlots, finalState, slots, entry,
+      hAlloc, hSlots, _hEntry => by
+      simp [allocateFunctionSignatures] at hAlloc
+      rcases hAlloc with ⟨rfl, rfl⟩
+      simp at hSlots
+  | fn :: rest, state, functionSlots, finalState, slots, entry,
+      hAlloc, hSlots, hEntry => by
+      cases hParams : allocateNames fn.params state with
+      | mk params stateAfterParams =>
+          cases hReturns : allocateNames fn.returns stateAfterParams with
+          | mk returns stateAfterReturns =>
+              cases hTail :
+                  allocateFunctionSignatures rest stateAfterReturns with
+              | mk tailSlots stateAfterTail =>
+                  simp [allocateFunctionSignatures, hParams, hReturns, hTail]
+                    at hAlloc
+                  rcases hAlloc with ⟨rfl, rfl⟩
+                  simp at hSlots
+                  rcases hSlots with hHead | hTailMem
+                  · cases hHead
+                    have hReturnsLe :
+                        stateAfterParams.nextSlot ≤
+                          stateAfterReturns.nextSlot := by
+                      simpa [hReturns] using
+                        allocateNames_nextSlot_mono fn.returns
+                          stateAfterParams
+                    have hTailLe :
+                        stateAfterReturns.nextSlot ≤
+                          stateAfterTail.nextSlot := by
+                      simpa [hTail] using
+                        allocateFunctionSignatures_nextSlot_mono rest
+                          stateAfterReturns
+                    have hAppend := List.mem_append.mp hEntry
+                    rcases hAppend with hParamEntry | hReturnEntry
+                    · have hParamLt :
+                          entry.2 < stateAfterParams.nextSlot := by
+                        have hParamEntry' :
+                            entry ∈ (allocateNames fn.params state).1 := by
+                          simpa [hParams] using hParamEntry
+                        simpa [hParams] using
+                          allocateNames_slots_lt_final
+                            (names := fn.params) (state := state)
+                            (entry := entry) hParamEntry'
+                      exact Nat.lt_of_lt_of_le hParamLt
+                        (Nat.le_trans hReturnsLe hTailLe)
+                    · have hReturnLt :
+                          entry.2 < stateAfterReturns.nextSlot := by
+                        have hReturnEntry' :
+                            entry ∈
+                              (allocateNames fn.returns stateAfterParams).1 := by
+                          simpa [hReturns] using hReturnEntry
+                        simpa [hReturns] using
+                          allocateNames_slots_lt_final
+                            (names := fn.returns)
+                            (state := stateAfterParams)
+                            (entry := entry) hReturnEntry'
+                      exact Nat.lt_of_lt_of_le hReturnLt hTailLe
+                  · exact
+                      allocateFunctionSignatures_slots_lt_final
+                        (fns := rest) (state := stateAfterReturns)
+                        (functionSlots := tailSlots)
+                        (finalState := stateAfterTail)
+                        (slots := slots) (entry := entry)
+                        hTail hTailMem hEntry
 
 theorem allocateFunctionSignatures_lookup_of_find? :
     ∀ {fns : List FunDef} {state : CompileState}
@@ -1958,6 +2086,86 @@ theorem compileMain?_nextSlot_mono {ctx : CompileCtx}
             compileStmtList?_nextSlot_mono
               (stmts := (splitPrelude stmts).2)
               (plan := listPlan) hList
+
+theorem compileExpressionsProgram?_signatures_nextSlot_le_maxFrameWords
+    {maxFrameWords : Nat} {program : Program}
+    {exprProgram : Expressions.Program}
+    {functionSlots : List FunSlots}
+    {stateAfterSignatures : CompileState}
+    (hSignatures :
+      allocateFunctionSignatures program.functions
+        ({ env := [], nextSlot := 0 } : CompileState) =
+          (functionSlots, stateAfterSignatures))
+    (hCompile :
+      compileExpressionsProgram? maxFrameWords program = some exprProgram) :
+    stateAfterSignatures.nextSlot ≤ maxFrameWords := by
+  unfold compileExpressionsProgram? at hCompile
+  by_cases hNames : (program.functions.map FunDef.name).Nodup
+  · simp [hNames, hSignatures] at hCompile
+    let ctx0 : CompileCtx := { functions := functionSlots, frameWords := 0 }
+    cases hProbeFunctions :
+        compileFunctions? ctx0 stateAfterSignatures program.functions with
+    | none =>
+        simp [ctx0, hProbeFunctions] at hCompile
+    | some probeResult =>
+        rcases probeResult with ⟨_probeProcs, stateAfterFunctions⟩
+        let mainStart : CompileState :=
+          { env := [], nextSlot := stateAfterFunctions.nextSlot }
+        cases hMainProbe :
+            compileMain? ctx0 0 mainStart program.body with
+        | none =>
+            simp [ctx0, mainStart, hProbeFunctions, hMainProbe] at hCompile
+        | some mainProbe =>
+            by_cases hBound : mainProbe.state.nextSlot ≤ maxFrameWords
+            · have hFunctionsLe :
+                  stateAfterSignatures.nextSlot ≤
+                    stateAfterFunctions.nextSlot :=
+                compileFunctions?_nextSlot_mono
+                  (ctx := ctx0) (state := stateAfterSignatures)
+                  (fns := program.functions) hProbeFunctions
+              have hMainLe :
+                  stateAfterFunctions.nextSlot ≤
+                    mainProbe.state.nextSlot := by
+                simpa [mainStart] using
+                  compileMain?_nextSlot_mono
+                    (ctx := ctx0) (frameWords := 0)
+                    (state := mainStart) (body := program.body)
+                    (plan := mainProbe) hMainProbe
+              exact Nat.le_trans hFunctionsLe
+                (Nat.le_trans hMainLe hBound)
+            · simp [ctx0, mainStart, hProbeFunctions, hMainProbe,
+                hBound] at hCompile
+  · simp [hNames] at hCompile
+
+theorem compileExpressionsProgram?_signature_slot_lt_maxFrameWords
+    {maxFrameWords : Nat} {program : Program}
+    {exprProgram : Expressions.Program}
+    {functionSlots : List FunSlots}
+    {stateAfterSignatures : CompileState}
+    {functionName : Name} {slots : FunSlots} {entry : Name × Nat}
+    (hSignatures :
+      allocateFunctionSignatures program.functions
+        ({ env := [], nextSlot := 0 } : CompileState) =
+          (functionSlots, stateAfterSignatures))
+    (hCompile :
+      compileExpressionsProgram? maxFrameWords program = some exprProgram)
+    (hLookup : lookupFun? functionName functionSlots = some slots)
+    (hEntry : entry ∈ slots.params ++ slots.returns) :
+    entry.2 < maxFrameWords := by
+  have hSlotLt :
+      entry.2 < stateAfterSignatures.nextSlot :=
+    allocateFunctionSignatures_slots_lt_final
+      (fns := program.functions)
+      (state := ({ env := [], nextSlot := 0 } : CompileState))
+      (functionSlots := functionSlots)
+      (finalState := stateAfterSignatures)
+      (slots := slots) (entry := entry)
+      hSignatures (lookupFun?_some_mem hLookup) hEntry
+  have hFrameLe :
+      stateAfterSignatures.nextSlot ≤ maxFrameWords :=
+    compileExpressionsProgram?_signatures_nextSlot_le_maxFrameWords
+      hSignatures hCompile
+  exact Nat.lt_of_lt_of_le hSlotLt hFrameLe
 
 theorem compilePreludeStmt?_noCallCreate {stmt : Stmt}
     {compiled : Expressions.Stmt}
