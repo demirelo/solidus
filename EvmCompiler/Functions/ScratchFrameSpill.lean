@@ -47,6 +47,9 @@ def slotOffset (slot : Nat) : Word :=
 def frameBytes (words : Nat) : Word :=
   word (32 * words)
 
+def zeroWord : Word :=
+  word 0
+
 namespace Block
 
 def append (left right : Expressions.Block) : Expressions.Block :=
@@ -675,7 +678,7 @@ def splitPrelude : List Stmt → List Expressions.Stmt × List Stmt
           (compiled :: pref, tail)
       | none => ([], stmt :: rest)
 
-def frameInitCode (words : Nat) : Structured.Code :=
+def frameBumpCode (words : Nat) : Structured.Code :=
   [ Structured.BasicInstr.push freePtrWord,
     Structured.BasicInstr.op .mload,
     Structured.BasicInstr.op .dup1,
@@ -683,6 +686,18 @@ def frameInitCode (words : Nat) : Structured.Code :=
     Structured.BasicInstr.op .add,
     Structured.BasicInstr.push freePtrWord,
     Structured.BasicInstr.op .mstore ]
+
+def framePreallocCode : Nat → Structured.Code
+  | 0 => []
+  | slot + 1 =>
+      [ Structured.BasicInstr.push zeroWord,
+        Structured.BasicInstr.op .dup2,
+        Structured.BasicInstr.push (slotOffset slot),
+        Structured.BasicInstr.op .add,
+        Structured.BasicInstr.op .mstore ]
+
+def frameInitCode (words : Nat) : Structured.Code :=
+  frameBumpCode words ++ framePreallocCode words
 
 def swapTopTwoCode? : Option Structured.Code := do
   let op ← Locals.StackOp.swap? 1
@@ -994,11 +1009,27 @@ theorem removeBaseUnderCode?_noCallCreate {valuesAboveBase : Nat}
               Structured.BasicInstr.usesCallCreate,
               Structured.BasicOp.toPrimOp, Assembly.PrimOp.isCallCreate])
 
-theorem frameInitCode_noCallCreate (words : Nat) :
-    (frameInitCode words).usesCallCreate = false := by
-  simp [frameInitCode, Structured.Code.usesCallCreate,
+theorem frameBumpCode_noCallCreate (words : Nat) :
+    (frameBumpCode words).usesCallCreate = false := by
+  simp [frameBumpCode, Structured.Code.usesCallCreate,
     Structured.BasicInstr.usesCallCreate, Structured.BasicOp.toPrimOp,
     Assembly.PrimOp.isCallCreate]
+
+theorem framePreallocCode_noCallCreate (words : Nat) :
+    (framePreallocCode words).usesCallCreate = false := by
+  cases words with
+  | zero => rfl
+  | succ slot =>
+      simp [framePreallocCode, Structured.Code.usesCallCreate,
+        Structured.BasicInstr.usesCallCreate, Structured.BasicOp.toPrimOp,
+        Assembly.PrimOp.isCallCreate]
+
+theorem frameInitCode_noCallCreate (words : Nat) :
+    (frameInitCode words).usesCallCreate = false := by
+  exact
+    structuredCode_append_noCallCreate
+      (frameBumpCode_noCallCreate words)
+      (framePreallocCode_noCallCreate words)
 
 theorem swapTopTwoCode?_noCallCreate {code : Structured.Code}
     (hCode : swapTopTwoCode? = some code) :
