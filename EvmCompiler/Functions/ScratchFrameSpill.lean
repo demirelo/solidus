@@ -335,6 +335,9 @@ mutual
                 { stmts := [Expressions.Stmt.leave] } ] }
     | .call targets functionName args => do
         let fn ← lookupFun? functionName ctx.functions
+        if args.length = fn.params.length then pure () else none
+        if targets.length = fn.returns.length then pure () else none
+        if targets.Nodup then pure () else none
         let callerBaseTop ← swapTopTwoCode?
         let argCode ← compileCallArgsToSlots? state.env args fn.params
         let calleeBaseTop ← swapTopTwoCode?
@@ -366,6 +369,8 @@ def functionEnv (slots : FunSlots) : SlotEnv :=
 
 def compileFunction? (ctx : CompileCtx) (state : CompileState)
     (fn : FunDef) : Option (Expressions.Proc × CompileState) := do
+  if (fn.returns ++ fn.params).Nodup then pure () else none
+  if fn.returns.length < 16 then pure () else none
   let slots ← lookupFun? fn.name ctx.functions
   let bodyStart : CompileState :=
     { env := functionEnv slots, nextSlot := state.nextSlot }
@@ -373,15 +378,12 @@ def compileFunction? (ctx : CompileCtx) (state : CompileState)
   let retCode ← compileReturnCode? bodyPlan.state.env fn.returns
   let fullBody :=
     Block.append bodyPlan.block (Block.ofCode retCode)
-  if fn.returns.length < 16 then
-    some
-      ({ name := fn.name
-         argc := 1
-         retc := fn.returns.length
-         body := fullBody },
-       { env := state.env, nextSlot := bodyPlan.state.nextSlot })
-  else
-    none
+  some
+    ({ name := fn.name
+       argc := 1
+       retc := fn.returns.length
+       body := fullBody },
+     { env := state.env, nextSlot := bodyPlan.state.nextSlot })
 
 def compileFunctions? (ctx : CompileCtx) :
     CompileState → List FunDef → Option (List Expressions.Proc × CompileState)
@@ -404,6 +406,7 @@ def compileMain? (ctx : CompileCtx) (frameWords : Nat)
 
 def compileExpressionsProgram? (maxFrameWords : Nat)
     (program : Program) : Option Expressions.Program := do
+  if (program.functions.map FunDef.name).Nodup then pure () else none
   let initial : CompileState := { env := [], nextSlot := 0 }
   let (functionSlots, stateAfterSignatures) ←
     some (allocateFunctionSignatures program.functions initial)
