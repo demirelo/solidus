@@ -37,6 +37,15 @@ frame relation. Verification passed: focused `ScratchFrameMemory` Lean check,
 scratch-frame/object proof build, frontend/bridge build, single-result
 user-call compiler smoke, scoped proof-hole scan, and `git diff --check`.
 
+## 2026-06-08 17:12 PDT - proof/scratch-frame-literal-expression-load
+Added the companion literal-expression execution theorem for scratch-frame
+expression preservation: successful `compileExprCode?` for a literal runs the
+generated push, preserves the hidden-frame machine relation, and places the
+literal above the hidden base stack shape. Verification passed: focused
+`ScratchFrameMemory` Lean check, scratch-frame/object proof build,
+frontend/bridge build, single-result user-call compiler smoke, scoped proof-hole
+scan, and `git diff --check`.
+
 ## 2026-06-08 16:58 PDT - proof/scratch-frame-state-invariant-memory-wrappers
 Added compiler-state invariant wrappers for scratch-frame generated load/store
 memory execution: state boundedness plus a frame-word bound now discharges the

@@ -873,6 +873,44 @@ theorem run_compileExprCode?_var_frameStore_lookup_of_stateSlots
       hLoadCode hStateBound hFrameWords hReady hRel hLookup
       state values rest hMachine hValues
 
+theorem run_compileExprCode?_lit_frameStore
+    {compileState : CompileState} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base value : Word}
+    {valuesAboveBase : Nat} {code : Structured.Code}
+    (hCompile :
+      compileExprCode? compileState.env valuesAboveBase (.lit value) =
+        some code)
+    (hRel : FrameStoreRel compileState.env store machine base)
+    (state : EVMState) (values rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (_hValues : values.length = valuesAboveBase) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.toMachineState = machine ∧
+      final.stack = value :: values ++ base :: rest ∧
+      FrameStoreRel compileState.env store final.toMachineState base := by
+  simp [compileExprCode?] at hCompile
+  cases hCompile
+  let start : EVMState := { state with stack := values ++ base :: rest }
+  let final : EVMState :=
+    start.replaceStackAndIncrPC (value :: values ++ base :: rest)
+      (pcΔ := 33)
+  refine ⟨final, ?_, ?_, ?_, ?_⟩
+  · simp [Structured.Code.run, Structured.BasicInstr.step,
+      Assembly.Target.stepInstr, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, EvmYul.Stack.push, start, final]
+  · simpa [start, final, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC] using hMachine
+  · simp [start, final, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC]
+  · have hFinalMachine : final.toMachineState = machine := by
+      simpa [start, final, EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC] using hMachine
+    rw [hFinalMachine]
+    intro query slot hLookup
+    exact hRel hLookup
+
 theorem run_storeTopSlotCode?_frameStore_assign
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
