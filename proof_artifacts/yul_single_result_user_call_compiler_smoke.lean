@@ -51,7 +51,7 @@ def smokeFrontendControlCallProgram : Solidity.Frontend.Program :=
         dispatcher :=
           [ .ifThen (.call .user "f" []) []
           , .switch (.call .user "f" []) [(smokeOne, [])] []
-          , .forLoop (.call .user "f" []) [] [] ]
+          , .forLoop [] (.call .user "f" []) [] [] ]
         functions :=
           [("f",
             { params := []
@@ -63,6 +63,13 @@ def smokeFrontendControlCallProgram : Solidity.Frontend.Program :=
 
 def smokeBridgeJsonSingleCall : String :=
   "{\"schema\":\"evm-compiler.solc-yul-bridge.v3\",\"source\":\"Smoke.sol\",\"contract\":\"Smoke\",\"selectedObject\":{\"node\":\"object\",\"name\":\"runtime\",\"dispatcher\":[{\"node\":\"let\",\"names\":[\"x\"],\"value\":{\"node\":\"call\",\"calleeKind\":\"user\",\"callee\":\"f\",\"args\":[]}}],\"functions\":[{\"name\":\"f\",\"params\":[],\"returns\":[\"r\"],\"body\":[{\"node\":\"assign\",\"names\":[\"r\"],\"value\":{\"node\":\"literal\",\"value\":1}}]}],\"data\":[],\"subobjects\":[],\"items\":[]}}"
+
+def smokeFrontendForWithInit : Solidity.Frontend.Stmt :=
+  .forLoop
+    [.letDecl ["i"] (some (.lit smokeOne))]
+    (.call .primitive "lt" [.var "i", .lit smokeOne])
+    [.assign ["i"] (.call .primitive "add" [.var "i", .lit smokeOne])]
+    []
 
 def smokeUserCall : AstExpr :=
   .Call (.inr "f") []
@@ -190,6 +197,9 @@ def smokeObjectNameBytes : List UInt8 :=
 def smokeLinkerSymbolNameBytes : List UInt8 :=
   [76, 73, 66]
 
+def smokeImmutableNameBytes : List UInt8 :=
+  [73, 77, 77]
+
 def smokeObjectLayout : Solidity.Frontend.ObjectLayout :=
   { entries := [] }
 
@@ -224,6 +234,10 @@ def smokeObjectContext : Solidity.Frontend.ObjectBuiltinContext :=
     dataSizes := [("blob", EvmYul.UInt256.ofNat smokeObjectDataBytes.length)]
     dataOffsets := [("blob", EvmYul.UInt256.ofNat 64)]
     linkerSymbols := [("LIB", smokeOne)] }
+
+def smokeImmutableContext : Solidity.Frontend.ObjectBuiltinContext :=
+  { smokeObjectContext with
+    immutableValues := [("IMM", smokeOne)] }
 
 #guard ObjectBuiltin.unsupported? "f" = false
 #guard ObjectBuiltin.unsupported? "datasize" = true
@@ -275,6 +289,12 @@ def smokeObjectContext : Solidity.Frontend.ObjectBuiltinContext :=
             value.toNat == smokeOne.toNat
       | _ => false
   | none => false) = true
+
+#guard
+  (match Solidity.Frontend.Stmt.toYul? smokeFrontendForWithInit with
+  | some (.Block [.Let ["i"] (some (.Lit value)), .For _ _ _]) =>
+      value.toNat == smokeOne.toNat
+  | _ => false) = true
 
 #guard
   (match Solidity.Frontend.BridgeJson.parseProgram? smokeBridgeJsonSingleCall with
@@ -548,6 +568,21 @@ def smokeObjectContext : Solidity.Frontend.ObjectBuiltinContext :=
         (.call .objectBuiltin "linkersymbol"
           [.bytesLit smokeLinkerSymbolNameBytes])
         smokeObjectContext >>= Solidity.Frontend.Expr.toYul? with
+  | some (.Lit value) => value.toNat == smokeOne.toNat
+  | _ => false) = true
+
+#guard
+  Solidity.Frontend.Expr.loadImmutableNames
+      (.call .objectBuiltin "loadimmutable"
+        [.bytesLit smokeImmutableNameBytes]) =
+    ["IMM"]
+
+#guard
+  (match
+      Solidity.Frontend.Expr.resolveObjectBuiltinsIn?
+        (.call .objectBuiltin "loadimmutable"
+          [.bytesLit smokeImmutableNameBytes])
+        smokeImmutableContext >>= Solidity.Frontend.Expr.toYul? with
   | some (.Lit value) => value.toNat == smokeOne.toNat
   | _ => false) = true
 

@@ -908,7 +908,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
                 [],
             ),
         )
-        self.assertEqual(for_stmt, bridge.For(bridge.Call("f", [], bridge.CALL_USER), [], []))
+        self.assertEqual(for_stmt, bridge.For([], bridge.Call("f", [], bridge.CALL_USER), [], []))
 
         summary = bridge.bridge_json_summary_artifact(
             root,
@@ -1083,15 +1083,13 @@ class SolidityToYulLeanTests(unittest.TestCase):
         )
 
         self.assertEqual([name for name, _ in root.functions], ["__yul_gen_0_f"])
-        dispatcher_block = root.dispatcher[0]
-        self.assertIsInstance(dispatcher_block, bridge.Block)
-        init_let = dispatcher_block.stmts[0]
+        loop = root.dispatcher[0]
+        self.assertIsInstance(loop, bridge.For)
+        init_let = loop.pre[0]
         self.assertIsInstance(init_let, bridge.Let)
         self.assertIsInstance(init_let.value, bridge.Call)
         self.assertEqual(init_let.value.callee, "__yul_gen_0_f")
 
-        loop = dispatcher_block.stmts[1]
-        self.assertIsInstance(loop, bridge.For)
         self.assertIsInstance(loop.cond, bridge.Call)
         self.assertEqual(loop.cond.callee, "__yul_gen_0_f")
 
@@ -1335,7 +1333,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
             }
         )
 
-        self.assertIsInstance(root.dispatcher[0], bridge.Block)
+        self.assertIsInstance(root.dispatcher[0], bridge.For)
         self.assertEqual(root.dispatcher[1], bridge.Let(["i"], bridge.Lit(2)))
 
     def test_bridge_json_preserves_selected_object_tree(self):
@@ -3158,6 +3156,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
                     [bridge.Control("Continue")],
                 ),
                 bridge.For(
+                    [],
                     bridge.Lit(1),
                     [bridge.ExprStmt(bridge.Call("pop", [bridge.Lit(0)], bridge.CALL_PRIMITIVE))],
                     [bridge.If(bridge.Var("x"), [bridge.Control("Leave")])],
@@ -3223,6 +3222,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
                     [bridge.Control("Continue")],
                 ),
                 bridge.For(
+                    [],
                     bridge.Lit(1),
                     [bridge.ExprStmt(bridge.Call("pop", [], bridge.CALL_PRIMITIVE))],
                     [bridge.If(bridge.Var("x"), [bridge.Control("Leave")])],

@@ -54,6 +54,12 @@ def decodeArrayField {α : Type} (decode : Lean.Json → DecodeM α)
     (json : Lean.Json) (name : String) : DecodeM (List α) := do
   decodeArray decode (← field json name)
 
+def decodeOptionalArrayField {α : Type} (decode : Lean.Json → DecodeM α)
+    (json : Lean.Json) (name : String) : DecodeM (List α) := do
+  match ← optionalField json name with
+  | none => pure []
+  | some value => decodeArray decode value
+
 def decodeStringArrayField (json : Lean.Json) (name : String) :
     DecodeM (List String) :=
   decodeArrayField (fun value => value.getStr?) json name
@@ -148,10 +154,11 @@ mutual
             let default ← decodeArrayField (decodeStmt fuel) json "default"
             .ok (.switch scrutinee cases default)
         | "for" =>
+            let pre ← decodeOptionalArrayField (decodeStmt fuel) json "pre"
             let condition ← decodeExpr fuel (← field json "condition")
             let post ← decodeArrayField (decodeStmt fuel) json "post"
             let body ← decodeArrayField (decodeStmt fuel) json "body"
-            .ok (.forLoop condition post body)
+            .ok (.forLoop pre condition post body)
         | "if" =>
             let condition ← decodeExpr fuel (← field json "condition")
             let body ← decodeArrayField (decodeStmt fuel) json "body"

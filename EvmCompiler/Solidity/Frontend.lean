@@ -57,7 +57,8 @@ inductive Stmt where
   | exprStmt (expr : Expr)
   | switch (scrutinee : Expr) (cases : List (Word × List Stmt))
       (default : List Stmt)
-  | forLoop (condition : Expr) (post : List Stmt) (body : List Stmt)
+  | forLoop (pre : List Stmt) (condition : Expr) (post : List Stmt)
+      (body : List Stmt)
   | ifThen (condition : Expr) (body : List Stmt)
   | break
   | continue
@@ -348,8 +349,9 @@ mutual
         Expr.loweringFuel scrutinee +
           Stmt.CaseList.loweringFuel cases +
           Stmt.List.loweringFuel default + 1
-    | .forLoop condition post body =>
+    | .forLoop pre condition post body =>
         Expr.loweringFuel condition +
+          Stmt.List.loweringFuel pre +
           Stmt.List.loweringFuel post +
           Stmt.List.loweringFuel body + 1
     | .ifThen condition body =>
@@ -595,13 +597,28 @@ def ofName? : Name → Option (EvmYul.Operation .Yul)
 
 end Primitive
 
+namespace Expr
+
+def objectBuiltinNameFromBytes (bytes : List UInt8) : Name :=
+  String.ofList (bytes.map (fun byte => Char.ofNat byte.toNat))
+
+def objectBuiltinNameArg? : Expr → Option Name
+  | .stringLit name => some name
+  | .bytesLit bytes => some (objectBuiltinNameFromBytes bytes)
+  | _ => none
+
+end Expr
+
 mutual
   def Expr.loadImmutableNames : Expr → List Name
     | .lit _ => []
     | .stringLit _ => []
     | .bytesLit _ => []
     | .var _ => []
-    | .call .objectBuiltin "loadimmutable" [.stringLit name] => [name]
+    | .call .objectBuiltin "loadimmutable" [nameArg] =>
+        match Expr.objectBuiltinNameArg? nameArg with
+        | some name => [name]
+        | none => []
     | .call _ _ args => Expr.List.loadImmutableNames args
 
   def Expr.List.loadImmutableNames : List Expr → List Name
@@ -621,8 +638,9 @@ mutual
         scrutinee.loadImmutableNames ++
           Stmt.CaseList.loadImmutableNames cases ++
           Stmt.List.loadImmutableNames default
-    | .forLoop condition post body =>
+    | .forLoop pre condition post body =>
         condition.loadImmutableNames ++
+          Stmt.List.loadImmutableNames pre ++
           Stmt.List.loadImmutableNames post ++
           Stmt.List.loadImmutableNames body
     | .ifThen condition body =>
@@ -801,18 +819,6 @@ def immutableReferenceEntriesFromCodes
 
 end Bytecode
 
-namespace Expr
-
-def objectBuiltinNameFromBytes (bytes : List UInt8) : Name :=
-  String.ofList (bytes.map (fun byte => Char.ofNat byte.toNat))
-
-def objectBuiltinNameArg? : Expr → Option Name
-  | .stringLit name => some name
-  | .bytesLit bytes => some (objectBuiltinNameFromBytes bytes)
-  | _ => none
-
-end Expr
-
 mutual
   def Expr.toYul? : Expr → Option AstExpr
     | .lit value => some (.Lit value)
@@ -860,11 +866,15 @@ mutual
         let cases' ← Stmt.CaseList.toYul? cases
         let default' ← Stmt.List.toYul? default
         some (.Switch scrutinee' cases' default')
-    | .forLoop condition post body => do
+    | .forLoop pre condition post body => do
+        let pre' ← Stmt.List.toYul? pre
         let condition' ← condition.toYul?
         let post' ← Stmt.List.toYul? post
         let body' ← Stmt.List.toYul? body
-        some (.For condition' post' body')
+        let loop := .For condition' post' body'
+        match pre' with
+        | [] => some loop
+        | _ => some (.Block (pre' ++ [loop]))
     | .ifThen condition body => do
         let condition' ← condition.toYul?
         let body' ← Stmt.List.toYul? body
@@ -977,11 +987,12 @@ mutual
         let cases' ← Stmt.CaseList.resolveObjectBuiltinsIn? cases context
         let default' ← Stmt.List.resolveObjectBuiltinsIn? default context
         some (.switch scrutinee' cases' default')
-    | .forLoop condition post body => do
+    | .forLoop pre condition post body => do
+        let pre' ← Stmt.List.resolveObjectBuiltinsIn? pre context
         let condition' ← condition.resolveObjectBuiltinsIn? context
         let post' ← Stmt.List.resolveObjectBuiltinsIn? post context
         let body' ← Stmt.List.resolveObjectBuiltinsIn? body context
-        some (.forLoop condition' post' body')
+        some (.forLoop pre' condition' post' body')
     | .ifThen condition body => do
         let condition' ← condition.resolveObjectBuiltinsIn? context
         let body' ← Stmt.List.resolveObjectBuiltinsIn? body context

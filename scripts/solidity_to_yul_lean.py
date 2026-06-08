@@ -930,25 +930,32 @@ class Switch(Stmt):
 
 @dataclass(frozen=True)
 class For(Stmt):
+    pre: List[Stmt]
     cond: Expr
     post: List[Stmt]
     body: List[Stmt]
 
     def lean(self) -> str:
-        return (
+        loop = (
             f"{LEAN_STMT}.For ({self.cond.lean()}) "
             f"{lean_stmt_list(self.post, 1)} {lean_stmt_list(self.body, 1)}"
         )
+        if not self.pre:
+            return loop
+        stmts = [stmt.lean() for stmt in self.pre] + [loop]
+        return f"{LEAN_STMT}.Block {lean_list(stmts, 1)}"
 
     def lean_ir(self) -> str:
         return (
-            f"{LEAN_FRONTEND}.Stmt.forLoop ({self.cond.lean_ir()}) "
+            f"{LEAN_FRONTEND}.Stmt.forLoop {lean_ir_stmt_list(self.pre, 1)} "
+            f"({self.cond.lean_ir()}) "
             f"{lean_ir_stmt_list(self.post, 1)} {lean_ir_stmt_list(self.body, 1)}"
         )
 
     def bridge_json(self) -> Json:
         return {
             "node": "for",
+            "pre": [stmt.bridge_json() for stmt in self.pre],
             "condition": self.cond.bridge_json(),
             "post": [stmt.bridge_json() for stmt in self.post],
             "body": [stmt.bridge_json() for stmt in self.body],
@@ -1551,12 +1558,12 @@ def parse_stmt(node: Any, ctx: Optional[ParseContext] = None) -> Stmt:
             fail(f"Expected YulForLoop pre/post/body blocks at {node_src(node)}")
         if ctx is None:
             pre = parse_block(pre_node)
-            loop = For(
+            return For(
+                pre,
                 parse_expr(node["condition"]),
                 parse_block(post_node),
                 parse_block(body_node),
             )
-            return loop if not pre else Block(pre + [loop])
 
         ctx.push_identifier_scope()
         try:
@@ -1564,6 +1571,7 @@ def parse_stmt(node: Any, ctx: Optional[ParseContext] = None) -> Stmt:
                 pre = parse_for_init_block_with_scope(pre_node, ctx)
                 try:
                     loop = For(
+                        pre,
                         parse_expr(node["condition"], ctx),
                         parse_block(post_node, ctx),
                         parse_block(body_node, ctx),
@@ -1573,13 +1581,14 @@ def parse_stmt(node: Any, ctx: Optional[ParseContext] = None) -> Stmt:
             else:
                 pre = parse_block(pre_node, ctx, creates_scope=False)
                 loop = For(
+                    pre,
                     parse_expr(node["condition"], ctx),
                     parse_block(post_node, ctx),
                     parse_block(body_node, ctx),
                 )
         finally:
             ctx.pop_identifier_scope()
-        return loop if not pre else Block(pre + [loop])
+        return loop
     if node_type == "YulBreak":
         return Control("Break")
     if node_type == "YulContinue":
@@ -2654,6 +2663,14 @@ def collect_stmt_summary(
         return
     if isinstance(stmt, For):
         increment_nested(stmt_counts, "for")
+        for child in stmt.pre:
+            collect_stmt_summary(
+                child,
+                stmt_counts,
+                expr_counts,
+                call_kind_counts,
+                call_name_counts,
+            )
         collect_expr_summary(
             stmt.cond,
             expr_counts,
@@ -3699,6 +3716,10 @@ def decode_bridge_stmt(data: Any) -> Stmt:
         return Switch(decode_bridge_expr(stmt.get("scrutinee")), cases, default)
     if node == "for":
         return For(
+            [
+                decode_bridge_stmt(child)
+                for child in bridge_array(stmt.get("pre", []), "for.pre")
+            ],
             decode_bridge_expr(stmt.get("condition")),
             [
                 decode_bridge_stmt(child)

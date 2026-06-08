@@ -241,6 +241,12 @@
             "node": {
               "const": "for"
             },
+            "pre": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/stmt"
+              }
+            },
             "condition": {
               "$ref": "#/$defs/expr"
             },
