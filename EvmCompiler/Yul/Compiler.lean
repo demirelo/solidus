@@ -257,7 +257,8 @@ mutual
 
   def List.directCallArgsSafe? : List AstExpr → Bool
     | [] => true
-    | _ :: _ => false
+    | expr :: rest =>
+        directCallArgSafe? expr && List.directCallArgsSafe? rest
 end
 
 mutual
@@ -1723,8 +1724,14 @@ mutual
               state')
     | _fuel + 1, state, .Let [name] (some value) => do
         let (preValue, lowerValue, state') ← Expr.lower1? state value
-        some (preValue ++ [Functions.Stmt.let_ (identName name) lowerValue],
-          state')
+        let lowerName := identName name
+        match preValue with
+        | [] => some ([Functions.Stmt.let_ lowerName lowerValue], state')
+        | _ :: _ =>
+            some
+              (Functions.Stmt.let_ lowerName (.lit zero) ::
+                (preValue ++ [Functions.Stmt.assign lowerName lowerValue]),
+                state')
     | _fuel + 1, state,
         .Let (name :: next :: rest) (some (.Call (.inr functionName) args)) =>
         if ObjectBuiltin.unsupported? functionName then

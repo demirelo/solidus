@@ -161,6 +161,28 @@
         }
       }
     },
+    "localsTargetEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "index", "name", "depth", "accessDepth"],
+      "properties": {
+        "owner": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "index": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "name": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "depth": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "accessDepth": {
+          "$ref": "#/$defs/nonemptyString"
+        }
+      }
+    },
     "frontend": {
       "type": "object",
       "additionalProperties": false,
@@ -230,6 +252,12 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/localsVarEntry"
+          }
+        },
+        "localsTargets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/localsTargetEntry"
           }
         },
         "frontend": {

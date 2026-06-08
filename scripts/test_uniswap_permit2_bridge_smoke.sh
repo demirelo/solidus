@@ -433,9 +433,15 @@ def runtime_backend_object(report, contract):
             return item
     raise SystemExit(f"missing runtime backend object for {contract}")
 
-def has_depth_seventeen_local(item):
-    for entry in item.get("localsVars", []):
-        if entry.get("depth") == "17":
+def has_deep_assignment_target(item, name, minimum=17):
+    for entry in item.get("localsTargets", []):
+        if entry.get("name") != name:
+            continue
+        try:
+            access_depth = int(entry.get("accessDepth"))
+        except (TypeError, ValueError):
+            continue
+        if access_depth >= minimum:
             return True
     return False
 
@@ -481,10 +487,10 @@ if hash_runtime_backend[0] == "fail":
         raise SystemExit(
             f"unexpected PermitHash runtime backend blocker: {hash_runtime_backend!r}"
         )
-    if not has_depth_seventeen_local(hash_runtime_object):
+    if not has_deep_assignment_target(hash_runtime_object, "var_result"):
         raise SystemExit(
-            "PermitHash locals_to_expressions blocker did not report a "
-            f"depth-17 local: {hash_runtime_object!r}"
+            "PermitHash locals_to_expressions blocker did not report deep "
+            f"assignment target var_result: {hash_runtime_object!r}"
         )
 
 signature_count = signature_check["counts"]["checkedObjects"]

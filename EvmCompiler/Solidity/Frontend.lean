@@ -1619,6 +1619,18 @@ def splitAfterLastTouch (names : List Name) :
         | [] => ([], stmt :: outside)
         | _ => (stmt :: inside, outside)
 
+def splitClosedAfterLastTouchFuel :
+    Nat → List Name → List Functions.Stmt →
+      List Functions.Stmt × List Functions.Stmt
+  | 0, names, stmts => splitAfterLastTouch names stmts
+  | fuel + 1, names, stmts =>
+      let (inside, outside) := splitAfterLastTouch names stmts
+      let declaredInside := StmtList.declaredNames inside
+      if anyNameIn declaredInside (StmtList.touchNames outside) then
+        splitClosedAfterLastTouchFuel fuel (names ++ declaredInside) stmts
+      else
+        (inside, outside)
+
 def StmtList.scopeLetLifetimesMappedFuel :
     Nat → List Functions.Stmt → List Functions.Stmt
   | 0, stmts => stmts
@@ -1626,7 +1638,8 @@ def StmtList.scopeLetLifetimesMappedFuel :
   | fuel + 1, stmt :: rest =>
       match letName? stmt with
       | some name =>
-          let (inside, outside) := splitAfterLastTouch [name] rest
+          let (inside, outside) :=
+            splitClosedAfterLastTouchFuel (rest.length + 1) [name] rest
           let declaredInside := StmtList.declaredNames inside
           let outsideTouches := StmtList.touchNames outside
           if anyNameIn declaredInside outsideTouches then
@@ -2167,7 +2180,8 @@ def compileCodeUncheckedIn? (object : Object)
     (context : ObjectBuiltinContext) : Option Assembly.TargetProgram := do
   let resolved ← object.resolveObjectBuiltinsIn? context
   let code ← resolved.lowerCodeUnchecked?
-  Functions.Program.compile? code
+  Objects.Program.compile?
+    { root := Objects.Object.mk resolved.name code [] [] }
 
 def codeBytesUncheckedIn? (object : Object)
     (context : ObjectBuiltinContext) : Option (List UInt8) := do

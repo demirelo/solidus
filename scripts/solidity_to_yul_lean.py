@@ -5251,6 +5251,7 @@ def render_json_file_backend_check_runner(
     )
     return f"""import EvmCompiler.Solidity.BridgeJson
 import EvmCompiler.Assembly.Bytecode
+import EvmCompiler.Functions.CallAwareSpill
 
 def evmCompilerRunnerBridgeJsonPath : String :=
   {lean_string(str(json_path))}
@@ -5324,6 +5325,22 @@ def evmCompilerRunnerPrintLocalsVarDepths
       ("locals_var\\t" ++ owner ++ "\\t" ++ toString idx ++ "\\t" ++
         name ++ "\\t" ++ depth)
 
+def evmCompilerRunnerPrintLocalsTargetDepth
+    (owner : String) (idx : Nat) (ctx : EvmCompiler.Locals.Ctx)
+    (name : EvmCompiler.Locals.Name) (offset : Nat) : IO Unit := do
+  let depth? := EvmCompiler.Locals.Layout.lookupDepth? name ctx.layout
+  let depth :=
+    match depth? with
+    | some value => toString value
+    | none => "missing"
+  let accessDepth :=
+    match depth? with
+    | some value => toString (offset + value)
+    | none => "missing"
+  IO.println
+    ("locals_target\\t" ++ owner ++ "\\t" ++ toString idx ++ "\\t" ++
+      name ++ "\\t" ++ depth ++ "\\t" ++ accessDepth)
+
 def evmCompilerRunnerPrintLocalsStmtFailureDetail
     (owner : String) (idx : Nat) (ctx : EvmCompiler.Locals.Ctx)
     (stmt : EvmCompiler.Locals.Stmt) : IO Unit := do
@@ -5340,9 +5357,14 @@ def evmCompilerRunnerPrintLocalsStmtFailureDetail
   | .let_ _ value =>
       evmCompilerRunnerPrintLocalsVarDepths owner idx ctx
         (evmCompilerRunnerLocalsExprVars value)
-  | .assign _ value =>
+  | .assign name value =>
+      evmCompilerRunnerPrintLocalsTargetDepth owner idx ctx name 0
       evmCompilerRunnerPrintLocalsVarDepths owner idx ctx
         (evmCompilerRunnerLocalsExprVars value)
+  | .assignTop name =>
+      evmCompilerRunnerPrintLocalsTargetDepth owner idx ctx name 0
+  | .assignTopWithOffset offset name =>
+      evmCompilerRunnerPrintLocalsTargetDepth owner idx ctx name offset
   | .terminalArgs _ args =>
       evmCompilerRunnerPrintLocalsVarDepths owner idx ctx
         (evmCompilerRunnerLocalsExprSeqVars args)
@@ -5461,6 +5483,8 @@ def main : IO Unit := do
   let lowerCodeUnchecked? ←
     evmCompilerRunnerTimedPure "lower_code_unchecked" (fun _ =>
       object.lowerCodeUnchecked?)
+  let spillScratchRange :=
+    EvmCompiler.Functions.CallAwareSpill.plannedScratchRange 64
   let functionsCompile? ←
     evmCompilerRunnerTimedPure "functions_compile" (fun _ => do
     let lower ← lowerCodeUnchecked?
@@ -5500,6 +5524,28 @@ def main : IO Unit := do
     evmCompilerRunnerTimedPure "live_layout_compile" (fun _ => do
     let lower ← lowerCodeUnchecked?
     EvmCompiler.Functions.LiveLayout.Lower.Program.compile? lower)
+  let localsAdaptiveSpillToExpressions? ←
+    evmCompilerRunnerTimedPure "locals_adaptive_spill_to_expressions" (fun _ => do
+    let locals ← functionsToLocals?
+    let (_plan, expressions) ←
+      EvmCompiler.Locals.SourceLowering.StateRel.SpillScratch.SpillPlan.compileProgramBodyWithAdaptiveSpillExpressions?
+        spillScratchRange locals
+    some expressions)
+  let localsAdaptiveSpillCompile? ←
+    evmCompilerRunnerTimedPure "locals_adaptive_spill_compile" (fun _ => do
+    let expressions ← localsAdaptiveSpillToExpressions?
+    expressions.compile?)
+  let callAwareSpillToExpressions? ←
+    evmCompilerRunnerTimedPure "call_aware_spill_to_expressions" (fun _ => do
+    let lower ← lowerCodeUnchecked?
+    let (_plan, expressions) ←
+      EvmCompiler.Functions.CallAwareSpill.compileExpressionsProgram?
+        spillScratchRange lower
+    some expressions)
+  let callAwareSpillCompile? ←
+    evmCompilerRunnerTimedPure "call_aware_spill_compile" (fun _ => do
+    let expressions ← callAwareSpillToExpressions?
+    expressions.compile?)
   let childImages? ←
     evmCompilerRunnerTimedPure "child_images" (fun _ =>
     EvmCompiler.Solidity.Frontend.Object.List.bytecodeImagesUncheckedWithLinkerSymbols?
@@ -5641,6 +5687,10 @@ def main : IO Unit := do
     , ("live_layout_to_locals", evmCompilerRunnerStageSome liveLayoutToLocals?)
     , ("live_layout_to_expressions", evmCompilerRunnerStageSome liveLayoutToExpressions?)
     , ("live_layout_compile", evmCompilerRunnerStageSome liveLayoutCompile?)
+    , ("locals_adaptive_spill_to_expressions", evmCompilerRunnerStageSome localsAdaptiveSpillToExpressions?)
+    , ("locals_adaptive_spill_compile", evmCompilerRunnerStageSome localsAdaptiveSpillCompile?)
+    , ("call_aware_spill_to_expressions", evmCompilerRunnerStageSome callAwareSpillToExpressions?)
+    , ("call_aware_spill_compile", evmCompilerRunnerStageSome callAwareSpillCompile?)
     , ("child_images", evmCompilerRunnerStageSome childImages?)
     , ("payload_items", evmCompilerRunnerStageSome items?)
     , ("data_sizes", evmCompilerRunnerStageSome dataSizes?)
@@ -5873,6 +5923,7 @@ def parse_backend_check_output(output: str) -> Json:
         "localsStmtTrace": [],
         "localsLayouts": [],
         "localsVars": [],
+        "localsTargets": [],
     }
     numeric_fields = {"bytecode_bytes"}
     for line in lines:
@@ -5986,6 +6037,36 @@ def parse_backend_check_output(output: str) -> Json:
                     "index": index,
                     "name": parts[3],
                     "depth": parts[4],
+                }
+            )
+            continue
+        if line.startswith("locals_target\t"):
+            parts = line.split("\t")
+            if (
+                len(parts) != 6
+                or not parts[1]
+                or not parts[3]
+                or not parts[4]
+                or not parts[5]
+            ):
+                fail(
+                    "Lean backend check runner produced malformed locals target: "
+                    f"{line!r}"
+                )
+            try:
+                index = int(parts[2])
+            except ValueError:
+                fail(
+                    "Lean backend check runner produced malformed locals target "
+                    f"index: {line!r}"
+                )
+            summary["localsTargets"].append(
+                {
+                    "owner": parts[1],
+                    "index": index,
+                    "name": parts[3],
+                    "depth": parts[4],
+                    "accessDepth": parts[5],
                 }
             )
             continue
@@ -6771,6 +6852,7 @@ def render_lean_backend_check_outputs(
             "localsStmtTrace",
             "localsLayouts",
             "localsVars",
+            "localsTargets",
         ]:
             value = artifact.summary.get(key)
             if value:

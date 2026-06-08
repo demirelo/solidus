@@ -524,7 +524,7 @@ def smokeSetImmutableNoReferenceContext :
       smokeUserCall) = true
 
 #guard
-  Expr.List.directCallArgsSafe? [.Var "a", .Lit smokeOne] = false
+  Expr.List.directCallArgsSafe? [.Var "a", .Lit smokeOne] = true
 
 #guard
   Expr.List.directCallArgsSafe? [.Call (.inr "g") []] = false

@@ -3108,6 +3108,15 @@ class SolidityToYulLeanTests(unittest.TestCase):
                                 "depth": "17",
                             }
                         ],
+                        "localsTargets": [
+                            {
+                                "owner": "main",
+                                "index": 2,
+                                "name": "target",
+                                "depth": "18",
+                                "accessDepth": "18",
+                            }
+                        ],
                     },
                     frontend={"producer": "solc", "ast": "irAst"},
                 ),
@@ -3148,6 +3157,9 @@ class SolidityToYulLeanTests(unittest.TestCase):
         )
         self.assertEqual(parsed["checkedObjects"][0]["localsLayouts"][0]["length"], 17)
         self.assertEqual(parsed["checkedObjects"][0]["localsVars"][0]["depth"], "17")
+        self.assertEqual(
+            parsed["checkedObjects"][0]["localsTargets"][0]["accessDepth"], "18"
+        )
         self.assertNotIn("timingsMs", parsed["checkedObjects"][1])
         self.assertEqual(parsed["checkedObjects"][1]["bytecodeBytes"], 12)
 
@@ -9121,7 +9133,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
             "permit2_hash_runtime_backend_check=",
             "permit2_hash_runtime_backend_first_none=",
             "locals_to_expressions",
-            "has_depth_seventeen_local",
+            "localsTargets",
+            "has_deep_assignment_target",
             "permit2_signature_backend_check_objects=",
             "permit2_signature_runtime_backend_check=",
             "permit2_signature_runtime_backend_first_none=",
