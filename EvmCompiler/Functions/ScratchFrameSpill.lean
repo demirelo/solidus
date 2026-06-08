@@ -3634,6 +3634,89 @@ theorem compileExpressionsProgram?_bounded_passes
                     hBound] at hCompile
   · simp [hNames] at hCompile
 
+theorem compileExpressionsProgram?_bounded_passes_state_eq
+    {maxFrameWords : Nat} {program : Program}
+    {exprProgram : Expressions.Program}
+    (hCompile :
+      compileExpressionsProgram? maxFrameWords program = some exprProgram) :
+    ∃ functionSlots stateAfterSignatures probeProcs
+        stateAfterFunctions mainProbe procs stateAfterFunctionsFinal main,
+      allocateFunctionSignatures program.functions
+        ({ env := [], nextSlot := 0 } : CompileState) =
+          (functionSlots, stateAfterSignatures) ∧
+      FunSlotListBounded functionSlots maxFrameWords ∧
+      StateSlotsBounded stateAfterSignatures ∧
+      compileFunctions?
+          { functions := functionSlots, frameWords := 0 }
+          stateAfterSignatures program.functions =
+            some (probeProcs, stateAfterFunctions) ∧
+      StateSlotsBounded stateAfterFunctions ∧
+      compileMain?
+          { functions := functionSlots, frameWords := 0 }
+          0 { env := [], nextSlot := stateAfterFunctions.nextSlot }
+          program.body = some mainProbe ∧
+      StateSlotsBounded mainProbe.state ∧
+      mainProbe.state.nextSlot ≤ maxFrameWords ∧
+      compileFunctions?
+          { functions := functionSlots,
+            frameWords := mainProbe.state.nextSlot }
+          stateAfterSignatures program.functions =
+            some (procs, stateAfterFunctionsFinal) ∧
+      stateAfterFunctionsFinal = stateAfterFunctions ∧
+      StateSlotsBounded stateAfterFunctionsFinal ∧
+      compileMain?
+          { functions := functionSlots,
+            frameWords := mainProbe.state.nextSlot }
+          mainProbe.state.nextSlot
+          { env := [], nextSlot := stateAfterFunctions.nextSlot }
+          program.body = some main ∧
+      main.state = mainProbe.state ∧
+      StateSlotsBounded main.state ∧
+      exprProgram = { procs := procs, body := main.block } := by
+  rcases compileExpressionsProgram?_bounded_passes hCompile with
+    ⟨functionSlots, stateAfterSignatures, probeProcs,
+      stateAfterFunctions, mainProbe, procs, stateAfterFunctionsFinal, main,
+      hSignatures, hFunctionSlotsBound, hSignatureStateBound,
+      hProbeFunctions, hProbeFunctionsBound, hMainProbe, hMainProbeBound,
+      hBound, hFinalFunctions, hFinalFunctionsBound, hMain, hMainBound,
+      hExprProgram⟩
+  have hFinalFunctionsState :
+      stateAfterFunctionsFinal = stateAfterFunctions :=
+    compileFunctions?_state_eq_of_functions_eq
+      (ctxLeft := { functions := functionSlots, frameWords := 0 })
+      (ctxRight :=
+        { functions := functionSlots,
+          frameWords := mainProbe.state.nextSlot })
+      (state := stateAfterSignatures)
+      (fns := program.functions)
+      (leftProcs := probeProcs)
+      (rightProcs := procs)
+      (leftState := stateAfterFunctions)
+      (rightState := stateAfterFunctionsFinal)
+      (by rfl) hProbeFunctions hFinalFunctions
+  have hMainState :
+      main.state = mainProbe.state :=
+    compileMain?_state_eq_of_functions_eq
+      (ctxLeft := { functions := functionSlots, frameWords := 0 })
+      (ctxRight :=
+        { functions := functionSlots,
+          frameWords := mainProbe.state.nextSlot })
+      (frameWordsLeft := 0)
+      (frameWordsRight := mainProbe.state.nextSlot)
+      (state := { env := [], nextSlot := stateAfterFunctions.nextSlot })
+      (body := program.body)
+      (left := mainProbe)
+      (right := main)
+      (by rfl) hMainProbe hMain
+  exact
+    ⟨functionSlots, stateAfterSignatures, probeProcs,
+      stateAfterFunctions, mainProbe, procs, stateAfterFunctionsFinal, main,
+      hSignatures, hFunctionSlotsBound, hSignatureStateBound,
+      hProbeFunctions, hProbeFunctionsBound, hMainProbe, hMainProbeBound,
+      hBound, hFinalFunctions, hFinalFunctionsState,
+      hFinalFunctionsBound, hMain, hMainState, hMainBound,
+      hExprProgram⟩
+
 theorem compilePreludeStmt?_noCallCreate {stmt : Stmt}
     {compiled : Expressions.Stmt}
     (hStmt : stmt.usesCallCreate = false)
