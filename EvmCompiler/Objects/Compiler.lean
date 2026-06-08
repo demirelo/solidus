@@ -1,5 +1,7 @@
 import EvmCompiler.Objects.Syntax
+import EvmCompiler.Functions.CallAwareSpill
 import EvmCompiler.Functions.Compiler
+import EvmCompiler.Functions.ScratchFrameSpill
 
 namespace EvmCompiler
 namespace Objects
@@ -26,9 +28,32 @@ def toFunctions (program : Program) : Functions.Program :=
 def toExpressions? (program : Program) : Option Expressions.Program :=
   Functions.Inline.Program.toExpressions? program.toFunctions
 
+def callAwareSpillFallbackScratchWords : Nat :=
+  64
+
+def scratchFrameSpillFallbackWords : Nat :=
+  4096
+
+def compileCallAwareSpillFallback? (program : Program) :
+    Option Assembly.TargetProgram := do
+  let (_range, _plan, _exprProgram, target) ←
+    Functions.CallAwareSpill.compileTargetPlannedPrealloc?
+      callAwareSpillFallbackScratchWords program.toFunctions
+  some target
+
+def compileScratchFrameSpillFallback? (program : Program) :
+    Option Assembly.TargetProgram :=
+  Functions.ScratchFrameSpill.compileTarget?
+    scratchFrameSpillFallbackWords program.toFunctions
+
 def compile? (program : Program) :
     Option Assembly.TargetProgram :=
-  Functions.Inline.Program.compile? program.toFunctions
+  match Functions.Inline.Program.compile? program.toFunctions with
+  | some target => some target
+  | none =>
+      match compileCallAwareSpillFallback? program with
+      | some target => some target
+      | none => compileScratchFrameSpillFallback? program
 
 def Accepted (program : Program) : Prop :=
   program.WF ∧ Functions.Inline.Program.Accepted program.toFunctions

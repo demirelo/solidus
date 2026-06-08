@@ -10176,6 +10176,12 @@ def compileExpressionsProgram? (range : ScratchRange) (program : Program) :
   let bodyPlan := withScratchPrealloc range bodyPlan
   some (bodyPlan, { procs := procs, body := bodyPlan.block })
 
+def compileTarget? (range : ScratchRange) (program : Program) :
+    Option (Plan × Expressions.Program × Assembly.TargetProgram) := do
+  let (plan, exprProgram) ← compileExpressionsProgram? range program
+  let target ← Expressions.Program.compile? exprProgram
+  some (plan, exprProgram, target)
+
 theorem compileExpressionsProgram?_eq_some_components
     {range : ScratchRange} {program : Program}
     {plan : Plan} {exprProgram : Expressions.Program}
@@ -16050,6 +16056,35 @@ def plannedScratchRange (words : Nat) : ScratchRange :=
 def plannedScratchRangeChecked? (words : Nat) : Option ScratchRange :=
   let range := plannedScratchRange words
   if range.preallocFits? then some range else none
+
+def compileTargetPlannedPreallocFrom?
+    (program : Program) : Nat → Nat →
+      Option (ScratchRange × Plan × Expressions.Program ×
+        Assembly.TargetProgram)
+  | remaining, words =>
+      match plannedScratchRangeChecked? words with
+      | some range =>
+          match compileTarget? range program with
+          | some (plan, exprProgram, target) =>
+              some (range, plan, exprProgram, target)
+          | none =>
+              match remaining with
+              | 0 => none
+              | remaining' + 1 =>
+                  compileTargetPlannedPreallocFrom? program remaining'
+                    (words + 1)
+      | none =>
+          match remaining with
+          | 0 => none
+          | remaining' + 1 =>
+              compileTargetPlannedPreallocFrom? program remaining'
+                (words + 1)
+
+def compileTargetPlannedPrealloc?
+    (maxWords : Nat) (program : Program) :
+    Option (ScratchRange × Plan × Expressions.Program ×
+      Assembly.TargetProgram) :=
+  compileTargetPlannedPreallocFrom? program maxWords 0
 
 theorem plannedScratchRangeChecked?_eq_some
     {words : Nat} {range : ScratchRange}

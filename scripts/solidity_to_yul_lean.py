@@ -5252,6 +5252,7 @@ def render_json_file_backend_check_runner(
     return f"""import EvmCompiler.Solidity.BridgeJson
 import EvmCompiler.Assembly.Bytecode
 import EvmCompiler.Functions.CallAwareSpill
+import EvmCompiler.Functions.ScratchFrameSpill
 
 def evmCompilerRunnerBridgeJsonPath : String :=
   {lean_string(str(json_path))}
@@ -5546,6 +5547,15 @@ def main : IO Unit := do
     evmCompilerRunnerTimedPure "call_aware_spill_compile" (fun _ => do
     let expressions ← callAwareSpillToExpressions?
     expressions.compile?)
+  let scratchFrameSpillToExpressions? ←
+    evmCompilerRunnerTimedPure "scratch_frame_spill_to_expressions" (fun _ => do
+    let lower ← lowerCodeUnchecked?
+    EvmCompiler.Functions.ScratchFrameSpill.compileExpressionsProgram?
+      4096 lower)
+  let scratchFrameSpillCompile? ←
+    evmCompilerRunnerTimedPure "scratch_frame_spill_compile" (fun _ => do
+    let expressions ← scratchFrameSpillToExpressions?
+    expressions.compile?)
   let childImages? ←
     evmCompilerRunnerTimedPure "child_images" (fun _ =>
     EvmCompiler.Solidity.Frontend.Object.List.bytecodeImagesUncheckedWithLinkerSymbols?
@@ -5691,6 +5701,8 @@ def main : IO Unit := do
     , ("locals_adaptive_spill_compile", evmCompilerRunnerStageSome localsAdaptiveSpillCompile?)
     , ("call_aware_spill_to_expressions", evmCompilerRunnerStageSome callAwareSpillToExpressions?)
     , ("call_aware_spill_compile", evmCompilerRunnerStageSome callAwareSpillCompile?)
+    , ("scratch_frame_spill_to_expressions", evmCompilerRunnerStageSome scratchFrameSpillToExpressions?)
+    , ("scratch_frame_spill_compile", evmCompilerRunnerStageSome scratchFrameSpillCompile?)
     , ("child_images", evmCompilerRunnerStageSome childImages?)
     , ("payload_items", evmCompilerRunnerStageSome items?)
     , ("data_sizes", evmCompilerRunnerStageSome dataSizes?)
