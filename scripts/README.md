@@ -537,6 +537,9 @@ SOLC=/Users/dan/.local/bin/solc LAKE=/Users/dan/.elan/bin/lake \
   scripts/compare_forge_solc_lean.sh --match-test testName
 ```
 
+Set `PYTHON=/path/to/python` when schema validation should use a specific
+runtime, for example the bundled Codex Python with `jsonschema` installed.
+
 The comparison script also validates the persisted `bridge-json/manifest.json`
 package after a successful solc-lean compilation, emits and validates a
 `bridge-json-summary.json` preflight, and only then reports

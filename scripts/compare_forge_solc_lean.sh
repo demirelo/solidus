@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REAL_SOLC="${SOLC:-/Users/dan/.local/bin/solc}"
 LAKE_BIN="${LAKE:-/Users/dan/.elan/bin/lake}"
 FORGE_BIN="${FORGE:-forge}"
+PYTHON_BIN="${PYTHON:-python3}"
 TMPDIR="${TMPDIR:-/tmp}"
 OUTDIR="$(mktemp -d "$TMPDIR/evm-compiler-forge-compare.XXXXXX")"
 KEEP_TMP="${KEEP_TMP:-0}"
@@ -35,6 +36,8 @@ Environment:
   SOLC      Real solc executable. Default: /Users/dan/.local/bin/solc
   LAKE      Lake executable. Default: /Users/dan/.elan/bin/lake
   FORGE     Forge executable. Default: forge
+  PYTHON    Python executable used for bridge JSON validation and reports.
+            Default: python3
   KEEP_TMP  Set to 1 to keep logs/artifacts under the temp directory.
   SOLC_LEAN_BRIDGE_JSON_DIR
             Directory for normalized bridge JSON files from the solc-lean run.
@@ -64,6 +67,13 @@ if [[ "$FORGE_BIN" != */* ]]; then
   fi
 fi
 
+if [[ "$PYTHON_BIN" != */* ]]; then
+  resolved_python="$(command -v "$PYTHON_BIN" || true)"
+  if [[ -n "$resolved_python" ]]; then
+    PYTHON_BIN="$resolved_python"
+  fi
+fi
+
 if [[ ! -x "$REAL_SOLC" ]]; then
   echo "error: real solc is not executable: $REAL_SOLC" >&2
   exit 2
@@ -71,6 +81,11 @@ fi
 
 if [[ ! -x "$FORGE_BIN" ]]; then
   echo "error: forge is not executable: $FORGE_BIN" >&2
+  exit 2
+fi
+
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "error: python is not executable: $PYTHON_BIN" >&2
   exit 2
 fi
 
@@ -91,18 +106,18 @@ build_bridge_summary_report() {
   if [[ ! -f "$bridge_json_manifest" ]]; then
     return 20
   fi
-  python3 "$ROOT/scripts/validate_bridge_json.py" \
+  "$PYTHON_BIN" "$ROOT/scripts/validate_bridge_json.py" \
     --quiet "$bridge_json_manifest" >"$bridge_json_validate_log" 2>&1 || return 21
-  python3 "$ROOT/scripts/solidity_to_yul_lean.py" \
+  "$PYTHON_BIN" "$ROOT/scripts/solidity_to_yul_lean.py" \
     "$bridge_json_manifest" \
     --input-format bridge-json-manifest \
     --format bridge-json-summary \
     --output "$bridge_json_summary" \
     >"$bridge_json_summary_log" 2>&1 || return 22
-  python3 "$ROOT/scripts/validate_bridge_json.py" \
+  "$PYTHON_BIN" "$ROOT/scripts/validate_bridge_json.py" \
     --quiet "$bridge_json_summary" \
     >"$bridge_json_summary_validate_log" 2>&1 || return 23
-  python3 - "$bridge_json_summary" "$bridge_json_manifest" >"$bridge_json_summary_report" <<'PY' || return 24
+  "$PYTHON_BIN" - "$bridge_json_summary" "$bridge_json_manifest" >"$bridge_json_summary_report" <<'PY' || return 24
 import json
 import sys
 
@@ -225,7 +240,7 @@ SOLC_LEAN_BRIDGE_JSON_DIR="$BRIDGE_JSON_DIR" \
 lean_status=$?
 set -e
 
-python3 - "$full_log" "$lean_log" "$full_results" "$lean_results" <<'PY'
+"$PYTHON_BIN" - "$full_log" "$lean_log" "$full_results" "$lean_results" <<'PY'
 import re
 import sys
 from pathlib import Path

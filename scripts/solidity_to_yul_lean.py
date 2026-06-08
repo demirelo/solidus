@@ -1661,14 +1661,14 @@ def parse_switch_case_value(node: Any, what: str) -> SwitchCaseValue:
                 return SwitchCaseValue(SWITCH_CASE_BOOL, True)
             if value == "false":
                 return SwitchCaseValue(SWITCH_CASE_BOOL, False)
+        if kind == "string" and isinstance(value, str):
+            return SwitchCaseValue(SWITCH_CASE_STRING, value)
         hex_value = node.get("hexValue")
         if kind == "string" and isinstance(hex_value, str):
             return SwitchCaseValue(
                 SWITCH_CASE_BYTES,
                 tuple(parse_hex_bytes(hex_value, f"{what} hex string literal")),
             )
-        if kind == "string" and isinstance(value, str):
-            return SwitchCaseValue(SWITCH_CASE_STRING, value)
     literal = parse_expr(node)
     return SwitchCaseValue(SWITCH_CASE_WORD, yul_literal_word(literal, what))
 
@@ -1693,13 +1693,13 @@ def parse_expr(node: Any, ctx: Optional[ParseContext] = None) -> Expr:
                     return Lit(1)
                 if value == "false":
                     return Lit(0)
+        if kind == "string" and isinstance(value, str):
+            return StringLit(value)
         hex_value = node.get("hexValue")
         if kind == "string" and isinstance(hex_value, str):
             return BytesLit(
                 parse_hex_bytes(hex_value, f"Yul hex string literal at {node_src(node)}")
             )
-        if kind == "string" and isinstance(value, str):
-            return StringLit(value)
         fail(
             "Unsupported Yul literal kind in solc IR AST; "
             f"got {kind!r} at {node_src(node)}"
