@@ -79,6 +79,11 @@ def functionEnv (slots : FunSlots) : SlotEnv :=
 def EnvSlotsBounded (env : SlotEnv) (limit : Nat) : Prop :=
   ∀ entry, entry ∈ env → entry.2 < limit
 
+def NamesResolveBounded (env : SlotEnv) (limit : Nat)
+    (names : List Name) : Prop :=
+  ∀ name, name ∈ names → ∃ slot,
+    lookupSlot? name env = some slot ∧ slot < limit
+
 def StateSlotsBounded (state : CompileState) : Prop :=
   EnvSlotsBounded state.env state.nextSlot
 
@@ -135,6 +140,48 @@ theorem lookupSlot?_lt_of_bounded {name : Name} {slot limit : Nat}
     (hLookup : lookupSlot? name env = some slot) :
     slot < limit := by
   exact hBound (name, slot) (lookupSlot?_some_mem hLookup)
+
+theorem namesResolveBounded_of_envSlotsBounded {env : SlotEnv}
+    {limit : Nat} {names : List Name}
+    (hBound : EnvSlotsBounded env limit)
+    (hResolve :
+      ∀ name, name ∈ names → ∃ slot, lookupSlot? name env = some slot) :
+    NamesResolveBounded env limit names := by
+  intro name hMem
+  rcases hResolve name hMem with ⟨slot, hLookup⟩
+  exact ⟨slot, hLookup, lookupSlot?_lt_of_bounded hBound hLookup⟩
+
+theorem mapM_lookupSlot?_namesResolveBounded_of_envSlotsBounded
+    {env : SlotEnv} {limit : Nat}
+    (hBound : EnvSlotsBounded env limit) :
+    ∀ {names : List Name} {slots : List Nat},
+      names.mapM (fun name => lookupSlot? name env) = some slots →
+        NamesResolveBounded env limit names
+  | [], slots, hMap => by
+      intro name hMem
+      simp at hMem
+  | name :: rest, slots, hMap => by
+      simp at hMap
+      cases hSlot : lookupSlot? name env with
+      | none =>
+          simp [hSlot] at hMap
+      | some slot =>
+          cases hTail :
+              rest.mapM (fun name => lookupSlot? name env) with
+          | none =>
+              simp [hSlot, hTail] at hMap
+          | some tailSlots =>
+              simp [hSlot, hTail] at hMap
+              intro query hMem
+              simp at hMem
+              rcases hMem with hHead | hRest
+              · cases hHead
+                exact
+                  ⟨slot, hSlot,
+                    lookupSlot?_lt_of_bounded hBound hSlot⟩
+              · exact
+                  mapM_lookupSlot?_namesResolveBounded_of_envSlotsBounded
+                    hBound hTail query hRest
 
 theorem lookupFun?_some_mem {name : Name} {slots : FunSlots}
     {functions : List FunSlots}
@@ -735,6 +782,81 @@ theorem storeTopSlotCode?_eq_some_inv
       cases hCode
       exact ⟨addr, rfl, rfl⟩
 
+theorem compileExprCode?_var_load_slot_bounded {env : SlotEnv}
+    {valuesAboveBase limit : Nat} {name : Name}
+    {code : Structured.Code}
+    (hBound : EnvSlotsBounded env limit)
+    (hCompile :
+      compileExprCode? env valuesAboveBase (.var name) = some code) :
+    ∃ slot,
+      lookupSlot? name env = some slot ∧
+        slot < limit ∧
+        loadSlotCode? valuesAboveBase slot = some code := by
+  simp [compileExprCode?] at hCompile
+  cases hSlot : lookupSlot? name env with
+  | none =>
+      simp [hSlot] at hCompile
+  | some slot =>
+      simp [hSlot] at hCompile
+      exact
+        ⟨slot, rfl, lookupSlot?_lt_of_bounded hBound hSlot,
+          hCompile⟩
+
+theorem compileReturnLoadsCode?_namesResolveBounded_of_envSlotsBounded :
+    ∀ {env : SlotEnv} {valuesAboveBase : Nat} {returns : List Name}
+      {code : Structured.Code} {limit : Nat},
+      EnvSlotsBounded env limit →
+      compileReturnLoadsCode? env valuesAboveBase returns = some code →
+        NamesResolveBounded env limit returns
+  | env, valuesAboveBase, [], code, limit, _hBound, hCode => by
+      intro name hMem
+      simp at hMem
+  | env, valuesAboveBase, name :: rest, code, limit, hBound, hCode => by
+      simp [compileReturnLoadsCode?] at hCode
+      cases hSlot : lookupSlot? name env with
+      | none =>
+          simp [hSlot] at hCode
+      | some slot =>
+          cases hHead : loadSlotCode? valuesAboveBase slot with
+          | none =>
+              simp [hSlot, hHead] at hCode
+          | some head =>
+              cases hTail :
+                  compileReturnLoadsCode? env (valuesAboveBase + 1) rest with
+              | none =>
+                  simp [hSlot, hHead, hTail] at hCode
+              | some tail =>
+                  simp [hSlot, hHead, hTail] at hCode
+                  intro query hMem
+                  simp at hMem
+                  rcases hMem with hHeadName | hRest
+                  · cases hHeadName
+                    exact
+                      ⟨slot, hSlot,
+                        lookupSlot?_lt_of_bounded hBound hSlot⟩
+                  · exact
+                      compileReturnLoadsCode?_namesResolveBounded_of_envSlotsBounded
+                        hBound hTail query hRest
+
+theorem compileReturnCode?_namesResolveBounded_of_envSlotsBounded
+    {env : SlotEnv} {returns : List Name} {code : Structured.Code}
+    {limit : Nat}
+    (hBound : EnvSlotsBounded env limit)
+    (hCode : compileReturnCode? env returns = some code) :
+    NamesResolveBounded env limit returns := by
+  unfold compileReturnCode? at hCode
+  cases hLoads : compileReturnLoadsCode? env 0 returns with
+  | none =>
+      simp [hLoads] at hCode
+  | some loads =>
+      cases hRemove : removeBaseUnderCode? returns.length with
+      | none =>
+          simp [hLoads, hRemove] at hCode
+      | some removeBase =>
+          exact
+            compileReturnLoadsCode?_namesResolveBounded_of_envSlotsBounded
+              hBound hLoads
+
 theorem structuredCode_append_noCallCreate
     {left right : Structured.Code}
     (hLeft : left.usesCallCreate = false)
@@ -1286,6 +1408,109 @@ mutual
               [ Block.ofCode code,
                 { stmts := [Expressions.Stmt.terminal kind] } ] }
 end
+
+theorem compileStmt?_assign_target_slot_bounded
+    {ctx : CompileCtx} {returns : List Name}
+    {state : CompileState} {name : Name} {value : Expr 1}
+    {plan : Plan}
+    (hBound : StateSlotsBounded state)
+    (hCompile :
+      compileStmt? ctx returns state (.assign name value) = some plan) :
+    ∃ slot valueCode storeCode,
+      lookupSlot? name state.env = some slot ∧
+        slot < state.nextSlot ∧
+        compileExprCode? state.env 0 value = some valueCode ∧
+        storeTopSlotCode? 1 slot = some storeCode ∧
+        plan.state = state ∧
+        plan.block = Block.ofCode (valueCode ++ storeCode) := by
+  simp [compileStmt?] at hCompile
+  cases hSlot : lookupSlot? name state.env with
+  | none =>
+      simp [hSlot] at hCompile
+  | some slot =>
+      cases hCode : compileExprCode? state.env 0 value with
+      | none =>
+          simp [hSlot, hCode] at hCompile
+      | some valueCode =>
+          cases hStore : storeTopSlotCode? 1 slot with
+          | none =>
+              simp [hSlot, hCode, hStore] at hCompile
+          | some storeCode =>
+              simp [hSlot, hCode, hStore] at hCompile
+              cases hCompile
+              exact
+                ⟨slot, valueCode, storeCode, rfl,
+                  lookupSlot?_lt_of_bounded hBound hSlot, rfl, hStore,
+                  rfl, rfl⟩
+
+theorem compileStmt?_leave_returnsResolveBounded
+    {ctx : CompileCtx} {returns : List Name}
+    {state : CompileState} {plan : Plan}
+    (hBound : StateSlotsBounded state)
+    (hCompile : compileStmt? ctx returns state .leave = some plan) :
+    NamesResolveBounded state.env state.nextSlot returns := by
+  simp [compileStmt?] at hCompile
+  cases hCode : compileReturnCode? state.env returns with
+  | none =>
+      simp [hCode] at hCompile
+  | some code =>
+      exact
+        compileReturnCode?_namesResolveBounded_of_envSlotsBounded
+          hBound hCode
+
+theorem compileStmt?_call_targetsResolveBounded
+    {ctx : CompileCtx} {returns targets : List Name}
+    {state : CompileState} {functionName : Name} {args : List (Expr 1)}
+    {plan : Plan}
+    (hBound : StateSlotsBounded state)
+    (hCompile :
+      compileStmt? ctx returns state
+        (.call targets functionName args) = some plan) :
+    NamesResolveBounded state.env state.nextSlot targets := by
+  simp [compileStmt?] at hCompile
+  cases hFn : lookupFun? functionName ctx.functions with
+  | none =>
+      simp [hFn] at hCompile
+  | some fn =>
+      by_cases hArgsLen : args.length = fn.params.length
+      · simp [hFn, hArgsLen] at hCompile
+        by_cases hTargetsLen : targets.length = fn.returns.length
+        · simp [hTargetsLen] at hCompile
+          by_cases hTargetsNodup : targets.Nodup
+          · simp [hTargetsNodup] at hCompile
+            cases hCallerBase : swapTopTwoCode? with
+            | none =>
+                simp [hCallerBase] at hCompile
+            | some callerBaseTop =>
+                cases hArgsCode :
+                    compileCallArgsToSlots? state.env args fn.params with
+                | none =>
+                    simp [hCallerBase, hArgsCode] at hCompile
+                | some argCode =>
+                    cases hCalleeBase : swapTopTwoCode? with
+                    | none =>
+                        simp [hCallerBase] at hCalleeBase
+                    | some calleeBaseTop =>
+                        cases hTargetSlots :
+                            targets.mapM
+                              (fun name => lookupSlot? name state.env) with
+                        | none =>
+                            simp [hCallerBase, hArgsCode, hCalleeBase,
+                              hTargetSlots] at hCompile
+                        | some targetSlots =>
+                            cases hStoreReturns :
+                                compileStoreTopSlots? fn.returns.length
+                                  targetSlots.reverse with
+                            | none =>
+                                simp [hCallerBase, hArgsCode, hCalleeBase,
+                                  hTargetSlots, hStoreReturns] at hCompile
+                            | some storeReturns =>
+                                exact
+                                  mapM_lookupSlot?_namesResolveBounded_of_envSlotsBounded
+                                    hBound hTargetSlots
+          · simp [hFn, hArgsLen, hTargetsLen, hTargetsNodup] at hCompile
+        · simp [hFn, hArgsLen, hTargetsLen] at hCompile
+      · simp [hFn, hArgsLen] at hCompile
 
 set_option linter.unusedSimpArgs false in
 mutual
