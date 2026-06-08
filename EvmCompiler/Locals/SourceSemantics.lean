@@ -105,7 +105,7 @@ Continuing EVM primitives exposed at the source-primitive boundary.
 
 Backend stack-shuffle instructions are deliberately not source primitives here:
 they remain part of the lower stack-machine implementation and proofs. External
-call/create and control/PC-dependent primitives are still rejected by
+call/create and control/PC/gas-dependent primitives are still rejected by
 `continuingStep?` until their source-facing interaction semantics are wired in.
 -/
 def sourceContinuingStep? (op : Structured.BasicOp) :

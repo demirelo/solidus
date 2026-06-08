@@ -28,8 +28,11 @@ Primitive operations admitted directly into the first assembly layer.
 
 Control transfer, labels, and pushes are represented by dedicated assembly
 instructions. Raw `JUMP`/`JUMPI`/`JUMPDEST` are represented by labeled
-control-flow instructions. The source/compiler tower does not admit the EVM
-`GAS` opcode; gas accounting remains only in the final gas-aware runner.
+control-flow instructions. The source/compiler tower does not admit `GAS` as
+an ordinary continuing source primitive; gas accounting remains only in the
+final gas-aware runner. `GAS` is still present in assembly syntax so executable
+unchecked object images can emit the real opcode for Solidity/Forge
+compatibility.
 -/
 inductive PrimOp where
   | stop
@@ -51,6 +54,7 @@ inductive PrimOp where
   | log0 | log1 | log2 | log3 | log4
   | create | call | callcode | return | delegatecall | create2 | staticcall
   | revert | invalid | selfdestruct
+  | gas
   deriving DecidableEq, Repr
 
 namespace PrimOp
@@ -117,6 +121,7 @@ def toEVM : PrimOp → EVMOp
   | .mstore8 => EvmYul.Operation.MSTORE8
   | .pc => EvmYul.Operation.PC
   | .msize => EvmYul.Operation.MSIZE
+  | .gas => EvmYul.Operation.GAS
   | .tload => EvmYul.Operation.TLOAD
   | .tstore => EvmYul.Operation.TSTORE
   | .mcopy => EvmYul.Operation.MCOPY

@@ -10,9 +10,9 @@ namespace PrimOp
 Primitive operations whose non-gas behavior is supplied by the shared
 EVM/Yul semantics imported from EVMYulLean.
 
-The first assembly layer deliberately has no `GAS` or exact gas accounting in
-its syntax, and raw EVM jumps are represented by labeled control-flow
-instructions. Account/code reads, logs, storage, memory, and terminal
+The first assembly source semantics deliberately has no continuing `GAS`
+primitive or exact gas accounting, and raw EVM jumps are represented by labeled
+control-flow instructions. Account/code reads, logs, storage, memory, and terminal
 `SELFDESTRUCT` reuse shared EVMYulLean state transformers in the gasless source
 step relation.  `CALL`/`CREATE` are admitted at the syntax/encoding level; the
 deployed open-world request/response behavior is handled by the higher Yul
@@ -34,15 +34,21 @@ def usesOutsideContext : PrimOp → Bool
   | .extcodehash
   | .blockhash | .coinbase | .timestamp | .number | .prevrandao | .gaslimit
   | .chainid | .selfbalance | .basefee | .blobhash | .blobbasefee
-  | .sload | .sstore | .tload | .tstore | .log0 | .log1 | .log2 | .log3
+  | .sload | .sstore | .tload | .tstore | .gas | .log0 | .log1 | .log2 | .log3
   | .log4 | .create | .call | .callcode | .return | .delegatecall | .create2
   | .staticcall | .revert | .selfdestruct =>
       true
   | _ =>
       false
 
+/--
+Primitive operations excluded from no-CALL/CREATE gas-erased replay paths.
+`gas` is included because it observes gas bookkeeping directly, not because it
+performs an external call.
+-/
 def isCallCreate : PrimOp → Bool
-  | .create | .call | .callcode | .delegatecall | .create2 | .staticcall =>
+  | .create | .call | .callcode | .delegatecall | .create2 | .staticcall
+  | .gas =>
       true
   | _ =>
       false

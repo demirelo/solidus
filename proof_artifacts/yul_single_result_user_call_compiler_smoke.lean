@@ -189,6 +189,9 @@ def smokeExternalDelegateCallExpr : AstExpr :=
     [.Lit smokeOne, .Lit smokeOne, .Lit smokeOne, .Lit smokeOne,
       .Lit smokeOne, .Lit smokeOne]
 
+def smokeGasExpr : AstExpr :=
+  .Call (.inl ((.StackMemFlow .GAS : EvmYul.Operation .Yul))) []
+
 def smokeCreateExpr : AstExpr :=
   .Call (.inl ((.System .CREATE : EvmYul.Operation .Yul)))
     [.Lit smokeOne, .Lit smokeOne, .Lit smokeOne]
@@ -563,6 +566,18 @@ def smokeSetImmutableNoReferenceContext :
   smokeSome
     (Expr.lower1? (Fresh.initial (Expr.names smokeExternalDelegateCallExpr))
       smokeExternalDelegateCallExpr) = true
+
+#guard
+  Expr.lower1? (Fresh.initial (Expr.names smokeGasExpr)) smokeGasExpr = none
+
+#guard
+  Prim.toUncheckedBasicOp?
+      ((.StackMemFlow .GAS : EvmYul.Operation .Yul)) = some .gas
+
+#guard
+  smokeSome
+    (Expr.lower1Unchecked? (Fresh.initial (Expr.names smokeGasExpr))
+      smokeGasExpr) = true
 
 #guard
   smokeSome

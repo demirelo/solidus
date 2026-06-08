@@ -97,6 +97,12 @@ def toBasicOp? : EvmYul.Operation .Yul → Option Structured.BasicOp
 @[simp] theorem toBasicOp?_msize :
     toBasicOp? ((.StackMemFlow .MSIZE : EvmYul.Operation .Yul)) = none := rfl
 
+def toUncheckedBasicOp? (prim : EvmYul.Operation .Yul) :
+    Option Structured.BasicOp :=
+  match prim with
+  | .StackMemFlow .GAS => some .gas
+  | _ => toBasicOp? prim
+
 def stop? : EvmYul.Operation .Yul → Option Assembly.HaltKind
   | .StopArith .STOP => some .stop
   | _ => none
@@ -392,7 +398,7 @@ mutual
         else
           none
     | .Call (.inl prim) args => do
-        let op ← Prim.toBasicOp? prim
+        let op ← Prim.toUncheckedBasicOp? prim
         let (preArgs, argExprs, state') ←
           if List.pureAliasArgsSafe? args then do
             let argExprs ← List.toLocals1? args

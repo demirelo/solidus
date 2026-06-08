@@ -1879,7 +1879,7 @@ def continuingStep? : PrimOp → Option PrimStep
   | .log3 => some .log3
   | .log4 => some .log4
   | .invalid => some .invalid
-  | .stop | .pc | .create | .call | .callcode | .return | .delegatecall
+  | .stop | .pc | .gas | .create | .call | .callcode | .return | .delegatecall
   | .create2 | .staticcall | .revert | .selfdestruct =>
       none
 

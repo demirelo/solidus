@@ -1,5 +1,20 @@
 # Progress Log
 
+## 2026-06-08 00:21 PDT - compaction-resume/object-builtin-audit
+Resumed after compaction to check the current `datasize`/`dataoffset`/`setimmutable`
+support boundary: object semantics and frontend resolution appear present, while
+ordinary primitive Yul compilation still classifies object builtins as a separate
+unsupported surface unless resolved by the object-image/frontend path.
+
+## 2026-06-08 00:32 PDT - audit/object-builtins-and-gas-boundary
+Confirmed `datasize`, `dataoffset`, and `setimmutable` are supported in the Yul
+object semantics/preservation and the Solidity computed object-image path, while
+direct core-Yul primitive lowering still rejects unresolved object builtins.
+Also kept `gas()` theorem-excluded but executable in the unchecked object-image
+path. Verification: object semantics/preservation build, Solidity frontend and
+BridgeJson build, assembly GasAware build, proof-artifact smoke, targeted Python
+object-builtin tests, and `git diff --check`.
+
 ## 2026-06-07 23:33 PDT - compaction-resume/runtime-external-placeholder
 Resumed after compaction while finishing the assembly runtime external-interaction placeholder removal; scoped Lean checks are green, and the next work is single-result user-call lowering plus an unsupported-Yul audit.
 

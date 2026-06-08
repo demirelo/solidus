@@ -151,6 +151,7 @@ inductive BasicOp where
   | log0 | log1 | log2 | log3 | log4
   | create | call | callcode | delegatecall | create2 | staticcall
   | invalid
+  | gas
   deriving DecidableEq, Repr
 
 namespace BasicOp
@@ -215,6 +216,7 @@ def toPrimOp : BasicOp → Assembly.PrimOp
   | .sstore => .sstore
   | .mstore8 => .mstore8
   | .msize => .msize
+  | .gas => .gas
   | .tload => .tload
   | .tstore => .tstore
   | .mcopy => .mcopy

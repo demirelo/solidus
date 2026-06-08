@@ -2032,12 +2032,13 @@ Operations admitted by the private-scratch spill fallback.
 
 `msize` does not read memory bytes, but it observes `activeWords`; target-side
 scratch preallocation changes that value, so it is rejected here with the other
-memory-observing operations.
+memory-observing operations. `gas` is also rejected by this gate: it is not a
+memory observer, but it reads the resource bookkeeping changed by inserted code.
 -/
 def basicOp? : Structured.BasicOp → Bool
   | .calldatacopy | .codecopy | .extcodecopy | .returndatacopy => false
   | .mload | .mstore | .mstore8 => false
-  | .mcopy | .keccak256 | .msize => false
+  | .mcopy | .keccak256 | .msize | .gas => false
   | .log0 | .log1 | .log2 | .log3 | .log4 => false
   | .create | .call | .callcode | .delegatecall | .create2 | .staticcall =>
       false
@@ -2046,7 +2047,7 @@ def basicOp? : Structured.BasicOp → Bool
 def BasicOpMemoryTouching : Structured.BasicOp → Prop
   | .calldatacopy | .codecopy | .extcodecopy | .returndatacopy => True
   | .mload | .mstore | .mstore8 => True
-  | .mcopy | .keccak256 | .msize => True
+  | .mcopy | .keccak256 | .msize | .gas => True
   | .log0 | .log1 | .log2 | .log3 | .log4 => True
   | .create | .call | .callcode | .delegatecall | .create2 | .staticcall =>
       True
