@@ -16,6 +16,18 @@ EvmCompiler.Functions.CallAwareSpill`;
 EvmCompiler.Solidity.BridgeJson`; the single-result user-call compiler smoke;
 scratch-frame proof-hole scan; and `git diff --check`.
 
+## 2026-06-08 16:45 PDT - proof/scratch-frame-state-slot-nodup-witness
+Added scratch-frame slot-uniqueness invariants for compiler states and
+function-slot tables, proved allocation and successful block/function/main
+compilation preserve them, exposed a whole-program nodup pass witness, and
+added the object-level checked compiler wrapper. Verification passed:
+`lake build EvmCompiler.Functions.ScratchFrameSpill
+EvmCompiler.Functions.ScratchFrameMemory EvmCompiler.Objects.Preservation
+EvmCompiler.Functions.CallAwareSpill`;
+`lake build EvmCompiler.Yul.Compiler EvmCompiler.Solidity.Frontend
+EvmCompiler.Solidity.BridgeJson`; the single-result user-call compiler smoke;
+scoped proof-hole scan; and `git diff --check`.
+
 ## 2026-06-08 16:00 PDT - compaction-resume/scratch-frame-sizing-question
 Resumed after context compaction to answer whether exact scratch-frame sizing
 by dry-run analysis is already reflected in the compiler/proofs and whether it

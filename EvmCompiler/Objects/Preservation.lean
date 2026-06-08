@@ -530,6 +530,50 @@ theorem compileCheckedWithScratchFrameSpill?_bounded_passes_state_eq
     Functions.ScratchFrameSpill.compileExpressionsProgram?_bounded_passes_state_eq
       (compileCheckedWithScratchFrameSpill?_eq_some hCompile).1
 
+theorem compileCheckedWithScratchFrameSpill?_nodup_passes
+    {maxFrameWords : Nat} {program : Objects.Program}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithScratchFrameSpill? maxFrameWords program =
+        some (exprProgram, asm)) :
+    ∃ functionSlots stateAfterSignatures probeProcs
+        stateAfterFunctions mainProbe procs stateAfterFunctionsFinal main,
+      Functions.ScratchFrameSpill.allocateFunctionSignatures
+          program.toFunctions.functions
+          ({ env := [], nextSlot := 0 } :
+            Functions.ScratchFrameSpill.CompileState) =
+        (functionSlots, stateAfterSignatures) ∧
+      Functions.ScratchFrameSpill.FunSlotListNodup functionSlots ∧
+      Functions.ScratchFrameSpill.StateSlotsNodup stateAfterSignatures ∧
+      Functions.ScratchFrameSpill.compileFunctions?
+          { functions := functionSlots, frameWords := 0 }
+          stateAfterSignatures program.toFunctions.functions =
+            some (probeProcs, stateAfterFunctions) ∧
+      Functions.ScratchFrameSpill.StateSlotsNodup stateAfterFunctions ∧
+      Functions.ScratchFrameSpill.compileMain?
+          { functions := functionSlots, frameWords := 0 }
+          0 { env := [], nextSlot := stateAfterFunctions.nextSlot }
+          program.toFunctions.body = some mainProbe ∧
+      Functions.ScratchFrameSpill.StateSlotsNodup mainProbe.state ∧
+      Functions.ScratchFrameSpill.compileFunctions?
+          { functions := functionSlots,
+            frameWords := mainProbe.state.nextSlot }
+          stateAfterSignatures program.toFunctions.functions =
+            some (procs, stateAfterFunctionsFinal) ∧
+      Functions.ScratchFrameSpill.StateSlotsNodup
+        stateAfterFunctionsFinal ∧
+      Functions.ScratchFrameSpill.compileMain?
+          { functions := functionSlots,
+            frameWords := mainProbe.state.nextSlot }
+          mainProbe.state.nextSlot
+          { env := [], nextSlot := stateAfterFunctions.nextSlot }
+          program.toFunctions.body = some main ∧
+      Functions.ScratchFrameSpill.StateSlotsNodup main.state ∧
+      exprProgram = { procs := procs, body := main.block } := by
+  exact
+    Functions.ScratchFrameSpill.compileExpressionsProgram?_nodup_passes
+      (compileCheckedWithScratchFrameSpill?_eq_some hCompile).1
+
 theorem compileCheckedWithScratchFrameSpill?_noCallCreate
     {maxFrameWords : Nat} {program : Objects.Program}
     {exprProgram : Expressions.Program} {asm : Assembly.Program}

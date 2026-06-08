@@ -90,11 +90,20 @@ def NamesResolveBounded (env : SlotEnv) (limit : Nat)
 def StateSlotsBounded (state : CompileState) : Prop :=
   EnvSlotsBounded state.env state.nextSlot
 
+def StateSlotsNodup (state : CompileState) : Prop :=
+  (slotList state.env).Nodup
+
 def FunSlotsBounded (slots : FunSlots) (limit : Nat) : Prop :=
   EnvSlotsBounded (functionEnv slots) limit
 
 def FunSlotListBounded (functions : List FunSlots) (limit : Nat) : Prop :=
   ∀ slots, slots ∈ functions → FunSlotsBounded slots limit
+
+def FunSlotsNodup (slots : FunSlots) : Prop :=
+  (slotList (functionEnv slots)).Nodup
+
+def FunSlotListNodup (functions : List FunSlots) : Prop :=
+  ∀ slots, slots ∈ functions → FunSlotsNodup slots
 
 def allocateName (name : Name) (state : CompileState) :
     Nat × CompileState :=
@@ -208,6 +217,13 @@ theorem lookupFun?_bounded {name : Name} {slots : FunSlots}
     FunSlotsBounded slots limit :=
   hBound slots (lookupFun?_some_mem hLookup)
 
+theorem lookupFun?_nodup {name : Name} {slots : FunSlots}
+    {functions : List FunSlots}
+    (hNodup : FunSlotListNodup functions)
+    (hLookup : lookupFun? name functions = some slots) :
+    FunSlotsNodup slots :=
+  hNodup slots (lookupFun?_some_mem hLookup)
+
 theorem funSlotListBounded_mono {functions : List FunSlots}
     {limit limit' : Nat}
     (hBound : FunSlotListBounded functions limit)
@@ -235,6 +251,44 @@ theorem allocateName_stateSlotsBounded (name : Name)
   · cases hHead
     omega
   · exact Nat.lt_trans (hBound entry hTail) (Nat.lt_succ_self _)
+
+theorem slotList_mem_exists_entry :
+    ∀ {env : SlotEnv} {slot : Nat},
+      slot ∈ slotList env → ∃ name, (name, slot) ∈ env
+  | [], slot, hMem => by
+      simp [slotList] at hMem
+  | (name, headSlot) :: rest, slot, hMem => by
+      change slot ∈ headSlot :: slotList rest at hMem
+      rw [List.mem_cons] at hMem
+      rcases hMem with hHead | hTail
+      · cases hHead
+        exact ⟨name, by simp⟩
+      · rcases slotList_mem_exists_entry hTail with ⟨other, hOther⟩
+        exact ⟨other, by simp [hOther]⟩
+
+theorem state_nextSlot_not_mem_slotList_of_bounded
+    {state : CompileState}
+    (hBound : StateSlotsBounded state) :
+    state.nextSlot ∉ slotList state.env := by
+  intro hMem
+  rcases slotList_mem_exists_entry hMem with ⟨name, hEntry⟩
+  have hLt := hBound (name, state.nextSlot) hEntry
+  omega
+
+theorem allocateName_stateSlotsNodup (name : Name)
+    (state : CompileState)
+    (hBound : StateSlotsBounded state)
+    (hNodup : StateSlotsNodup state) :
+    StateSlotsNodup (allocateName name state).2 := by
+  unfold StateSlotsNodup at hNodup ⊢
+  simp [allocateName, slotList]
+  constructor
+  · intro other hMem
+    exact state_nextSlot_not_mem_slotList_of_bounded hBound
+      (by
+        simpa [slotList] using
+          List.mem_map_of_mem (f := Prod.snd) hMem)
+  · exact hNodup
 
 theorem allocateNames_nextSlot :
     ∀ (names : List Name) (state : CompileState),
@@ -272,6 +326,28 @@ theorem allocateNames_stateSlotsBounded :
               allocateName_stateSlotsBounded name state hBound
           simpa [allocateNames, hAlloc] using
             allocateNames_stateSlotsBounded rest stateAfterHead hHeadBound
+
+theorem allocateNames_stateSlotsNodup :
+    ∀ (names : List Name) (state : CompileState),
+      StateSlotsBounded state →
+      StateSlotsNodup state →
+        StateSlotsNodup (allocateNames names state).2
+  | [], state, _hBound, hNodup => by
+      simpa [allocateNames] using hNodup
+  | name :: rest, state, hBound, hNodup => by
+      cases hAlloc : allocateName name state with
+      | mk slot stateAfterHead =>
+          have hHeadBound :
+              StateSlotsBounded stateAfterHead := by
+            simpa [hAlloc] using
+              allocateName_stateSlotsBounded name state hBound
+          have hHeadNodup :
+              StateSlotsNodup stateAfterHead := by
+            simpa [hAlloc] using
+              allocateName_stateSlotsNodup name state hBound hNodup
+          simpa [allocateNames, hAlloc] using
+            allocateNames_stateSlotsNodup rest stateAfterHead
+              hHeadBound hHeadNodup
 
 theorem allocateNames_entries_length :
     ∀ (names : List Name) (state : CompileState),
@@ -362,6 +438,96 @@ theorem allocateNames_slotList_nodup :
         omega
       · exact hTail
 
+theorem slotList_append_nodup_of_disjoint :
+    ∀ {left right : SlotEnv},
+      (slotList left).Nodup →
+      (slotList right).Nodup →
+      (∀ {slot : Nat}, slot ∈ slotList left →
+        slot ∈ slotList right → False) →
+        (slotList (left ++ right)).Nodup
+  | [], right, _hLeft, hRight, _hDisjoint => by
+      simpa [slotList] using hRight
+  | (name, slot) :: tail, right, hLeft, hRight, hDisjoint => by
+      change (slot :: slotList tail).Nodup at hLeft
+      cases hLeft with
+      | cons hFresh hTail =>
+          change (slot :: slotList (tail ++ right)).Nodup
+          constructor
+          · intro other hMem hEq
+            cases hEq
+            have hSlotListAppend :
+                slotList (tail ++ right) =
+                  slotList tail ++ slotList right := by
+              simp [slotList]
+            rw [hSlotListAppend] at hMem
+            rw [List.mem_append] at hMem
+            rcases hMem with hTailMem | hRightMem
+            · exact hFresh slot hTailMem rfl
+            · exact
+                hDisjoint
+                  (by
+                    change slot ∈ slot :: slotList tail
+                    rw [List.mem_cons]
+                    exact Or.inl rfl)
+                  hRightMem
+          · exact
+              slotList_append_nodup_of_disjoint hTail hRight
+                (fun hTailMem hRightMem =>
+                  hDisjoint
+                    (by
+                      change _ ∈ slot :: slotList tail
+                      rw [List.mem_cons]
+                      exact Or.inr hTailMem)
+                    hRightMem)
+
+theorem allocateNames_append_entries_slotList_nodup
+    {leftNames rightNames : List Name} {state : CompileState}
+    {leftEntries : SlotEnv} {stateAfterLeft : CompileState}
+    {rightEntries : SlotEnv} {stateAfterRight : CompileState}
+    (hLeft :
+      allocateNames leftNames state =
+        (leftEntries, stateAfterLeft))
+    (hRight :
+      allocateNames rightNames stateAfterLeft =
+        (rightEntries, stateAfterRight)) :
+    (slotList (rightEntries ++ leftEntries)).Nodup := by
+  have hRightNodup :
+      (slotList rightEntries).Nodup := by
+    simpa [hRight] using
+      allocateNames_slotList_nodup rightNames stateAfterLeft
+  have hLeftNodup :
+      (slotList leftEntries).Nodup := by
+    simpa [hLeft] using
+      allocateNames_slotList_nodup leftNames state
+  refine
+    slotList_append_nodup_of_disjoint hRightNodup hLeftNodup ?_
+  intro slot hRightMem hLeftMem
+  rcases slotList_mem_exists_entry hRightMem with
+    ⟨rightName, hRightEntry⟩
+  rcases slotList_mem_exists_entry hLeftMem with
+    ⟨leftName, hLeftEntry⟩
+  have hRightGe :
+      stateAfterLeft.nextSlot ≤ slot := by
+    have hRightEntry' :
+        (rightName, slot) ∈
+          (allocateNames rightNames stateAfterLeft).1 := by
+      simpa [hRight] using hRightEntry
+    exact
+      allocateNames_slots_ge_start
+        (names := rightNames) (state := stateAfterLeft)
+        (entry := (rightName, slot)) hRightEntry'
+  have hLeftLt :
+      slot < stateAfterLeft.nextSlot := by
+    have hLeftEntry' :
+        (leftName, slot) ∈
+          (allocateNames leftNames state).1 := by
+      simpa [hLeft] using hLeftEntry
+    simpa [hLeft] using
+      allocateNames_slots_lt_final
+        (names := leftNames) (state := state)
+        (entry := (leftName, slot)) hLeftEntry'
+  omega
+
 theorem allocateFunctionSignatures_names :
     ∀ (fns : List FunDef) (state : CompileState),
       (allocateFunctionSignatures fns state).1.map FunSlots.name =
@@ -437,6 +603,85 @@ theorem allocateFunctionSignatures_stateSlotsBounded :
                   simpa [hTail] using
                     allocateFunctionSignatures_stateSlotsBounded rest
                       stateAfterReturns hReturnsBound
+
+theorem allocateFunctionSignatures_stateSlotsNodup :
+    ∀ (fns : List FunDef) (state : CompileState),
+      StateSlotsBounded state →
+      StateSlotsNodup state →
+        StateSlotsNodup (allocateFunctionSignatures fns state).2
+  | [], state, _hBound, hNodup => by
+      simpa [allocateFunctionSignatures] using hNodup
+  | fn :: rest, state, hBound, hNodup => by
+      cases hParams : allocateNames fn.params state with
+      | mk params stateAfterParams =>
+          have hParamsBound :
+              StateSlotsBounded stateAfterParams := by
+            simpa [hParams] using
+              allocateNames_stateSlotsBounded fn.params state hBound
+          have hParamsNodup :
+              StateSlotsNodup stateAfterParams := by
+            simpa [hParams] using
+              allocateNames_stateSlotsNodup fn.params state hBound hNodup
+          cases hReturns : allocateNames fn.returns stateAfterParams with
+          | mk returns stateAfterReturns =>
+              have hReturnsBound :
+                  StateSlotsBounded stateAfterReturns := by
+                simpa [hReturns] using
+                  allocateNames_stateSlotsBounded fn.returns
+                    stateAfterParams hParamsBound
+              have hReturnsNodup :
+                  StateSlotsNodup stateAfterReturns := by
+                simpa [hReturns] using
+                  allocateNames_stateSlotsNodup fn.returns
+                    stateAfterParams hParamsBound hParamsNodup
+              cases hTail :
+                  allocateFunctionSignatures rest stateAfterReturns with
+              | mk tailSlots stateAfterTail =>
+                  simp [allocateFunctionSignatures, hParams, hReturns, hTail]
+                  simpa [hTail] using
+                    allocateFunctionSignatures_stateSlotsNodup rest
+                      stateAfterReturns hReturnsBound hReturnsNodup
+
+theorem allocateFunctionSignatures_funSlotListNodup :
+    ∀ {fns : List FunDef} {state : CompileState}
+      {functionSlots : List FunSlots} {finalState : CompileState},
+      allocateFunctionSignatures fns state =
+        (functionSlots, finalState) →
+        FunSlotListNodup functionSlots
+  | [], state, functionSlots, finalState, hAlloc => by
+      simp [allocateFunctionSignatures] at hAlloc
+      rcases hAlloc with ⟨rfl, rfl⟩
+      intro slots hMem
+      simp at hMem
+  | fn :: rest, state, functionSlots, finalState, hAlloc => by
+      cases hParams : allocateNames fn.params state with
+      | mk params stateAfterParams =>
+          cases hReturns : allocateNames fn.returns stateAfterParams with
+          | mk returns stateAfterReturns =>
+              cases hTail :
+                  allocateFunctionSignatures rest stateAfterReturns with
+              | mk tailSlots stateAfterTail =>
+                  simp [allocateFunctionSignatures, hParams, hReturns, hTail]
+                    at hAlloc
+                  rcases hAlloc with ⟨rfl, rfl⟩
+                  intro slots hMem
+                  simp at hMem
+                  rcases hMem with hHead | hTailMem
+                  · cases hHead
+                    unfold FunSlotsNodup functionEnv
+                    simpa [slotList] using
+                      allocateNames_append_entries_slotList_nodup
+                        (leftNames := fn.params)
+                        (rightNames := fn.returns)
+                        (state := state)
+                        (leftEntries := params)
+                        (stateAfterLeft := stateAfterParams)
+                        (rightEntries := returns)
+                        (stateAfterRight := stateAfterReturns)
+                        hParams hReturns
+                  · exact
+                      allocateFunctionSignatures_funSlotListNodup
+                        hTail slots hTailMem
 
 theorem allocateFunctionSignatures_slots_lt_final :
     ∀ {fns : List FunDef} {state : CompileState}
@@ -2202,6 +2447,353 @@ end
 
 set_option linter.unusedSimpArgs false in
 mutual
+  theorem compileBlockOpen?_stateSlotsNodup
+      {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} {block : Block} {plan : Plan}
+      (hBound : StateSlotsBounded state)
+      (hNodup : StateSlotsNodup state)
+      (hCompile :
+        compileBlockOpen? ctx returns state block = some plan) :
+      StateSlotsNodup plan.state := by
+    cases block with
+    | mk stmts =>
+        exact compileStmtList?_stateSlotsNodup hBound hNodup
+          (by simpa [compileBlockOpen?] using hCompile)
+
+  theorem compileBlockScoped?_stateSlotsNodup
+      {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} {block : Block} {plan : Plan}
+      (_hBound : StateSlotsBounded state)
+      (hNodup : StateSlotsNodup state)
+      (hCompile :
+        compileBlockScoped? ctx returns state block = some plan) :
+      StateSlotsNodup plan.state := by
+    unfold compileBlockScoped? at hCompile
+    cases hOpen : compileBlockOpen? ctx returns state block with
+    | none =>
+        simp [hOpen] at hCompile
+    | some openPlan =>
+        simp [hOpen] at hCompile
+        cases hCompile
+        simpa [StateSlotsNodup]
+
+  theorem compileStmtList?_stateSlotsNodup
+      {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} :
+      ∀ {stmts : List Stmt} {plan : Plan},
+        StateSlotsBounded state →
+        StateSlotsNodup state →
+        compileStmtList? ctx returns state stmts = some plan →
+          StateSlotsNodup plan.state
+  | [], plan, _hBound, hNodup, hCompile => by
+      simp [compileStmtList?] at hCompile
+      cases hCompile
+      exact hNodup
+  | stmt :: rest, plan, hBound, hNodup, hCompile => by
+      unfold compileStmtList? at hCompile
+      cases hHead : compileStmt? ctx returns state stmt with
+      | none =>
+          simp [hHead] at hCompile
+      | some head =>
+          cases hTail :
+              compileStmtList? ctx returns head.state rest with
+          | none =>
+              simp [hHead, hTail] at hCompile
+          | some tail =>
+              simp [hHead, hTail] at hCompile
+              cases hCompile
+              have hHeadBound :
+                  StateSlotsBounded head.state :=
+                compileStmt?_stateSlotsBounded
+                  (plan := head) hBound hHead
+              have hHeadNodup :
+                  StateSlotsNodup head.state :=
+                compileStmt?_stateSlotsNodup
+                  (plan := head) hBound hNodup hHead
+              exact
+                compileStmtList?_stateSlotsNodup
+                  (stmts := rest) (plan := tail)
+                  hHeadBound hHeadNodup hTail
+
+  theorem compileCases?_stateSlotsNodup
+      {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} :
+      ∀ {cases : List (Word × Block)}
+        {compiled : List (Word × Expressions.Block)}
+        {state' : CompileState},
+        StateSlotsBounded state →
+        StateSlotsNodup state →
+        compileCases? ctx returns state cases = some (compiled, state') →
+          StateSlotsNodup state'
+  | [], compiled, state', _hBound, hNodup, hCompile => by
+      simp [compileCases?] at hCompile
+      rcases hCompile with ⟨rfl, rfl⟩
+      exact hNodup
+  | (value, body) :: rest, compiled, state', hBound, hNodup, hCompile => by
+      unfold compileCases? at hCompile
+      cases hBody : compileBlockScoped? ctx returns state body with
+      | none =>
+          simp [hBody] at hCompile
+      | some bodyPlan =>
+          cases hTail :
+              compileCases? ctx returns bodyPlan.state rest with
+          | none =>
+              simp [hBody, hTail] at hCompile
+          | some tail =>
+              rcases tail with ⟨tailCases, tailState⟩
+              simp [hBody, hTail] at hCompile
+              rcases hCompile with ⟨rfl, rfl⟩
+              have hBodyBound :
+                  StateSlotsBounded bodyPlan.state :=
+                compileBlockScoped?_stateSlotsBounded
+                  (plan := bodyPlan) hBound hBody
+              have hBodyNodup :
+                  StateSlotsNodup bodyPlan.state :=
+                compileBlockScoped?_stateSlotsNodup
+                  (plan := bodyPlan) hBound hNodup hBody
+              exact
+                compileCases?_stateSlotsNodup
+                  (cases := rest) (compiled := tailCases)
+                  (state' := tailState)
+                  hBodyBound hBodyNodup hTail
+
+  theorem compileDefault?_stateSlotsNodup
+      {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} :
+      ∀ {defaultBody : Option Block}
+        {compiled : Option Expressions.Block} {state' : CompileState},
+        StateSlotsBounded state →
+        StateSlotsNodup state →
+        compileDefault? ctx returns state defaultBody =
+            some (compiled, state') →
+          StateSlotsNodup state'
+  | none, compiled, state', _hBound, hNodup, hCompile => by
+      simp [compileDefault?] at hCompile
+      rcases hCompile with ⟨rfl, rfl⟩
+      exact hNodup
+  | some body, compiled, state', hBound, hNodup, hCompile => by
+      unfold compileDefault? at hCompile
+      cases hPlan : compileBlockScoped? ctx returns state body with
+      | none =>
+          simp [hPlan] at hCompile
+      | some plan =>
+          simp [hPlan] at hCompile
+          rcases hCompile with ⟨rfl, rfl⟩
+          exact compileBlockScoped?_stateSlotsNodup
+            (plan := plan) hBound hNodup hPlan
+
+  theorem compileStmt?_stateSlotsNodup
+      {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} {stmt : Stmt} {plan : Plan}
+      (hBound : StateSlotsBounded state)
+      (hNodup : StateSlotsNodup state)
+      (hCompile :
+        compileStmt? ctx returns state stmt = some plan) :
+      StateSlotsNodup plan.state := by
+    cases stmt with
+    | expr expr =>
+        simp [compileStmt?] at hCompile
+        cases hCode : compileExprCode? state.env 0 expr with
+        | none =>
+            simp [hCode] at hCompile
+        | some code =>
+            simp [hCode] at hCompile
+            cases hCompile
+            exact hNodup
+    | let_ name value =>
+        simp [compileStmt?] at hCompile
+        cases hCode : compileExprCode? state.env 0 value with
+        | none =>
+            simp [hCode] at hCompile
+        | some code =>
+            cases hAlloc : allocateName name state with
+            | mk slot state' =>
+                cases hStore : storeTopSlotCode? 1 slot with
+                | none =>
+                    simp [hCode, hAlloc, hStore] at hCompile
+                | some store =>
+                    simp [hCode, hAlloc, hStore] at hCompile
+                    cases hCompile
+                    simpa [hAlloc] using
+                      allocateName_stateSlotsNodup name state hBound hNodup
+    | assign name value =>
+        simp [compileStmt?] at hCompile
+        cases hSlot : lookupSlot? name state.env with
+        | none =>
+            simp [hSlot] at hCompile
+        | some slot =>
+            cases hCode : compileExprCode? state.env 0 value with
+            | none =>
+                simp [hSlot, hCode] at hCompile
+            | some code =>
+                cases hStore : storeTopSlotCode? 1 slot with
+                | none =>
+                    simp [hSlot, hCode, hStore] at hCompile
+                | some store =>
+                    simp [hSlot, hCode, hStore] at hCompile
+                    cases hCompile
+                    exact hNodup
+    | block body =>
+        exact
+          compileBlockScoped?_stateSlotsNodup
+            (plan := plan) hBound hNodup
+            (by simpa [compileStmt?] using hCompile)
+    | if_ cond body =>
+        simp [compileStmt?] at hCompile
+        cases hCond : compileExprCode? state.env 0 cond with
+        | none =>
+            simp [hCond] at hCompile
+        | some condCode =>
+            cases hBody : compileBlockScoped? ctx returns state body with
+            | none =>
+                simp [hCond, hBody] at hCompile
+            | some bodyPlan =>
+                simp [hCond, hBody] at hCompile
+                cases hCompile
+                exact compileBlockScoped?_stateSlotsNodup
+                  (plan := bodyPlan) hBound hNodup hBody
+    | switch scrutinee cases defaultBody =>
+        simp [compileStmt?] at hCompile
+        cases hScrutinee : compileExprCode? state.env 0 scrutinee with
+        | none =>
+            simp [hScrutinee] at hCompile
+        | some scrutineeCode =>
+            cases hCases : compileCases? ctx returns state cases with
+            | none =>
+                simp [hScrutinee, hCases] at hCompile
+            | some casesResult =>
+                rcases casesResult with ⟨compiledCases, stateAfterCases⟩
+                cases hDefault :
+                    compileDefault? ctx returns stateAfterCases defaultBody with
+                | none =>
+                    simp [hScrutinee, hCases, hDefault] at hCompile
+                | some defaultResult =>
+                    rcases defaultResult with
+                      ⟨compiledDefault, stateAfterDefault⟩
+                    simp [hScrutinee, hCases, hDefault] at hCompile
+                    cases hCompile
+                    have hCasesBound :
+                        StateSlotsBounded stateAfterCases :=
+                      compileCases?_stateSlotsBounded
+                        (cases := cases) (compiled := compiledCases)
+                        (state' := stateAfterCases) hBound hCases
+                    have hCasesNodup :
+                        StateSlotsNodup stateAfterCases :=
+                      compileCases?_stateSlotsNodup
+                        (cases := cases) (compiled := compiledCases)
+                        (state' := stateAfterCases) hBound hNodup hCases
+                    exact compileDefault?_stateSlotsNodup
+                      (defaultBody := defaultBody)
+                      (compiled := compiledDefault)
+                      (state' := stateAfterDefault)
+                      hCasesBound hCasesNodup hDefault
+    | for_ init cond post body =>
+        simp [compileStmt?] at hCompile
+        cases hInit : compileBlockOpen? ctx returns state init with
+        | none =>
+            simp [hInit] at hCompile
+        | some initPlan =>
+            cases hCond :
+                compileExprCode? initPlan.state.env 0 cond with
+            | none =>
+                simp [hInit, hCond] at hCompile
+            | some condCode =>
+                cases hPost :
+                    compileBlockScoped? ctx returns initPlan.state post with
+                | none =>
+                    simp [hInit, hCond, hPost] at hCompile
+                | some postPlan =>
+                    cases hBody :
+                        compileBlockScoped? ctx returns postPlan.state body with
+                    | none =>
+                        simp [hInit, hCond, hPost, hBody] at hCompile
+                    | some bodyPlan =>
+                        simp [hInit, hCond, hPost, hBody] at hCompile
+                        cases hCompile
+                        simpa [StateSlotsNodup] using hNodup
+    | brk =>
+        simp [compileStmt?] at hCompile
+        cases hCompile
+        exact hNodup
+    | cont =>
+        simp [compileStmt?] at hCompile
+        cases hCompile
+        exact hNodup
+    | leave =>
+        simp [compileStmt?] at hCompile
+        cases hCode : compileReturnCode? state.env returns with
+        | none =>
+            simp [hCode] at hCompile
+        | some code =>
+            simp [hCode] at hCompile
+            cases hCompile
+            exact hNodup
+    | call targets functionName args =>
+        simp [compileStmt?] at hCompile
+        cases hFn : lookupFun? functionName ctx.functions with
+        | none =>
+            simp [hFn] at hCompile
+        | some fn =>
+            by_cases hArgsLen : args.length = fn.params.length
+            · simp [hFn, hArgsLen] at hCompile
+              by_cases hTargetsLen : targets.length = fn.returns.length
+              · simp [hTargetsLen] at hCompile
+                by_cases hTargetsNodup : targets.Nodup
+                · simp [hTargetsNodup] at hCompile
+                  cases hCallerBase : swapTopTwoCode? with
+                  | none =>
+                      simp [hCallerBase] at hCompile
+                  | some callerBaseTop =>
+                      cases hArgsCode :
+                          compileCallArgsToSlots? state.env args fn.params with
+                      | none =>
+                          simp [hCallerBase, hArgsCode] at hCompile
+                      | some argCode =>
+                          cases hCalleeBase : swapTopTwoCode? with
+                          | none =>
+                              simp [hCallerBase] at hCalleeBase
+                          | some calleeBaseTop =>
+                              cases hTargetSlots :
+                                  targets.mapM
+                                    (fun name => lookupSlot? name state.env) with
+                              | none =>
+                                  simp [hCallerBase, hArgsCode, hCalleeBase,
+                                    hTargetSlots] at hCompile
+                              | some targetSlots =>
+                                  cases hStoreReturns :
+                                      compileStoreTopSlots? fn.returns.length
+                                        targetSlots.reverse with
+                                  | none =>
+                                      simp [hCallerBase, hArgsCode,
+                                        hCalleeBase, hTargetSlots,
+                                        hStoreReturns] at hCompile
+                                  | some storeReturns =>
+                                      simp [hCallerBase, hArgsCode,
+                                        hCalleeBase, hTargetSlots,
+                                        hStoreReturns] at hCompile
+                                      cases hCompile
+                                      exact hNodup
+                · simp [hFn, hArgsLen, hTargetsLen, hTargetsNodup]
+                    at hCompile
+              · simp [hFn, hArgsLen, hTargetsLen] at hCompile
+            · simp [hFn, hArgsLen] at hCompile
+    | terminal kind =>
+        simp [compileStmt?] at hCompile
+        cases hCompile
+        exact hNodup
+    | terminalArgs kind args =>
+        simp [compileStmt?] at hCompile
+        cases hCode : compileExprSeqCode? state.env 0 args with
+        | none =>
+            simp [hCode] at hCompile
+        | some code =>
+            simp [hCode] at hCompile
+            cases hCompile
+            exact hNodup
+end
+
+set_option linter.unusedSimpArgs false in
+mutual
   theorem compileBlockOpen?_state_eq_of_functions_eq
       {ctxLeft ctxRight : CompileCtx} {returns : List Name}
       {state : CompileState} {block : Block}
@@ -3492,6 +4084,40 @@ theorem compileFunction?_stateSlotsBounded {ctx : CompileCtx}
     · simp [hRetBound] at hCompile
   · simp [hSigNodup] at hCompile
 
+theorem compileFunction?_stateSlotsNodup {ctx : CompileCtx}
+    {state : CompileState} {fn : FunDef}
+    {proc : Expressions.Proc} {state' : CompileState}
+    (hNodup : StateSlotsNodup state)
+    (hCompile : compileFunction? ctx state fn = some (proc, state')) :
+    StateSlotsNodup state' := by
+  unfold compileFunction? at hCompile
+  by_cases hSigNodup : (fn.returns ++ fn.params).Nodup
+  · simp [hSigNodup] at hCompile
+    by_cases hRetBound : fn.returns.length < 16
+    · simp [hRetBound] at hCompile
+      cases hSlots : lookupFun? fn.name ctx.functions with
+      | none =>
+          simp [hSlots] at hCompile
+      | some slots =>
+          simp [hSlots] at hCompile
+          let bodyStart : CompileState :=
+            { env := functionEnv slots, nextSlot := state.nextSlot }
+          cases hBodyPlan :
+              compileBlockOpen? ctx fn.returns bodyStart fn.body with
+          | none =>
+              simp [bodyStart, hBodyPlan] at hCompile
+          | some bodyPlan =>
+              cases hRetCode :
+                  compileReturnCode? bodyPlan.state.env fn.returns with
+              | none =>
+                  simp [bodyStart, hBodyPlan, hRetCode] at hCompile
+              | some retCode =>
+                  simp [bodyStart, hBodyPlan, hRetCode] at hCompile
+                  rcases hCompile with ⟨rfl, rfl⟩
+                  simpa [StateSlotsNodup]
+    · simp [hRetBound] at hCompile
+  · simp [hSigNodup] at hCompile
+
 theorem compileFunction?_bodyPlan_stateSlotsBounded {ctx : CompileCtx}
     {state : CompileState} {fn : FunDef}
     {proc : Expressions.Proc} {state' : CompileState}
@@ -3537,6 +4163,58 @@ theorem compileFunction?_bodyPlan_stateSlotsBounded {ctx : CompileCtx}
                       compileBlockOpen?_stateSlotsBounded
                         (state := bodyStart) (plan := bodyPlan)
                         hBodyStartBound hBodyPlan
+    · simp [hRetBound] at hCompile
+  · simp [hSigNodup] at hCompile
+
+theorem compileFunction?_bodyPlan_stateSlotsNodup {ctx : CompileCtx}
+    {state : CompileState} {fn : FunDef}
+    {proc : Expressions.Proc} {state' : CompileState}
+    (hFunctionBound :
+      FunSlotListBounded ctx.functions state.nextSlot)
+    (hFunctionNodup : FunSlotListNodup ctx.functions)
+    (hCompile : compileFunction? ctx state fn = some (proc, state')) :
+    ∃ slots bodyPlan retCode,
+      lookupFun? fn.name ctx.functions = some slots ∧
+        compileBlockOpen? ctx fn.returns
+          { env := functionEnv slots, nextSlot := state.nextSlot }
+          fn.body = some bodyPlan ∧
+        compileReturnCode? bodyPlan.state.env fn.returns = some retCode ∧
+        StateSlotsNodup bodyPlan.state := by
+  unfold compileFunction? at hCompile
+  by_cases hSigNodup : (fn.returns ++ fn.params).Nodup
+  · simp [hSigNodup] at hCompile
+    by_cases hRetBound : fn.returns.length < 16
+    · simp [hRetBound] at hCompile
+      cases hSlots : lookupFun? fn.name ctx.functions with
+      | none =>
+          simp [hSlots] at hCompile
+      | some slots =>
+          simp [hSlots] at hCompile
+          let bodyStart : CompileState :=
+            { env := functionEnv slots, nextSlot := state.nextSlot }
+          have hBodyStartBound : StateSlotsBounded bodyStart := by
+            simpa [bodyStart, StateSlotsBounded] using
+              lookupFun?_bounded hFunctionBound hSlots
+          have hBodyStartNodup : StateSlotsNodup bodyStart := by
+            simpa [bodyStart, StateSlotsNodup] using
+              lookupFun?_nodup hFunctionNodup hSlots
+          cases hBodyPlan :
+              compileBlockOpen? ctx fn.returns bodyStart fn.body with
+          | none =>
+              simp [bodyStart, hBodyPlan] at hCompile
+          | some bodyPlan =>
+              cases hRetCode :
+                  compileReturnCode? bodyPlan.state.env fn.returns with
+              | none =>
+                  simp [bodyStart, hBodyPlan, hRetCode] at hCompile
+              | some retCode =>
+                  simp [bodyStart, hBodyPlan, hRetCode] at hCompile
+                  refine ⟨slots, bodyPlan, retCode, rfl, ?_, hRetCode, ?_⟩
+                  · simpa [bodyStart] using hBodyPlan
+                  · exact
+                      compileBlockOpen?_stateSlotsNodup
+                        (state := bodyStart) (plan := bodyPlan)
+                        hBodyStartBound hBodyStartNodup hBodyPlan
     · simp [hRetBound] at hCompile
   · simp [hSigNodup] at hCompile
 
@@ -3611,6 +4289,55 @@ theorem compileFunctions?_stateSlotsBounded {ctx : CompileCtx} :
                   (state' := tailState)
                   hHeadBound hFunctionBoundTail hTail
 
+theorem compileFunctions?_stateSlotsNodup {ctx : CompileCtx} :
+    ∀ {state : CompileState} {fns : List FunDef}
+      {procs : List Expressions.Proc} {state' : CompileState},
+      StateSlotsBounded state →
+      StateSlotsNodup state →
+      FunSlotListBounded ctx.functions state.nextSlot →
+      FunSlotListNodup ctx.functions →
+      compileFunctions? ctx state fns = some (procs, state') →
+        StateSlotsNodup state'
+  | state, [], procs, state', _hStateBound, hStateNodup,
+      _hFunctionBound, _hFunctionNodup, hCompile => by
+      simp [compileFunctions?] at hCompile
+      rcases hCompile with ⟨rfl, rfl⟩
+      exact hStateNodup
+  | state, fn :: rest, procs, state', hStateBound, hStateNodup,
+      hFunctionBound, hFunctionNodup, hCompile => by
+      unfold compileFunctions? at hCompile
+      cases hHead : compileFunction? ctx state fn with
+      | none =>
+          simp [hHead] at hCompile
+      | some headResult =>
+          rcases headResult with ⟨proc, stateAfterHead⟩
+          cases hTail :
+              compileFunctions? ctx stateAfterHead rest with
+          | none =>
+              simp [hHead, hTail] at hCompile
+          | some tailResult =>
+              rcases tailResult with ⟨tailProcs, tailState⟩
+              simp [hHead, hTail] at hCompile
+              rcases hCompile with ⟨rfl, rfl⟩
+              have hHeadBound :
+                  StateSlotsBounded stateAfterHead :=
+                compileFunction?_stateSlotsBounded
+                  hStateBound hFunctionBound hHead
+              have hHeadNodup :
+                  StateSlotsNodup stateAfterHead :=
+                compileFunction?_stateSlotsNodup hStateNodup hHead
+              have hFunctionBoundTail :
+                  FunSlotListBounded ctx.functions
+                    stateAfterHead.nextSlot :=
+                funSlotListBounded_mono hFunctionBound
+                  (compileFunction?_nextSlot_mono hHead)
+              exact
+                compileFunctions?_stateSlotsNodup
+                  (fns := rest) (procs := tailProcs)
+                  (state' := tailState)
+                  hHeadBound hHeadNodup hFunctionBoundTail
+                  hFunctionNodup hTail
+
 theorem compileMain?_nextSlot_mono {ctx : CompileCtx}
     {frameWords : Nat} {state : CompileState} {body : Block}
     {plan : Plan}
@@ -3653,6 +4380,29 @@ theorem compileMain?_stateSlotsBounded {ctx : CompileCtx}
             compileStmtList?_stateSlotsBounded
               (stmts := (splitPrelude stmts).2)
               (plan := listPlan) hStateBound hList
+
+theorem compileMain?_stateSlotsNodup {ctx : CompileCtx}
+    {frameWords : Nat} {state : CompileState} {body : Block}
+    {plan : Plan}
+    (hStateBound : StateSlotsBounded state)
+    (hStateNodup : StateSlotsNodup state)
+    (hCompile : compileMain? ctx frameWords state body = some plan) :
+    StateSlotsNodup plan.state := by
+  unfold compileMain? at hCompile
+  cases body with
+  | mk stmts =>
+      simp at hCompile
+      cases hList :
+          compileStmtList? ctx [] state (splitPrelude stmts).2 with
+      | none =>
+          simp [hList] at hCompile
+      | some listPlan =>
+          simp [hList] at hCompile
+          cases hCompile
+          exact
+            compileStmtList?_stateSlotsNodup
+              (stmts := (splitPrelude stmts).2)
+              (plan := listPlan) hStateBound hStateNodup hList
 
 theorem compileExpressionsProgram?_signatures_nextSlot_le_maxFrameWords
     {maxFrameWords : Nat} {program : Program}
@@ -4033,6 +4783,119 @@ theorem compileExpressionsProgram?_bounded_passes_state_eq
       hProbeFunctions, hProbeFunctionsBound, hMainProbe, hMainProbeBound,
       hBound, hFinalFunctions, hFinalFunctionsState,
       hFinalFunctionsBound, hMain, hMainState, hMainBound,
+      hExprProgram⟩
+
+theorem compileExpressionsProgram?_nodup_passes
+    {maxFrameWords : Nat} {program : Program}
+    {exprProgram : Expressions.Program}
+    (hCompile :
+      compileExpressionsProgram? maxFrameWords program = some exprProgram) :
+    ∃ functionSlots stateAfterSignatures probeProcs
+        stateAfterFunctions mainProbe procs stateAfterFunctionsFinal main,
+      allocateFunctionSignatures program.functions
+        ({ env := [], nextSlot := 0 } : CompileState) =
+          (functionSlots, stateAfterSignatures) ∧
+      FunSlotListNodup functionSlots ∧
+      StateSlotsNodup stateAfterSignatures ∧
+      compileFunctions?
+          { functions := functionSlots, frameWords := 0 }
+          stateAfterSignatures program.functions =
+            some (probeProcs, stateAfterFunctions) ∧
+      StateSlotsNodup stateAfterFunctions ∧
+      compileMain?
+          { functions := functionSlots, frameWords := 0 }
+          0 { env := [], nextSlot := stateAfterFunctions.nextSlot }
+          program.body = some mainProbe ∧
+      StateSlotsNodup mainProbe.state ∧
+      compileFunctions?
+          { functions := functionSlots,
+            frameWords := mainProbe.state.nextSlot }
+          stateAfterSignatures program.functions =
+            some (procs, stateAfterFunctionsFinal) ∧
+      StateSlotsNodup stateAfterFunctionsFinal ∧
+      compileMain?
+          { functions := functionSlots,
+            frameWords := mainProbe.state.nextSlot }
+          mainProbe.state.nextSlot
+          { env := [], nextSlot := stateAfterFunctions.nextSlot }
+          program.body = some main ∧
+      StateSlotsNodup main.state ∧
+      exprProgram = { procs := procs, body := main.block } := by
+  rcases compileExpressionsProgram?_bounded_passes hCompile with
+    ⟨functionSlots, stateAfterSignatures, probeProcs,
+      stateAfterFunctions, mainProbe, procs, stateAfterFunctionsFinal, main,
+      hSignatures, _hFunctionSlotsBoundMax, hSignatureStateBound,
+      hProbeFunctions, hProbeFunctionsBound, hMainProbe, _hMainProbeBound,
+      _hBound, hFinalFunctions, _hFinalFunctionsBound, hMain, _hMainBound,
+      hExprProgram⟩
+  let initial : CompileState := { env := [], nextSlot := 0 }
+  have hInitialBound : StateSlotsBounded initial := by
+    intro entry hMem
+    simp [initial] at hMem
+  have hInitialNodup : StateSlotsNodup initial := by
+    simp [StateSlotsNodup, initial, slotList]
+  have hSignaturesInitial :
+      allocateFunctionSignatures program.functions initial =
+        (functionSlots, stateAfterSignatures) := by
+    simpa [initial] using hSignatures
+  have hFunctionSlotsBoundSig :
+      FunSlotListBounded functionSlots stateAfterSignatures.nextSlot :=
+    allocateFunctionSignatures_funSlotListBounded_final
+      hSignatures
+  have hFunctionSlotsNodup :
+      FunSlotListNodup functionSlots :=
+    allocateFunctionSignatures_funSlotListNodup hSignatures
+  have hSignatureStateNodup :
+      StateSlotsNodup stateAfterSignatures := by
+    simpa [hSignaturesInitial] using
+      allocateFunctionSignatures_stateSlotsNodup
+        program.functions initial hInitialBound hInitialNodup
+  have hProbeFunctionsNodup :
+      StateSlotsNodup stateAfterFunctions :=
+    compileFunctions?_stateSlotsNodup
+      (ctx := { functions := functionSlots, frameWords := 0 })
+      (state := stateAfterSignatures)
+      (fns := program.functions)
+      hSignatureStateBound hSignatureStateNodup
+      hFunctionSlotsBoundSig hFunctionSlotsNodup hProbeFunctions
+  let mainStart : CompileState :=
+    { env := [], nextSlot := stateAfterFunctions.nextSlot }
+  have hMainStartBound : StateSlotsBounded mainStart := by
+    intro entry hMem
+    simp [mainStart] at hMem
+  have hMainStartNodup : StateSlotsNodup mainStart := by
+    simp [StateSlotsNodup, mainStart, slotList]
+  have hMainProbeNodup : StateSlotsNodup mainProbe.state :=
+    compileMain?_stateSlotsNodup
+      (ctx := { functions := functionSlots, frameWords := 0 })
+      (frameWords := 0) (state := mainStart) (body := program.body)
+      (plan := mainProbe) hMainStartBound hMainStartNodup
+      (by simpa [mainStart] using hMainProbe)
+  have hFinalFunctionsNodup :
+      StateSlotsNodup stateAfterFunctionsFinal :=
+    compileFunctions?_stateSlotsNodup
+      (ctx :=
+        { functions := functionSlots,
+          frameWords := mainProbe.state.nextSlot })
+      (state := stateAfterSignatures)
+      (fns := program.functions)
+      hSignatureStateBound hSignatureStateNodup
+      hFunctionSlotsBoundSig hFunctionSlotsNodup hFinalFunctions
+  have hMainNodup : StateSlotsNodup main.state :=
+    compileMain?_stateSlotsNodup
+      (ctx :=
+        { functions := functionSlots,
+          frameWords := mainProbe.state.nextSlot })
+      (frameWords := mainProbe.state.nextSlot)
+      (state := mainStart) (body := program.body) (plan := main)
+      hMainStartBound hMainStartNodup
+      (by simpa [mainStart] using hMain)
+  exact
+    ⟨functionSlots, stateAfterSignatures, probeProcs,
+      stateAfterFunctions, mainProbe, procs, stateAfterFunctionsFinal, main,
+      hSignatures, hFunctionSlotsNodup, hSignatureStateNodup,
+      hProbeFunctions, hProbeFunctionsNodup, hMainProbe, hMainProbeNodup,
+      hFinalFunctions, hFinalFunctionsNodup, hMain, hMainNodup,
       hExprProgram⟩
 
 theorem compilePreludeStmt?_noCallCreate {stmt : Stmt}
