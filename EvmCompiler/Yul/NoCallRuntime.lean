@@ -126,7 +126,7 @@ rejects source and emitted-target `RETURNDATACOPY` until the source/gasless
 target semantics carry the same return-data bounds enforced by gas-aware
 `EVM.X`.
 -/
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
     (program : Program) :
     Option (Assembly.Program × Assembly.TargetProgram) :=
@@ -141,7 +141,7 @@ noncomputable def
         else none
       else none
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_eq_some
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -181,7 +181,7 @@ theorem
           Assembly.GasAware.targetProgramNoReturnDataCopy_of_check
             (by simpa using hTargetReturnDataCopy)⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_compileChecked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -194,7 +194,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_eq_some
       hCompileTarget).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -215,7 +215,7 @@ theorem
     compileCheckedAssemblyTargetBytecode?_eq_some hResources.1
   exact (compileCheckedAssemblyTarget?_eq_some hBytecode.1).2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_targetNoReturnDataCopy
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -227,7 +227,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_eq_some
     hCompileTarget).2.2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -240,7 +240,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_targetNoReturnDataCopy
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -285,7 +285,23 @@ theorem
     Assembly.GasAware.targetInstr_usesCallCreate_false_of_program_noCall_emit_mem
       hNoCallAsm hAt hEmit hLocatedMem
 
-theorem
+private theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_blockPathReturnDataCopyBounds
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.GasAware.XStepTrace.XBlockPathReturnDataCopyBoundsReady
+      asm target :=
+  Assembly.GasAware.XStepTrace.XBlockPathReturnDataCopyBoundsReady.of_noReturnDataCopy_noCallCreate
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
+      hCompileTarget)
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
+      hCompileTarget)
+
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -326,7 +342,7 @@ theorem
     Program.compileCheckedAssemblyTarget?_noCallCreate hSourceAccepted.reference
       hBytecode.1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_blockPathChecks_of_core
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -339,14 +355,83 @@ theorem
         (Assembly.GasAware.validJumps target)) :
     Assembly.GasAware.XStepTrace.XBlockPathChecksReady asm target
       (Assembly.GasAware.validJumps target) :=
-  Assembly.GasAware.XStepTrace.XBlockPathChecksReady.of_core_noReturnDataCopy_noCallCreate
+  Assembly.GasAware.XStepTrace.XBlockPathChecksReady.of_core_returnDataCopyBounds_noCallCreate
     hCore
-    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_blockPathReturnDataCopyBounds
       hCompileTarget)
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
       hCompileTarget)
 
 theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_noCallCreate
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+          program =
+        some (asm, target)) :
+    asm.usesCallCreate = false := by
+  let hStatic :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_eq_some
+      hCompileTarget
+  let hFeatures :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeatures?_eq_some hStatic.1
+  let hResources :=
+    compileCheckedAssemblyTargetBytecodeResources?_eq_some hFeatures.1
+  let hBytecode :=
+    compileCheckedAssemblyTargetBytecode?_eq_some hResources.1
+  let hProgramSourceAccepted : Program.SourceAccepted program :=
+    Program.sourceAccepted_of_sourceAcceptedCore_supported
+      hStatic.2.sourceAcceptedCore hStatic.2.supported
+  let hProgramAccepted : Program.Accepted program :=
+    accepted_of_sourceAccepted_compileChecked? hProgramSourceAccepted
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_compileChecked
+        hCompileTarget)
+  let hFullSourceAccepted : RecursiveBridgeFullSourceAccepted program :=
+    hStatic.2.toFullSourceAccepted hProgramAccepted
+  let hCompile := (compileCheckedAssemblyTarget?_eq_some hBytecode.1).1
+  let hSourceAccepted : RecursiveBridgeSourceAccepted program :=
+    RecursiveBridgeSourceAccepted.ofFullCoverageAndCompileChecked
+      hFullSourceAccepted hFeatures.2 hCompile
+  exact
+    Program.compileCheckedAssemblyTarget?_noCallCreate
+      hSourceAccepted.reference hBytecode.1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_blockReplayNoCallCreate
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+          program =
+        some (asm, target)) :
+    Assembly.GasAware.XStepTrace.XBlockReplayNoCallCreate asm target :=
+  Assembly.GasAware.XStepTrace.XBlockReplayNoCallCreate.of_program_no_call_create
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_noCallCreate
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_blockPathChecks_of_core_returnDataCopyBounds
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+          program =
+        some (asm, target))
+    (hCore :
+      Assembly.GasAware.XStepTrace.XBlockReplayCoreNonGasReady asm target
+        (Assembly.GasAware.validJumps target))
+    (hReturnDataCopyBounds :
+      Assembly.GasAware.XStepTrace.XBlockPathReturnDataCopyBoundsReady
+        asm target) :
+    Assembly.GasAware.XStepTrace.XBlockPathChecksReady asm target
+      (Assembly.GasAware.validJumps target) :=
+  Assembly.GasAware.XStepTrace.XBlockPathChecksReady.of_core_returnDataCopyBounds_noCallCreate
+    hCore hReturnDataCopyBounds
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_blockReplayNoCallCreate
+      hCompileTarget)
+
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_assemble
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -371,7 +456,7 @@ theorem
     Assembly.Preservation.compile?_some_assemble
       (compileCheckedAssemblyTarget?_eq_some hBytecode.1).2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -393,7 +478,7 @@ theorem
   exact
     (compileCheckedAssemblyTargetBytecode?_eq_some hResources.1).2.2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_decodeSafety
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -586,7 +671,7 @@ theorem
           RecursiveBridgeSourceStaticFacts.of_checked?
             (by simpa using hFacts)⟩
 
-noncomputable def
+private noncomputable def
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
     (program : Program) :
     Option (Assembly.Program × Assembly.TargetProgram) :=
@@ -605,7 +690,7 @@ noncomputable def
       else
         none
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -645,7 +730,7 @@ theorem
           Assembly.GasAware.targetProgramNoReturnDataCopy_of_check
             (by simpa using hTargetReturnDataCopy)⟩
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_compileLive
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -670,7 +755,7 @@ theorem
     (compileLiveNoInternalCallCheckedAssemblyTarget?_eq_some
       hBytecode.1).1
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -695,7 +780,7 @@ theorem
     (compileLiveNoInternalCallCheckedAssemblyTarget?_eq_some
       hBytecode.1).2
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetNoReturnDataCopy
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -707,7 +792,7 @@ theorem
   (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
     hCompileTarget).2.2
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -720,7 +805,7 @@ theorem
     (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetNoReturnDataCopy
       hCompileTarget)
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemble
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -733,7 +818,7 @@ theorem
     (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
       hCompileTarget)
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -755,7 +840,7 @@ theorem
     (compileLiveNoInternalCallCheckedAssemblyTargetBytecode?_eq_some
       hFeatures.1).2.2
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_decodeSafety
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -782,7 +867,7 @@ theorem
         hBytecode.1).2
       hBytecode.2.1
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -821,7 +906,7 @@ theorem
           (by simpa [Program.toObjects?] using hLower))
       hCompile
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -1058,7 +1143,7 @@ theorem
           RecursiveBridgeSourceStaticFacts.of_checked?
             (by simpa using hFacts)⟩
 
-noncomputable def
+private noncomputable def
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
     (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
     (program : Program) :
@@ -1078,7 +1163,7 @@ noncomputable def
       else
         none
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1119,7 +1204,7 @@ theorem
           Assembly.GasAware.targetProgramNoReturnDataCopy_of_check
             (by simpa using hTargetReturnDataCopy)⟩
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_compileAdaptive
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1145,7 +1230,7 @@ theorem
     (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTarget?_eq_some
       hBytecode.1).1
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1171,7 +1256,7 @@ theorem
     (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTarget?_eq_some
       hBytecode.1).2
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetNoReturnDataCopy
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1184,7 +1269,7 @@ theorem
   (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
     hCompileTarget).2.2
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1198,7 +1283,7 @@ theorem
     (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetNoReturnDataCopy
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemble
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1212,7 +1297,7 @@ theorem
     (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1235,7 +1320,7 @@ theorem
     (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecode?_eq_some
       hFeatures.1).2.2
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetFitsDecodeWindow
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1258,7 +1343,7 @@ theorem
     (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecode?_eq_some
       hFeatures.1).2.1
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_decodeSafety
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1286,7 +1371,7 @@ theorem
         hBytecode.1).2
       hBytecode.2.1
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1300,7 +1385,7 @@ theorem
     (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_compileAdaptive
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1314,7 +1399,24 @@ theorem
     (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
       hCompileTarget)
 
-theorem
+private theorem
+    compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockPathReturnDataCopyBounds
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          range program =
+        some (asm, target)) :
+    Assembly.GasAware.XStepTrace.XBlockPathReturnDataCopyBoundsReady
+      asm target :=
+  Assembly.GasAware.XStepTrace.XBlockPathReturnDataCopyBoundsReady.of_noReturnDataCopy_noCallCreate
+    (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
+      hCompileTarget)
+    (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
+      hCompileTarget)
+
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockPathChecks_of_core
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1328,14 +1430,14 @@ theorem
         (Assembly.GasAware.validJumps target)) :
     Assembly.GasAware.XStepTrace.XBlockPathChecksReady asm target
       (Assembly.GasAware.validJumps target) :=
-  Assembly.GasAware.XStepTrace.XBlockPathChecksReady.of_core_noReturnDataCopy_noCallCreate
+  Assembly.GasAware.XStepTrace.XBlockPathChecksReady.of_core_returnDataCopyBounds_noCallCreate
     hCore
-    (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
+    (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockPathReturnDataCopyBounds
       hCompileTarget)
     (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_source_observations_targetFacts
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -1397,7 +1499,7 @@ This is the target-side stack-safety gate needed by later gas-aware wrappers:
 the emitted adaptive spill assembly must pass the same inferred
 `AssemblyBounds` checker as the existing no-CALL runtime route.
 -/
-noncomputable def
+private noncomputable def
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
     (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
     (program : Program) :
@@ -1413,7 +1515,7 @@ noncomputable def
       | none => none
       | some _check => some (asm, target)
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1451,7 +1553,7 @@ theorem
           rcases hCompileTarget with ⟨rfl, rfl⟩
           exact ⟨rfl, check, hBound⟩
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_of_noReturnDataCopy
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1474,7 +1576,7 @@ theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
   simp [hBase, hBound]
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1489,7 +1591,7 @@ theorem
   (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget).1
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyCompile
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1503,7 +1605,7 @@ theorem
     (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
       hCompileTarget)
 
-noncomputable def
+private noncomputable def
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1518,7 +1620,7 @@ noncomputable def
     (compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -1546,7 +1648,7 @@ bytecode/source-static/no-RETURNDATACOPY/assembly-bound gates as the ordinary
 adaptive spill route.
 -/
 
-noncomputable def
+private noncomputable def
     compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
     (maxWords : Nat) (program : Program) :
     Option
@@ -1582,7 +1684,7 @@ noncomputable def
           else
             none
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     {maxWords : Nat} {program : Program}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -1665,7 +1767,7 @@ theorem
                     (by simpa using hTargetReturnDataCopy),
                   check, hBound⟩
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_compilePlanned
     {maxWords : Nat} {program : Program}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -1681,7 +1783,7 @@ theorem
   (compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget).1
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_source_observations_targetFacts
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {maxWords : Nat}
@@ -2346,7 +2448,7 @@ theorem
   compileSourceOwnedSpillAssemblyTargetBytecodeFeaturesSourceStatic?_eq_some
     hCompileTarget
 
-noncomputable def
+private noncomputable def
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
     (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
     (program : Program) :
@@ -2356,7 +2458,7 @@ noncomputable def
       compileCheckedWithConservativeSpillSourceOwned? range program)
     program
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2374,7 +2476,7 @@ theorem
   compileSourceOwnedSpillAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
     hCompileTarget
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_compileConservative
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2388,7 +2490,7 @@ theorem
   compileSourceOwnedSpillAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_compileAsm
     hCompileTarget
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2401,7 +2503,7 @@ theorem
   compileSourceOwnedSpillAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
     hCompileTarget
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetNoReturnDataCopy
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2414,7 +2516,7 @@ theorem
   compileSourceOwnedSpillAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetNoReturnDataCopy
     hCompileTarget
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2427,7 +2529,7 @@ theorem
   compileSourceOwnedSpillAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
     hCompileTarget
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemble
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2440,7 +2542,7 @@ theorem
   compileSourceOwnedSpillAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemble
     hCompileTarget
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2453,7 +2555,7 @@ theorem
   compileSourceOwnedSpillAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
     hCompileTarget
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetFitsDecodeWindow
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2466,7 +2568,7 @@ theorem
   compileSourceOwnedSpillAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetFitsDecodeWindow
     hCompileTarget
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_decodeSafety
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2479,7 +2581,7 @@ theorem
   compileSourceOwnedSpillAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_decodeSafety
     hCompileTarget
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2493,7 +2595,7 @@ theorem
     (compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_compileConservative
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2507,7 +2609,24 @@ theorem
     (compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
       hCompileTarget)
 
-theorem
+private theorem
+    compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockPathReturnDataCopyBounds
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          range program =
+        some (asm, target)) :
+    Assembly.GasAware.XStepTrace.XBlockPathReturnDataCopyBoundsReady
+      asm target :=
+  Assembly.GasAware.XStepTrace.XBlockPathReturnDataCopyBoundsReady.of_noReturnDataCopy_noCallCreate
+    (compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
+      hCompileTarget)
+    (compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
+      hCompileTarget)
+
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockPathChecks_of_core
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2521,14 +2640,14 @@ theorem
         (Assembly.GasAware.validJumps target)) :
     Assembly.GasAware.XStepTrace.XBlockPathChecksReady asm target
       (Assembly.GasAware.validJumps target) :=
-  Assembly.GasAware.XStepTrace.XBlockPathChecksReady.of_core_noReturnDataCopy_noCallCreate
+  Assembly.GasAware.XStepTrace.XBlockPathChecksReady.of_core_returnDataCopyBounds_noCallCreate
     hCore
-    (compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
+    (compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockPathReturnDataCopyBounds
       hCompileTarget)
     (compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_source_observations_targetFacts
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -2583,7 +2702,7 @@ theorem
       compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
         hCompileTarget⟩
 
-noncomputable def
+private noncomputable def
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
     (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
     (program : Program) :
@@ -2593,7 +2712,7 @@ noncomputable def
       compileCheckedWithConservativeSpillSourceOwned? range program)
     program
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2614,7 +2733,7 @@ theorem
   compileSourceOwnedSpillAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_of_noReturnDataCopy
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2641,7 +2760,7 @@ theorem
     compileSourceOwnedSpillAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
   simp [hBase, hBound]
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2656,7 +2775,7 @@ theorem
   (compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget).1
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyCompile
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2670,7 +2789,7 @@ theorem
     (compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
       hCompileTarget)
 
-noncomputable def
+private noncomputable def
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2685,7 +2804,7 @@ noncomputable def
     (compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {asm : Assembly.Program}
@@ -2801,7 +2920,7 @@ theorem compileLiveNoInternalCallChecked?_dispatcher_stmtsNoUserCalls
     ⟨compileLiveNoInternalCallChecked?_dispatcher_noUserCalls hCompile,
       trivial⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_coreTrace_of_instrCoreReady
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -2825,7 +2944,7 @@ theorem
       hCompileTarget)
     hTrace hInstrCoreReady
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_coreTrace_of_traceInstrCoreReady
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -2850,7 +2969,7 @@ theorem
       hCompileTarget)
     hTraceInstrCoreReady
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_coreTrace_of_traceInputsReady
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -2873,7 +2992,7 @@ theorem
     (Assembly.GasAware.XStepTrace.InstrCoreBlockTraceReadyFor.of_inputs_ready
       hTraceInputsReady)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_coreTrace_of_instrCoreInputsReady
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -2895,7 +3014,7 @@ theorem
     (Assembly.GasAware.XStepTrace.InstrCoreBlockTraceInputsReadyFor.of_block_instr_inputs_ready
       hTrace hInstrCoreInputsReady)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_coreTrace_of_instrCoreResources
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -2918,7 +3037,7 @@ theorem
       hResources)
     hTrace
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_coreTrace_of_instrCoreResidualResources
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -2944,7 +3063,7 @@ theorem
         hCompileTarget)
       hTrace hNoCallCreate hResidual
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_coreTrace_of_traceInstrCoreResidualReady
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -3677,7 +3796,7 @@ theorem of_assemblyBoundCheck
 
 end RecursiveBridgeActualEVMStackHeadroomBound
 
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
     {cfg : Reference.StateRelConfig}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -3705,7 +3824,7 @@ theorem
           (by decide : 17 ≤ 1024)
           (state := initial)))
 
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
     {cfg : Reference.StateRelConfig}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -3744,7 +3863,7 @@ value replays the same target result.  The remaining public imported-Yul gap is
 above this theorem: relating the reference Yul run to the `SourceLowered.run`
 premise while preserving the private scratch boundary.
 -/
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceLowered_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -3935,7 +4054,7 @@ The scratch-readiness obligation is discharged by the checked planned range and
 the source-facing empty-memory premise; the observable relation hides the
 compiler-private scratch allocation.
 -/
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceLowered_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {maxWords : Nat}
@@ -4121,7 +4240,7 @@ This is the same target/gas handoff as the adaptive route above, but for the
 broader spill-on-failure compiler that supports source-owned non-CALL control
 through the executable checker.
 -/
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceLowered_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -4314,7 +4433,7 @@ dispatcher bridge and the executable adaptive `toObjects?` witness, rather than
 from the old `compileChecked?`/live-layout target compiler path that can reject
 deep stack locals before spilling.
 -/
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_referenceRun_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -4613,7 +4732,7 @@ provide an existentially sufficient reference fuel and the explicit exclusion of
 the historical successful `.OutOfFuel` marker, not the internal
 `RecursiveBridgeSourceRun` package.
 -/
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_runResult_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -4697,7 +4816,7 @@ starting from the imported/reference Yul run.
 This is the adaptive spill bridge with the scratch-readiness premise replaced
 by a checked planned range and empty canonical-entry memory.
 -/
-theorem
+private theorem
     compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_referenceRun_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -4989,7 +5108,7 @@ above.  It derives the `SourceLowered.run` premise from the checked recursive
 dispatcher bridge and the executable conservative `toObjects?` witness, rather
 than from the old live-layout target path.
 -/
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_referenceRun_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -5288,7 +5407,7 @@ provide an existentially sufficient reference fuel and the explicit exclusion of
 the historical successful `.OutOfFuel` marker, not the internal
 `RecursiveBridgeSourceRun` package.
 -/
-theorem
+private theorem
     compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_runResult_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -10691,13 +10810,13 @@ the verified source-resource checker, which may try multiple recurrence
 analyzers and only accepts a bound that fits the source-frame EVM stack budget,
 before the combined inferred assembly-bound checker below consumes it.
 -/
-structure ExecutableStackSafeNoReturnDataCopyCheckedCompile
+private structure ExecutableStackSafeNoReturnDataCopyCheckedCompile
     (program : Program) : Type where
   asm : Assembly.Program
   target : Assembly.TargetProgram
   sourceDepth : Nat
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?
     (program : Program) :
     Option (ExecutableStackSafeNoReturnDataCopyCheckedCompile program) :=
@@ -10714,7 +10833,7 @@ noncomputable def
               target := target
               sourceDepth := sourceDepth }
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
     (program : Program) :
     Option (Assembly.Program × Assembly.TargetProgram) :=
@@ -10724,7 +10843,7 @@ noncomputable def
   | none => none
   | some checked => some (checked.asm, checked.target)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?_eq_some
     {program : Program}
     {checked : ExecutableStackSafeNoReturnDataCopyCheckedCompile program}
@@ -10758,7 +10877,7 @@ theorem
             ⟨rfl, rfl,
               recursiveBridgeSourceResourceDepth?_sound hSourceResource⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_full
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -10785,7 +10904,7 @@ theorem
       rcases hCompileTarget with ⟨rfl, rfl⟩
       exact ⟨checked, rfl, rfl, rfl⟩
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -10798,7 +10917,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked_full
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -10815,7 +10934,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked_asm
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -10830,7 +10949,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).2.1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked_target
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -10845,7 +10964,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).2.2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked_sourceResourceBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -10867,7 +10986,7 @@ theorem
     ⟨_hBase, hDepth, hResource⟩
   exact ⟨hDepth, hResource⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_sourceRecurrence
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -10908,7 +11027,7 @@ theorem
     ⟨hBase', sourceCheck, checked.sourceDepth, hSourceResource, hMaxFrames,
       hBound⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_sourceResource
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -10945,7 +11064,7 @@ concrete word-PC keyed bound table against the emitted assembly.  It is still a
 sidecar rather than an inferred table: callers supply the table, and the gate
 accepts only when the executable checker constructs a check result.
 -/
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?
     (program : Program)
     (table :
@@ -10962,7 +11081,7 @@ noncomputable def
       | none => none
       | some _check => some (asm, target)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_eq_some
     {program : Program}
     {table :
@@ -11002,7 +11121,7 @@ theorem
           rcases hCompileTarget with ⟨rfl, rfl⟩
           exact ⟨rfl, check, hBound⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_base
     {program : Program}
     {table :
@@ -11019,7 +11138,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyCompile
     {program : Program}
     {table :
@@ -11035,7 +11154,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_base
       hCompileTarget)
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
     {program : Program}
     {table :
@@ -11052,7 +11171,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
     {program : Program}
     {table :
@@ -11072,7 +11191,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_table
     {program : Program}
     {table :
@@ -11090,7 +11209,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_actualSourceRunEVMStackHeadroomPoints_of_checked_table
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -11134,7 +11253,7 @@ theorem
           hCompileTarget
       simpa [hTable] using hInitialPoint)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_checked_table
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -11181,7 +11300,7 @@ The inference result is not trusted directly: successful compilation requires
 `inferProgramBoundCheckResult?` to return the checker-produced
 `ProgramBoundCheckResult` for the emitted assembly.
 -/
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
     (program : Program) :
     Option (Assembly.Program × Assembly.TargetProgram) :=
@@ -11196,7 +11315,7 @@ noncomputable def
       | none => none
       | some _check => some (asm, target)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     {program : Program}
     {asm : Assembly.Program}
@@ -11234,7 +11353,7 @@ theorem
           rcases hCompileTarget with ⟨rfl, rfl⟩
           exact ⟨rfl, check, hBound⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
     {program : Program}
     {asm : Assembly.Program}
@@ -11249,7 +11368,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyCompile
     {program : Program}
     {asm : Assembly.Program}
@@ -11263,7 +11382,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
       hCompileTarget)
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
     {program : Program}
     {asm : Assembly.Program}
@@ -11278,7 +11397,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
     {program : Program}
     {asm : Assembly.Program}
@@ -11296,7 +11415,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunEVMStackHeadroomPoints
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -11337,7 +11456,7 @@ theorem
           (by decide : 17 ≤ 1024)
           (state := initial)))
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -11364,7 +11483,7 @@ theorem
           (by decide : 17 ≤ 1024)
           (state := initial)))
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_base
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11378,7 +11497,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_sourceRecurrence
     hCompileTarget).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_assemblyCompile
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11391,7 +11510,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_base
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_points
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -11415,7 +11534,7 @@ theorem
       hCompileTarget)
     hPoints
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11428,7 +11547,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_sourceRecurrence
       hCompileTarget).2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11448,7 +11567,7 @@ theorem
     ⟨_depth, _hDepth, _hMaxFrames, hBound⟩
   exact hBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceResourceBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11462,7 +11581,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_sourceResource
     hCompileTarget).2
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11475,7 +11594,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked_sourceResourceBound
       hCompileTarget).2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceSafe
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11491,7 +11610,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
     hCompileTarget).stackResourceSafe
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceSafeFromBase
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11507,7 +11626,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
     hCompileTarget).stackResourceSafeFromBase
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceSafe
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11535,7 +11654,7 @@ stack-check disjunction remains only as a compatibility surface for
 branch-local checker facts. The target headroom table is still inferred and
 immediately rechecked against the emitted assembly.
 -/
-structure
+private structure
     ExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyCheckedCompile
     (program : Program) : Type where
   asm : Assembly.Program
@@ -11545,7 +11664,7 @@ structure
     _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
       asm 17 1024
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?
     (program : Program) :
     Option
@@ -11567,7 +11686,7 @@ noncomputable def
               sourceDepth := sourceChecked.sourceDepth
               assemblyBound := assemblyBound }
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
     (program : Program) :
     Option (Assembly.Program × Assembly.TargetProgram) :=
@@ -11577,7 +11696,7 @@ noncomputable def
   | none => none
   | some checked => some (checked.asm, checked.target)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?_eq_some
     {program : Program}
     {checked :
@@ -11626,7 +11745,7 @@ theorem
             ⟨sourceChecked, rfl, rfl, rfl, rfl, hBound,
               hSourceDepth, hResource⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some_full
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11654,7 +11773,7 @@ theorem
       rcases hCompileTarget with ⟨rfl, rfl⟩
       exact ⟨checked, rfl, rfl, rfl⟩
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11668,7 +11787,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_full
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11685,7 +11804,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_asm
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11700,7 +11819,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).2.1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_target
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11715,7 +11834,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).2.2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_assemblyBound_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11737,7 +11856,7 @@ theorem
       _hSourceDepth, hBound, _hDepth, _hResource⟩
   exact hBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11760,7 +11879,7 @@ theorem
       _hSourceDepth, _hBound, hDepth, hResource⟩
   exact ⟨hDepth, hResource⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceActiveDepthBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11781,7 +11900,7 @@ theorem
     ⟨hDepth, ⟨lowerObj, hLower, hResource⟩⟩
   exact ⟨hDepth, lowerObj, hLower, hResource.activeDepthBound⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     {program : Program}
     {asm : Assembly.Program}
@@ -11820,7 +11939,7 @@ theorem
   refine ⟨hBase, checked.assemblyBound, ?_⟩
   simpa using hBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_executableBase
     {program : Program}
     {asm : Assembly.Program}
@@ -11835,7 +11954,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
     {program : Program}
     {asm : Assembly.Program}
@@ -11851,7 +11970,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_executableBase
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyCompile
     {program : Program}
     {asm : Assembly.Program}
@@ -11865,7 +11984,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_executableBase
       hCompileTarget)
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11878,7 +11997,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_executableBase
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceRecurrenceBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11895,7 +12014,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_executableBase
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceResourceBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11911,7 +12030,7 @@ theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
       hCompileTarget⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceActiveDepthBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11927,7 +12046,7 @@ theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceActiveDepthBound
       hCompileTarget⟩
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11940,7 +12059,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
       hCompileTarget).2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceSafe
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11956,7 +12075,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
     hCompileTarget).stackResourceSafe
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceSafeFromBase
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -11972,7 +12091,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
     hCompileTarget).stackResourceSafeFromBase
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceRecurrenceSafe
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12005,7 +12124,7 @@ private theorem
   cases hAsm
   exact hBound
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12020,7 +12139,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
       hCompileTarget).assemblyBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12042,7 +12161,7 @@ by
       hCompileTarget
   exact inferProgramBoundCheckResult?_checked_cast hAsm hBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -12082,13 +12201,13 @@ for compatibility; the preferred stack-guard path below uses the
 frame-word-sum/live-layout gates, which track accumulated hidden-frame usage
 and visible layout width more precisely.
 -/
-structure ExecutableFrameWordsStackSafeNoReturnDataCopyCheckedCompile
+private structure ExecutableFrameWordsStackSafeNoReturnDataCopyCheckedCompile
     (program : Program) : Type where
   asm : Assembly.Program
   target : Assembly.TargetProgram
   sourceDepth : Nat
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?
     (program : Program) :
     Option
@@ -12106,7 +12225,7 @@ noncomputable def
               target := target
               sourceDepth := sourceDepth }
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
     (program : Program) :
     Option (Assembly.Program × Assembly.TargetProgram) :=
@@ -12116,7 +12235,7 @@ noncomputable def
   | none => none
   | some checked => some (checked.asm, checked.target)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?_eq_some
     {program : Program}
     {checked :
@@ -12154,7 +12273,7 @@ theorem
               recursiveBridgeSourceFrameWordsResourceDepth?_sound
                 hSourceResource⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12181,7 +12300,7 @@ theorem
       rcases hCompileTarget with ⟨rfl, rfl⟩
       exact ⟨checked, rfl, rfl, rfl⟩
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12194,7 +12313,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked_full
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12211,7 +12330,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked_asm
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12226,7 +12345,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).2.1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked_target
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12241,7 +12360,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).2.2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked_sourceFrameWordsResourceBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12263,7 +12382,7 @@ theorem
     ⟨_hBase, hDepth, hResource⟩
   exact ⟨hDepth, hResource⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_base
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12286,7 +12405,7 @@ theorem
   cases hTarget
   exact hBase
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_assemblyCompile
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12307,7 +12426,7 @@ This is the assembly-bound sibling of
 `ExecutableFrameWordsStackSafeNoReturnDataCopyCheckedCompile`; prefer the
 `FrameWordSum` and live-layout variants for new stack-guard theorem surfaces.
 -/
-structure
+private structure
     ExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyCheckedCompile
     (program : Program) : Type where
   asm : Assembly.Program
@@ -12317,7 +12436,7 @@ structure
     _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
       asm 17 1024
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?
     (program : Program) :
     Option
@@ -12339,7 +12458,7 @@ noncomputable def
               sourceDepth := sourceChecked.sourceDepth
               assemblyBound := assemblyBound }
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
     (program : Program) :
     Option (Assembly.Program × Assembly.TargetProgram) :=
@@ -12349,7 +12468,7 @@ noncomputable def
   | none => none
   | some checked => some (checked.asm, checked.target)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?_eq_some
     {program : Program}
     {checked :
@@ -12399,7 +12518,7 @@ theorem
             ⟨sourceChecked, rfl, rfl, rfl, rfl, hBound,
               hSourceDepth, hResource⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12427,7 +12546,7 @@ theorem
       rcases hCompileTarget with ⟨rfl, rfl⟩
       exact ⟨checked, rfl, rfl, rfl⟩
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12441,7 +12560,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_full
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12458,7 +12577,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_asm
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12473,7 +12592,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).2.1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_target
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12488,7 +12607,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).2.2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_assemblyBound_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12510,7 +12629,7 @@ theorem
       _hSourceDepth, hBound, _hDepth, _hResource⟩
   exact hBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_sourceFrameWordsResourceBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12533,7 +12652,7 @@ theorem
       _hSourceDepth, _hBound, hDepth, hResource⟩
   exact ⟨hDepth, hResource⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some
     {program : Program}
     {asm : Assembly.Program}
@@ -12572,7 +12691,7 @@ theorem
   refine ⟨hBase, checked.assemblyBound, ?_⟩
   simpa using hBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_executableBase
     {program : Program}
     {asm : Assembly.Program}
@@ -12587,7 +12706,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_base
     {program : Program}
     {asm : Assembly.Program}
@@ -12603,7 +12722,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_executableBase
       hCompileTarget)
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_assemblyBoundCheck
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12618,7 +12737,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked
       hCompileTarget).assemblyBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12639,7 +12758,7 @@ theorem
       hCompileTarget
   exact inferProgramBoundCheckResult?_checked_cast hAsm hBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -12675,13 +12794,13 @@ of checking `maxFrameWords * depth`, it keeps the executable
 bound is the maximum sum of the actual active hidden return-frame sizes along
 accepted acyclic call paths.
 -/
-structure ExecutableFrameWordSumStackSafeNoReturnDataCopyCheckedCompile
+private structure ExecutableFrameWordSumStackSafeNoReturnDataCopyCheckedCompile
     (program : Program) : Type where
   asm : Assembly.Program
   target : Assembly.TargetProgram
   sourceCheck : RecursiveBridgeExecutableFrameWordSumStackCheckResult program
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?
     (program : Program) :
     Option
@@ -12700,7 +12819,7 @@ noncomputable def
               target := target
               sourceCheck := sourceCheck }
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
     (program : Program) :
     Option (Assembly.Program × Assembly.TargetProgram) :=
@@ -12710,7 +12829,7 @@ noncomputable def
   | none => none
   | some checked => some (checked.asm, checked.target)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?_eq_some
     {program : Program}
     {checked :
@@ -12744,7 +12863,7 @@ theorem
           cases hChecked
           exact ⟨rfl, rfl⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12771,7 +12890,7 @@ theorem
       rcases hCompileTarget with ⟨rfl, rfl⟩
       exact ⟨checked, rfl, rfl, rfl⟩
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12784,7 +12903,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked_full
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12801,7 +12920,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked_asm
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12816,7 +12935,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).2.1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked_target
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12831,7 +12950,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).2.2
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_sourceFrameWordSumResourceBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12843,7 +12962,7 @@ noncomputable def
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked
     hCompileTarget).sourceCheck.toSourceFrameWordSumResourceBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_base
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12866,7 +12985,7 @@ theorem
   cases hTarget
   exact hBase
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_assemblyCompile
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12884,7 +13003,7 @@ Exact accumulated hidden-frame source gate plus inferred target assembly
 headroom.  This is the preferred no-CALL stack gate once the exact weighted
 resource route is available.
 -/
-structure
+private structure
     ExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyCheckedCompile
     (program : Program) : Type where
   asm : Assembly.Program
@@ -12894,7 +13013,7 @@ structure
     _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
       asm 17 1024
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyFull?
     (program : Program) :
     Option
@@ -12916,7 +13035,7 @@ noncomputable def
               sourceCheck := sourceChecked.sourceCheck
               assemblyBound := assemblyBound }
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
     (program : Program) :
     Option (Assembly.Program × Assembly.TargetProgram) :=
@@ -12926,7 +13045,7 @@ noncomputable def
   | none => none
   | some checked => some (checked.asm, checked.target)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyFull?_eq_some
     {program : Program}
     {checked :
@@ -12970,7 +13089,7 @@ theorem
             ⟨_hBase, _hSourceCheck⟩
           exact ⟨sourceChecked, rfl, rfl, rfl, rfl, hBound⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -12998,7 +13117,7 @@ theorem
       rcases hCompileTarget with ⟨rfl, rfl⟩
       exact ⟨checked, rfl, rfl, rfl⟩
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -13012,7 +13131,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked_full
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -13029,7 +13148,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked_asm
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -13044,7 +13163,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).2.1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked_target
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -13059,7 +13178,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
       hCompileTarget)).2.2
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked_assemblyBound_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -13081,7 +13200,7 @@ theorem
       _hSourceCheck, hBound⟩
   exact hBound
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_sourceFrameWordSumResourceBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -13093,7 +13212,7 @@ noncomputable def
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked
     hCompileTarget).sourceCheck.toSourceFrameWordSumResourceBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_sourceFrameWordSumExactBound
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -13115,7 +13234,7 @@ theorem
       hResource.lower, hResource.resource.checked,
       hResource.resource.budget⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some
     {program : Program}
     {asm : Assembly.Program}
@@ -13154,7 +13273,7 @@ theorem
   refine ⟨hBase, checked.assemblyBound, ?_⟩
   simpa using hBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_executableBase
     {program : Program}
     {asm : Assembly.Program}
@@ -13169,7 +13288,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_base
     {program : Program}
     {asm : Assembly.Program}
@@ -13185,7 +13304,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_executableBase
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyCompile
     {program : Program}
     {asm : Assembly.Program}
@@ -13199,7 +13318,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_executableBase
       hCompileTarget)
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -13214,7 +13333,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked
       hCompileTarget).assemblyBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -13235,7 +13354,7 @@ theorem
       hCompileTarget
   exact inferProgramBoundCheckResult?_checked_cast hAsm hBound
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -13262,7 +13381,7 @@ theorem
           (by decide : 17 ≤ 1024)
           (state := initial)))
 
-noncomputable def
+private noncomputable def
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
     (program : Program) :
     Option (Assembly.Program × Assembly.TargetProgram) :=
@@ -13277,7 +13396,7 @@ noncomputable def
       | none => none
       | some _assemblyBound => some (asm, target)
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     {program : Program}
     {asm : Assembly.Program}
@@ -13316,7 +13435,7 @@ theorem
           rcases hCompileTarget with ⟨rfl, rfl⟩
           exact ⟨by simpa [hBase] using hBase, assemblyBound, by simpa using hBound⟩
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
     {program : Program}
     {asm : Assembly.Program}
@@ -13331,7 +13450,7 @@ theorem
   (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget).1
 
-noncomputable def
+private noncomputable def
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -13345,7 +13464,7 @@ noncomputable def
     (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -13362,7 +13481,7 @@ theorem
     (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -13389,7 +13508,7 @@ theorem
           (by decide : 17 ≤ 1024)
           (state := initial)))
 
-noncomputable def
+private noncomputable def
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
     (program : Program) :
     Option (Assembly.Program × Assembly.TargetProgram) :=
@@ -13407,7 +13526,7 @@ noncomputable def
           | none => none
           | some _assemblyBound => some (asm, target)
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some
     {program : Program}
     {asm : Assembly.Program}
@@ -13458,7 +13577,7 @@ theorem
                   ⟨sourceCheck, by simpa using hSource⟩,
                   assemblyBound, by simpa using hBound⟩
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_base
     {program : Program}
     {asm : Assembly.Program}
@@ -13473,7 +13592,7 @@ theorem
   (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget).1
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_stackSafeCompile
     {program : Program}
     {asm : Assembly.Program}
@@ -13494,7 +13613,7 @@ theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
   simp [hBase, hBound]
 
-noncomputable def
+private noncomputable def
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_sourceFrameWordSumResourceBound
     {program : Program}
     {asm : Assembly.Program}
@@ -13510,7 +13629,7 @@ noncomputable def
         (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some
           hCompileTarget).2.1)
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_sourceFrameWordSumExactBound
     {program : Program}
     {asm : Assembly.Program}
@@ -13533,7 +13652,7 @@ theorem
       hResource.lower, hResource.resource.checked,
       hResource.resource.budget⟩
 
-noncomputable def
+private noncomputable def
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck
     {program : Program}
     {asm : Assembly.Program}
@@ -13548,7 +13667,7 @@ noncomputable def
     (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2.2
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
     {program : Program}
     {asm : Assembly.Program}
@@ -13566,7 +13685,7 @@ theorem
     (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2.2
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -13593,7 +13712,7 @@ theorem
           (by decide : 17 ≤ 1024)
           (state := initial)))
 
-noncomputable def
+private noncomputable def
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?
     (program : Program) :
     Option (Assembly.Program × Assembly.TargetProgram) :=
@@ -13612,7 +13731,7 @@ noncomputable def
           | none => none
           | some _assemblyBound => some (asm, target)
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_eq_some
     {program : Program}
     {asm : Assembly.Program}
@@ -13663,7 +13782,7 @@ theorem
                   ⟨sourceCheck, by simpa using hSource⟩,
                   assemblyBound, by simpa using hBound⟩
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_of_checks
     {program : Program}
     {asm : Assembly.Program}
@@ -13691,7 +13810,7 @@ theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?
   simp [hBase, hSource, hBound]
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_base
     {program : Program}
     {asm : Assembly.Program}
@@ -13706,7 +13825,7 @@ theorem
   (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget).1
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_stackSafeCompile
     {program : Program}
     {asm : Assembly.Program}
@@ -13727,7 +13846,7 @@ theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
   simp [hBase, hBound]
 
-noncomputable def
+private noncomputable def
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_sourceCheck
     {program : Program}
     {asm : Assembly.Program}
@@ -13741,7 +13860,7 @@ noncomputable def
     (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2.1
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_sourceCheck_checked
     {program : Program}
     {asm : Assembly.Program}
@@ -13758,7 +13877,7 @@ theorem
     (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2.1
 
-noncomputable def
+private noncomputable def
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_sourceFrameWordSumVisibleResourceBound
     {program : Program}
     {asm : Assembly.Program}
@@ -13774,7 +13893,7 @@ noncomputable def
     (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_sourceCheck_checked
       hCompileTarget)
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_sourceFrameWordSumLiveLayoutExactBound
     {program : Program}
     {asm : Assembly.Program}
@@ -13801,7 +13920,7 @@ theorem
       sourceCheck.liveWidthCheck, sourceCheck.resource.checked,
       sourceCheck.resource.budget⟩
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_body_layoutsBoundedBy
     {program : Program}
     {asm : Assembly.Program}
@@ -13830,7 +13949,7 @@ theorem
   (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_sourceCheck
     hCompileTarget).body_layoutsBoundedBy
 
-noncomputable def
+private noncomputable def
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_assemblyBoundCheck
     {program : Program}
     {asm : Assembly.Program}
@@ -13845,7 +13964,7 @@ noncomputable def
     (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2.2
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
     {program : Program}
     {asm : Assembly.Program}
@@ -13863,7 +13982,7 @@ theorem
     (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2.2
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -13890,7 +14009,7 @@ theorem
           (by decide : 17 ≤ 1024)
           (state := initial)))
 
-theorem
+private theorem
     liveLayoutStackSafe_actualEVMHeadroomPoints
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -13931,7 +14050,7 @@ theorem
           (by decide : 17 ≤ 1024)
           (state := initial)))
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_sourceRunFrameWordSumLiveLayoutPoints
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -13959,7 +14078,7 @@ theorem
         hCompileTarget))
     hPoints
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_sourceRunFrameWordSumLiveLayoutWeightPoints
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -13987,7 +14106,7 @@ theorem
         hCompileTarget))
     hPoints
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_sourceRunFrameStackHeadroom
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -14009,7 +14128,7 @@ theorem
   RecursiveBridgeActualSourceRunFrameStackHeadroom.toEVMStackHeadroomBound
     hHeadroom
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunEVMStackHeadroomPoints
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -14373,7 +14492,7 @@ private theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext
       hCompileTarget hSourceRun hRun hStep)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_resourcePoints
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -14400,7 +14519,7 @@ theorem
     (RecursiveBridgeActualSourceRunFrameStackResourcePoints.toEVMStackHeadroomPoints
       hPoints)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_actualSourceRunEVMStackHeadroomPoints_of_assemblyBoundCheck
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -14438,7 +14557,7 @@ theorem
   RecursiveBridgeActualSourceRunEVMStackHeadroomPoints.of_assemblyBoundCheck
     check hSourceRun hRun hInitialPoint
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext_of_points
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -14560,7 +14679,7 @@ private theorem
   RecursiveBridgeActualSourceRunFrameStackResourceContext.of_blockTraceResult_invariant_initial
     hSourceRun hStep
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
     (program : Program)
     (edges : List Functions.CallDepth.Ranked.Edge)
@@ -14577,7 +14696,7 @@ noncomputable def
       | none => none
       | some _stack => some (asm, target)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_eq_some
     {program : Program}
     {edges : List Functions.CallDepth.Ranked.Edge}
@@ -14615,7 +14734,7 @@ theorem
           rcases hCompileTarget with ⟨rfl, rfl⟩
           exact ⟨rfl, ⟨stackCheck, by simp⟩⟩
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_base
     {program : Program}
     {edges : List Functions.CallDepth.Ranked.Edge}
@@ -14632,7 +14751,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_eq_some
     hCompileTarget).1
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_assemblyCompile
     {program : Program}
     {edges : List Functions.CallDepth.Ranked.Edge}
@@ -14648,7 +14767,7 @@ theorem
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_base
       hCompileTarget)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_points
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -14674,7 +14793,7 @@ theorem
       hCompileTarget)
     hPoints
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackCheck
     {program : Program}
     {edges : List Functions.CallDepth.Ranked.Edge}
@@ -14690,7 +14809,7 @@ noncomputable def
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_eq_some
       hCompileTarget).2
 
-noncomputable def
+private noncomputable def
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
     {program : Program}
     {edges : List Functions.CallDepth.Ranked.Edge}
@@ -14705,7 +14824,7 @@ noncomputable def
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackCheck
     hCompileTarget).toStackResourceCheckResult
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceSafe
     {program : Program}
     {edges : List Functions.CallDepth.Ranked.Edge}
@@ -14724,7 +14843,7 @@ theorem
   (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
     hCompileTarget).stackResourceSafe
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_resourcePoints
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -14753,7 +14872,7 @@ theorem
     (RecursiveBridgeActualSourceRunFrameStackResourcePoints.toEVMStackHeadroomPoints
       hPoints)
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext_of_points
     {cfg : Reference.StateRelConfig}
     {program : Program}
@@ -14881,7 +15000,7 @@ private theorem
   RecursiveBridgeActualSourceRunFrameStackResourceContext.of_blockTraceResult_invariant_initial
     hSourceRun hStep
 
-theorem
+private theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_rankedCheck
     {program : Program}
     {edges : List Functions.CallDepth.Ranked.Edge}
@@ -17905,7 +18024,7 @@ private theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_
       hGasFits
   exact ⟨evmFuel, result, hTraceX, hXRun, hAgrees⟩
 
-theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18013,7 +18132,7 @@ theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonica
       hInitialCodeImageRel hSourceFuelRun hBase
       hActualXTraceFacts
 
-theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18076,7 +18195,7 @@ theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonica
   compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
     hInitialCodeImageRel hSourceFuelRun hCheckedCompileTarget hInitialPerm
 
-theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18142,7 +18261,7 @@ theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonica
       hCheckedCompileTarget)
     hInitialPerm
 
-theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18208,7 +18327,7 @@ theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonica
       hCheckedCompileTarget)
     hInitialPerm
 
-theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprCallResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprCallResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18272,7 +18391,7 @@ theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonica
     hInitialCodeImageRel
     hSourceFuelRun hCheckedCompileTarget hInitialPerm
 
-theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprUserCallResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprUserCallResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18336,7 +18455,7 @@ theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonica
     hInitialCodeImageRel
     hSourceFuelRun hCheckedCompileTarget hInitialPerm
 
-theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18402,7 +18521,7 @@ theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonica
       hCheckedCompileTarget)
     hInitialPerm
 
-theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprUserCallResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprUserCallResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18466,7 +18585,7 @@ theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonica
     hInitialCodeImageRel
     hSourceFuelRun hCheckedCompileTarget hInitialPerm
 
-theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18525,7 +18644,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_
       intro hImpossible
       cases hImpossible⟩
 
-theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18569,7 +18688,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_
   compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
     hInitialCodeImageRel hSourceFuelRun hCheckedCompileTarget hInitialPerm
 
-theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18616,7 +18735,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_
       hCheckedCompileTarget)
     hInitialPerm
 
-theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18663,7 +18782,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_
       hCheckedCompileTarget)
     hInitialPerm
 
-theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprCallResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprCallResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18708,7 +18827,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_
     hInitialCodeImageRel
     hSourceFuelRun hCheckedCompileTarget hInitialPerm
 
-theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprUserCallResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprUserCallResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18753,7 +18872,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_
     hInitialCodeImageRel
     hSourceFuelRun hCheckedCompileTarget hInitialPerm
 
-theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -18800,7 +18919,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_
       hCheckedCompileTarget)
     hInitialPerm
 
-theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprUserCallResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprUserCallResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -19210,7 +19329,7 @@ private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsRe
     hCheckedCompileTarget hInitialPerm
     hActualStackHeadroom.toXTraceHeadroomFacts
 
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -19287,7 +19406,7 @@ The older `...existsSourceRun_exprResultContracts...` wrapper remains as a
 compatibility surface, but the audit-facing route should use this theorem so
 callers do not supply an arbitrary expression-result package.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -19362,7 +19481,7 @@ right branch is the conservative private-scratch spill observation relation:
 contract-visible shared state agrees outside the declared scratch range, while
 private scratch memory may differ.
 -/
-def StackSafeOrConservativeSpillObservableOutcomeRel
+private def StackSafeOrConservativeSpillObservableOutcomeRel
     (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
     (sourceOutcome : Objects.Source.Outcome)
     (targetOutcome : Assembly.StepResult) : Prop :=
@@ -19379,7 +19498,7 @@ tries the already-proved private-scratch conservative spill route.  The theorem
 below exposes which semantic observation relation was proved, rather than
 pretending the scratch fallback preserves exact memory.
 -/
-noncomputable def
+private noncomputable def
     compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?
     (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
     (program : Program) :
@@ -19392,7 +19511,7 @@ noncomputable def
       compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
         range program
 
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?_of_stackSafe
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program}
@@ -19407,7 +19526,7 @@ theorem
   simp [compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?,
     hStackSafe]
 
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?_of_conservativeSpill
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program}
@@ -19426,7 +19545,7 @@ theorem
   simp [compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?,
     hStackSafe, hSpill]
 
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?_runResult_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -19535,7 +19654,7 @@ theorem
           hRun, hOutcome, Or.inr hObs, hAccepted, hBytes, hEncoding,
           hTrace, hGasBound, hGasReplay⟩
 
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?_runResult_sufficientGas_no_out_of_gas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -19676,7 +19795,7 @@ This is the preferred top-16 escape route: try the exact ordinary compiler
 first, then use the adaptive private-scratch spill compiler, which spills only
 when needed to get around `DUP`/`SWAP` top-16 access failures.
 -/
-noncomputable def
+private noncomputable def
     compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?
     (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
     (program : Program) :
@@ -19689,7 +19808,7 @@ noncomputable def
       compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
         range program
 
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_of_stackSafe
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program}
@@ -19703,7 +19822,7 @@ theorem
       some (asm, target) := by
   simp [compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?, hStackSafe]
 
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_of_adaptiveSpill
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program}
@@ -19722,7 +19841,7 @@ theorem
   simp [compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?,
     hStackSafe, hSpill]
 
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -19831,7 +19950,7 @@ theorem
           hRun, hOutcome, Or.inr hObs, hAccepted, hBytes, hEncoding,
           hTrace, hGasBound, hGasReplay⟩
 
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_sufficientGas_no_out_of_gas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -19994,7 +20113,7 @@ result-shape facts.  This theorem states the actual needed boundary directly:
 the same expression-result contract and bundled imported source run used by the
 exact public spine, plus the explicit private-scratch initial-state check.
 -/
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprResultContracts_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20098,7 +20217,7 @@ theorem
           hRun, hOutcome, Or.inr hObs, hAccepted, hBytes, hEncoding,
           hTrace, hGasBound, hGasReplay⟩
 
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20141,7 +20260,7 @@ theorem
       hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel
       hReferenceRun hCompileTarget hBoundary hInitialPerm
 
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20184,7 +20303,7 @@ theorem
       hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel
       hReferenceRun hCompileTarget hBoundary hInitialPerm
 
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20255,7 +20374,7 @@ theorem
     hInitialCodeImageRel hSourceFuelRun hCompileTarget hBoundary
     hInitialPerm
 
-theorem
+private theorem
     compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_no_out_of_gas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20337,7 +20456,7 @@ whose deep locals can be handled by dead-prefix trimming still get ordinary
 whole-program outcome equality.  Only if that exact route fails does it fall
 back to the adaptive private-scratch spill route.
 -/
-noncomputable def
+private noncomputable def
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?
     (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
     (program : Program) :
@@ -20348,7 +20467,7 @@ noncomputable def
   | some result => some result
   | none => compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill? range program
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_of_liveLayout
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program}
@@ -20364,7 +20483,7 @@ theorem
   simp [compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?,
     hLiveLayout]
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_of_adaptiveFallback
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program}
@@ -20383,7 +20502,7 @@ theorem
   simp [compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?,
     hLiveLayout, hFallback]
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_eq_some
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program}
@@ -20415,7 +20534,7 @@ theorem
       simp [hLiveLayout] at hCompileTarget
       exact Or.inr ⟨rfl, hCompileTarget⟩
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20506,7 +20625,7 @@ theorem
           hSpec hExprUserCallResultContracts hInitialCodeImageRel
           hSourceFuelRun hCompileTarget hBoundary hInitialPerm
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprResultContracts_sufficientGas_X_of_liveLayoutOrScratchBoundary
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20600,7 +20719,7 @@ theorem
           hSpec hExprResultContracts hInitialCodeImageRel
           hSourceFuelRun hCompileTarget (hBoundary hLiveLayout) hInitialPerm
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X_of_liveLayoutOrScratchBoundary
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20638,7 +20757,7 @@ theorem
     hSpec hExprNoSuccessfulOutOfFuel.to_resultContracts
     hInitialCodeImageRel hSourceFuelRun hCompileTarget hBoundary hInitialPerm
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20673,7 +20792,7 @@ theorem
     hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel hSourceFuelRun
     hCompileTarget (fun _ => hBoundary) hInitialPerm
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_X_of_liveLayoutOrScratchBoundary
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20746,7 +20865,7 @@ theorem
       hExprUserCallResultContracts)
     hInitialCodeImageRel hSourceFuelRun hCompileTarget hBoundary hInitialPerm
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_no_out_of_gas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20818,7 +20937,7 @@ theorem
       intro hImpossible
       cases hImpossible⟩
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprResultContracts_sufficientGas_no_out_of_gas_X_of_liveLayoutOrScratchBoundary
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20893,7 +21012,7 @@ theorem
       intro hImpossible
       cases hImpossible⟩
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X_of_liveLayoutOrScratchBoundary
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20931,7 +21050,7 @@ theorem
     hSpec hExprNoSuccessfulOutOfFuel.to_resultContracts
     hInitialCodeImageRel hSourceFuelRun hCompileTarget hBoundary hInitialPerm
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -20966,7 +21085,7 @@ theorem
     hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel hSourceFuelRun
     hCompileTarget (fun _ => hBoundary) hInitialPerm
 
-theorem
+private theorem
     compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_no_out_of_gas_X_of_liveLayoutOrScratchBoundary
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -21049,10 +21168,10 @@ Canonical no-CALL stack-guarded compiler surface.
 This is a concise alias for the preferred live-layout-first, adaptive-fallback
 compiler used by the public stack-guarded theorem aliases.
 -/
-noncomputable abbrev compileStackGuardedNoReturnDataCopy? :=
+noncomputable abbrev compileStackGuardedReturnDataCopyBounds? :=
   compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?
 
-theorem compileStackGuardedNoReturnDataCopy?_of_liveLayout
+private theorem compileStackGuardedReturnDataCopyBounds?_of_liveLayout
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program}
     {asm : Assembly.Program}
@@ -21061,11 +21180,11 @@ theorem compileStackGuardedNoReturnDataCopy?_of_liveLayout
       compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?
           program =
         some (asm, target)) :
-    compileStackGuardedNoReturnDataCopy? range program = some (asm, target) :=
+    compileStackGuardedReturnDataCopyBounds? range program = some (asm, target) :=
   compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_of_liveLayout
     hLiveLayout
 
-theorem compileStackGuardedNoReturnDataCopy?_of_adaptiveFallback
+private theorem compileStackGuardedReturnDataCopyBounds?_of_adaptiveFallback
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program}
     {asm : Assembly.Program}
@@ -21077,7 +21196,7 @@ theorem compileStackGuardedNoReturnDataCopy?_of_adaptiveFallback
     (hFallback :
       compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill? range program =
         some (asm, target)) :
-    compileStackGuardedNoReturnDataCopy? range program = some (asm, target) :=
+    compileStackGuardedReturnDataCopyBounds? range program = some (asm, target) :=
   compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_of_adaptiveFallback
     hLiveLayout hFallback
 
@@ -21089,7 +21208,7 @@ need private scratch memory.  The adaptive fallback branch uses the declared
 scratch range, so scratch readiness is required only when the live-layout
 target compiler fails.
 -/
-abbrev StackGuardedNoReturnDataCopyFallbackScratchReady
+abbrev StackGuardedReturnDataCopyBoundsFallbackScratchReady
     (range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange)
     (program : Program) (initial : EVMState) : Prop :=
   compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?
@@ -21099,7 +21218,7 @@ abbrev StackGuardedNoReturnDataCopyFallbackScratchReady
       (canonicalEntryState initial).toMachineState range [] [] [] =
     true
 
-theorem StackGuardedNoReturnDataCopyFallbackScratchReady.of_liveLayout
+theorem StackGuardedReturnDataCopyBoundsFallbackScratchReady.of_liveLayout
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {initial : EVMState}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -21107,22 +21226,22 @@ theorem StackGuardedNoReturnDataCopyFallbackScratchReady.of_liveLayout
       compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?
           program =
         some (asm, target)) :
-    StackGuardedNoReturnDataCopyFallbackScratchReady range program initial := by
+    StackGuardedReturnDataCopyBoundsFallbackScratchReady range program initial := by
   intro hFallback
   simp [hLiveLayout] at hFallback
 
-theorem StackGuardedNoReturnDataCopyFallbackScratchReady.of_scratchCheck
+theorem StackGuardedReturnDataCopyBoundsFallbackScratchReady.of_scratchCheck
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {program : Program} {initial : EVMState}
     (hScratch :
       Locals.SourceLowering.StateRel.SpillScratch.PrivateScratchBoundary.scratchCheck?
           (canonicalEntryState initial).toMachineState range [] [] [] =
         true) :
-    StackGuardedNoReturnDataCopyFallbackScratchReady range program initial := by
+    StackGuardedReturnDataCopyBoundsFallbackScratchReady range program initial := by
   intro _hFallback
   exact hScratch
 
-abbrev compileStackGuardedNoReturnDataCopy?_eq_some :=
+private abbrev compileStackGuardedReturnDataCopyBounds?_eq_some :=
   @compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_eq_some
 
 abbrev StackGuardedSufficientGasConclusion
@@ -21331,7 +21450,7 @@ abbrev StackGuardedPlannedPreallocNoOutOfGasConclusion
                             (canonicalEntryState initial)) ≠
                         .error EvmYul.EVM.ExecutionException.OutOfGass
 
-noncomputable def compileStackGuardedNoReturnDataCopyPlannedPrealloc?
+private noncomputable def compileStackGuardedNoReturnDataCopyPlannedPrealloc?
     (maxWords : Nat) (program : Program) :
     Option
       (Locals.SourceLowering.StateRel.SpillScratch.ScratchRange ×
@@ -21344,7 +21463,14 @@ noncomputable def compileStackGuardedNoReturnDataCopyPlannedPrealloc?
         compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
           maxWords program
 
-theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_eq_some
+noncomputable def compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
+    (maxWords : Nat) (program : Program) :
+    Option
+      (Locals.SourceLowering.StateRel.SpillScratch.ScratchRange ×
+        Assembly.Program × Assembly.TargetProgram) :=
+  compileStackGuardedNoReturnDataCopyPlannedPrealloc? maxWords program
+
+private theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_eq_some
     {maxWords : Nat} {program : Program}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -21375,7 +21501,203 @@ theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_eq_some
       simp [hLive] at hCompileTarget
       exact Or.inr ⟨rfl, hCompileTarget⟩
 
-theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_noCallCreate
+private theorem compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_eq_some
+    {maxWords : Nat} {program : Program}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
+          maxWords program =
+        some (range, asm, target)) :
+    (range = { base := 0, words := 0 } ∧
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) ∨
+      (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?
+          program =
+        none ∧
+        compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          maxWords program =
+        some (range, asm, target)) :=
+  compileStackGuardedNoReturnDataCopyPlannedPrealloc?_eq_some
+    hCompileTarget
+
+theorem
+    compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_sourceStaticFacts
+    {maxWords : Nat} {program : Program}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
+          maxWords program =
+        some (range, asm, target)) :
+    ∃ lowerObj : Objects.Program,
+      program.toObjects? = some lowerObj ∧
+        RecursiveBridgeFeatureCoverage program ∧
+          RecursiveBridgeSourceStaticFacts program := by
+  rcases compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_eq_some
+      hCompileTarget with hLive | hAdaptive
+  · rcases hLive with ⟨_hRange, hLiveCompile⟩
+    have hBase :
+        compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+            program =
+          some (asm, target) :=
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_base
+        hLiveCompile
+    let hNoReturn :=
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
+        hBase
+    let hStaticFacts :=
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?_eq_some
+        hNoReturn.1
+    let hFeatureFacts :=
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?_eq_some
+        hStaticFacts.1
+    let hBytecode :=
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecode?_eq_some
+        hFeatureFacts.1
+    have hCompileLive :
+        compileLiveNoInternalCallChecked? program = some asm :=
+      (compileLiveNoInternalCallCheckedAssemblyTarget?_eq_some
+        hBytecode.1).1
+    rcases compileLiveNoInternalCallChecked?_eq_some hCompileLive with
+      ⟨lowerObj, hLowerObj, _hObjCompile⟩
+    exact ⟨lowerObj, hLowerObj, hFeatureFacts.2, hStaticFacts.2⟩
+  · rcases hAdaptive with ⟨_hLiveNone, hAdaptiveCompile⟩
+    obtain
+      ⟨hPlanned, _hAsmCompile, _hDecodeWindow, _hJumpdest, hCoverage,
+        hStatic, _hReturnDataCopy, _hTargetNoReturnDataCopy, _check,
+        _hBound⟩ :=
+      compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+        hAdaptiveCompile
+    rcases compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_eq_some
+        hPlanned with
+      ⟨lowerObj, hLowerObj, _hObjCompile⟩
+    exact ⟨lowerObj, hLowerObj, hCoverage, hStatic⟩
+
+theorem
+    compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_sourceLowered_targetFacts
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    {maxWords : Nat} {program : Program}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {fuel : Nat} {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hCompileTarget :
+      compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
+          maxWords program =
+        some (range, asm, target))
+    (hInitialMemory :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchInitialMemoryEmpty
+        initial.toMachineState)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hRun :
+      SourceLowered.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      StackGuardedPlannedPreallocObservableOutcomeRel range sourceOutcome
+        targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome ∧
+      Assembly.compile? asm = some target ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target ∧
+      asm.usesCallCreate = false ∧
+      ∃ check :
+        _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+          asm 17 1024,
+        True := by
+  rcases compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_eq_some
+      hCompileTarget with hLive | hAdaptive
+  · rcases hLive with ⟨_hRange, hLiveCompile⟩
+    have hBase :
+        compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+            program =
+          some (asm, target) :=
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_base
+        hLiveCompile
+    let hNoReturn :=
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
+        hBase
+    let hStatic :=
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?_eq_some
+        hNoReturn.1
+    let hFeatures :=
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?_eq_some
+        hStatic.1
+    let hBytecode :=
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecode?_eq_some
+        hFeatures.1
+    have hProgramSourceAccepted : Program.SourceAccepted program :=
+      Program.sourceAccepted_of_sourceAcceptedCore_supported
+        hStatic.2.sourceAcceptedCore hStatic.2.supported
+    have hCompileLive :
+        compileLiveNoInternalCallChecked? program = some asm :=
+      (compileLiveNoInternalCallCheckedAssemblyTarget?_eq_some
+        hBytecode.1).1
+    obtain ⟨targetFuel, targetOutcome, hTargetRun, hWholeRel, hEndPc⟩ :=
+      compile_live_noInternalCall_source_preserves_checked_endPc_anyFuel
+        (prim := Locals.Source.PrimitiveSemantics.structured)
+        _root_.EvmCompiler.Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
+        (program := program) (asm := asm) (fuel := fuel)
+        (initial := initial) (sourceOutcome := sourceOutcome)
+        hCompileLive hProgramSourceAccepted hInitialPc hInitialStack hRun
+    have hAsmCompile : Assembly.compile? asm = some target :=
+      (compileLiveNoInternalCallCheckedAssemblyTarget?_eq_some
+        hBytecode.1).2
+    have hNoCallCreate : asm.usesCallCreate = false := by
+      rcases compileLiveNoInternalCallChecked?_eq_some hCompileLive with
+        ⟨lowerObj, hLowerObj, _hObjCompile⟩
+      have hCoverageProgram :
+          Reference.Safe.FeatureCoverage.program program :=
+        hFeatures.2.to_program_of_objectBuiltin
+          (Reference.Safe.FeatureCoverage.objectBuiltinProgram_of_toObjects?_some
+            hLowerObj)
+      have hSafeProgram : Reference.Safe.program program :=
+        (Reference.Safe.FeatureCoverage.program_iff_safe program).mp
+          hCoverageProgram
+      exact
+        Program.compileLiveNoInternalCallChecked?_noCallCreate_of_loweredFunctions
+          (fun obj hLower =>
+            _root_.EvmCompiler.Yul.NoCallCreate.contract_toObjects?_functions_noCallCreate
+              (by simpa [Reference.Safe.program] using hSafeProgram)
+              (by simpa [Program.toObjects?] using hLower))
+          hCompileLive
+    let check :=
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_assemblyBoundCheck
+        hLiveCompile
+    exact
+      ⟨targetFuel, targetOutcome, hTargetRun,
+        StackGuardedPlannedPreallocObservableOutcomeRel.of_exact hWholeRel,
+        hEndPc, hAsmCompile, hBytecode.2.1, hBytecode.2.2, hNoCallCreate,
+        check, True.intro⟩
+  · rcases hAdaptive with ⟨_hLiveNone, hAdaptiveCompile⟩
+    obtain
+      ⟨targetFuel, targetOutcome, hTargetRun, hObs, hEndPc, hAsmCompile,
+        hDecodeWindow, hJumpdest, _hNoReturnDataCopy,
+        _hBlockNoCallCreate⟩ :=
+      compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_source_observations_targetFacts
+        hSpec hAdaptiveCompile hInitialMemory hInitialPc hRun
+    obtain
+      ⟨hPlanned, _hAsmCompile, _hDecodeWindow, _hJumpdest, _hCoverage,
+        _hStatic, _hReturnDataCopy, _hTargetNoReturnDataCopy, check,
+        _hBound⟩ :=
+      compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+        hAdaptiveCompile
+    have hNoCallCreate : asm.usesCallCreate = false :=
+      compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_noCallCreate
+        hPlanned
+    exact
+      ⟨targetFuel, targetOutcome, hTargetRun,
+        StackGuardedPlannedPreallocObservableOutcomeRel.of_plannedPrealloc
+          hObs,
+        hEndPc, hAsmCompile, hDecodeWindow, hJumpdest, hNoCallCreate,
+        check, True.intro⟩
+
+private theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_noCallCreate
     {maxWords : Nat} {program : Program}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -21395,7 +21717,7 @@ theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_noCallCreate
         (compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
           hAdaptive.2).1
 
-theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_blockReplayNoCallCreate
+private theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_blockReplayNoCallCreate
     {maxWords : Nat} {program : Program}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -21404,11 +21726,36 @@ theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_blockReplayNoCallCre
           maxWords program =
         some (range, asm, target)) :
     Assembly.GasAware.XStepTrace.XBlockReplayNoCallCreate asm target :=
-  Assembly.GasAware.XStepTrace.XBlockReplayNoCallCreate.of_program_no_call_create
+    Assembly.GasAware.XStepTrace.XBlockReplayNoCallCreate.of_program_no_call_create
     (compileStackGuardedNoReturnDataCopyPlannedPrealloc?_noCallCreate
       hCompileTarget)
 
-theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_targetNoReturnDataCopy
+theorem compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_noCallCreate
+    {maxWords : Nat} {program : Program}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
+          maxWords program =
+        some (range, asm, target)) :
+    asm.usesCallCreate = false :=
+  compileStackGuardedNoReturnDataCopyPlannedPrealloc?_noCallCreate
+    hCompileTarget
+
+private theorem
+    compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_blockReplayNoCallCreate
+    {maxWords : Nat} {program : Program}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
+          maxWords program =
+        some (range, asm, target)) :
+    Assembly.GasAware.XStepTrace.XBlockReplayNoCallCreate asm target :=
+  compileStackGuardedNoReturnDataCopyPlannedPrealloc?_blockReplayNoCallCreate
+    hCompileTarget
+
+private theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_targetNoReturnDataCopy
     {maxWords : Nat} {program : Program}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -21427,7 +21774,7 @@ theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_targetNoReturnDataCo
       (compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
         hAdaptive.2).2.2.2.2.2.2.2.1
 
-theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_blockReplayNoReturnDataCopy
+private theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_blockReplayNoReturnDataCopy
     {maxWords : Nat} {program : Program}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -21440,7 +21787,37 @@ theorem compileStackGuardedNoReturnDataCopyPlannedPrealloc?_blockReplayNoReturnD
     (compileStackGuardedNoReturnDataCopyPlannedPrealloc?_targetNoReturnDataCopy
       hCompileTarget)
 
+private theorem compileStackGuardedPlannedPrealloc?_blockPathReturnDataCopyBounds
+    {maxWords : Nat} {program : Program}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileStackGuardedNoReturnDataCopyPlannedPrealloc?
+          maxWords program =
+        some (range, asm, target)) :
+    Assembly.GasAware.XStepTrace.XBlockPathReturnDataCopyBoundsReady
+      asm target :=
+  Assembly.GasAware.XStepTrace.XBlockPathReturnDataCopyBoundsReady.of_noReturnDataCopy_noCallCreate
+    (compileStackGuardedNoReturnDataCopyPlannedPrealloc?_blockReplayNoReturnDataCopy
+      hCompileTarget)
+    (compileStackGuardedNoReturnDataCopyPlannedPrealloc?_blockReplayNoCallCreate
+      hCompileTarget)
+
 theorem
+    compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_blockPathReturnDataCopyBounds
+    {maxWords : Nat} {program : Program}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
+          maxWords program =
+        some (range, asm, target)) :
+    Assembly.GasAware.XStepTrace.XBlockPathReturnDataCopyBoundsReady
+      asm target :=
+  compileStackGuardedPlannedPrealloc?_blockPathReturnDataCopyBounds
+    hCompileTarget
+
+private theorem
     compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprResultContracts_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -21504,7 +21881,7 @@ theorem
           hRun, hOutcome, Or.inr hObs, hAccepted, hBytes, hEncoding,
           hTrace, hGasBound, hGasReplay⟩
 
-theorem
+private theorem
     compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -21540,7 +21917,7 @@ theorem
     hInitialCodeImageRel hSourceFuelRun hCompileTarget hInitialMemory
     hInitialPerm
 
-theorem
+private theorem
     compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprResultContracts_sufficientGas_no_out_of_gas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -21590,7 +21967,7 @@ theorem
       intro hImpossible
       cases hImpossible⟩
 
-theorem
+private theorem
     compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
@@ -21625,8 +22002,148 @@ theorem
     hSpec hExprNoSuccessfulOutOfFuel.to_resultContracts hInitialCodeImageRel
     hSourceFuelRun hCompileTarget hInitialMemory hInitialPerm
 
+private theorem
+    compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_runResult_existsSourceRun_exprResultContracts_sufficientGas_X
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    {cfg : Reference.StateRelConfig}
+    {maxWords : Nat}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts :
+      RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel
+          referenceResult)
+    (hCompileTarget :
+      compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
+          maxWords program =
+        some (range, asm, target))
+    (hInitialMemory :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchInitialMemoryEmpty
+        (canonicalEntryState initial).toMachineState)
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    StackGuardedPlannedPreallocSufficientGasConclusion cfg range program asm
+      target shared store initial referenceResult :=
+  compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprResultContracts_sufficientGas_X
+    hSpec hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    hCompileTarget hInitialMemory hInitialPerm
+
 theorem
-    compileStackGuardedNoReturnDataCopy?_runResult_existsSourceRun_exprResultContracts_sufficientGas_X
+    compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    {cfg : Reference.StateRelConfig}
+    {maxWords : Nat}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel :
+      RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel
+          referenceResult)
+    (hCompileTarget :
+      compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
+          maxWords program =
+        some (range, asm, target))
+    (hInitialMemory :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchInitialMemoryEmpty
+        (canonicalEntryState initial).toMachineState)
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    StackGuardedPlannedPreallocSufficientGasConclusion cfg range program asm
+      target shared store initial referenceResult :=
+  compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
+    hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel hSourceFuelRun
+    hCompileTarget hInitialMemory hInitialPerm
+
+private theorem
+    compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_runResult_existsSourceRun_exprResultContracts_sufficientGas_no_out_of_gas_X
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    {cfg : Reference.StateRelConfig}
+    {maxWords : Nat}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts :
+      RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel
+          referenceResult)
+    (hCompileTarget :
+      compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
+          maxWords program =
+        some (range, asm, target))
+    (hInitialMemory :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchInitialMemoryEmpty
+        (canonicalEntryState initial).toMachineState)
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    StackGuardedPlannedPreallocNoOutOfGasConclusion cfg range program asm
+      target shared store initial referenceResult :=
+  compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprResultContracts_sufficientGas_no_out_of_gas_X
+    hSpec hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    hCompileTarget hInitialMemory hInitialPerm
+
+private theorem
+    compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    {cfg : Reference.StateRelConfig}
+    {maxWords : Nat}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel :
+      RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel
+          referenceResult)
+    (hCompileTarget :
+      compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
+          maxWords program =
+        some (range, asm, target))
+    (hInitialMemory :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchInitialMemoryEmpty
+        (canonicalEntryState initial).toMachineState)
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    StackGuardedPlannedPreallocNoOutOfGasConclusion cfg range program asm
+      target shared store initial referenceResult :=
+  compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
+    hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel hSourceFuelRun
+    hCompileTarget hInitialMemory hInitialPerm
+
+private theorem
+    compileStackGuardedReturnDataCopyBounds?_runResult_existsSourceRun_exprResultContracts_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -21645,9 +22162,9 @@ theorem
         RecursiveBridgeSourceRun program shared store sourceFuel
           referenceResult)
     (hCompileTarget :
-      compileStackGuardedNoReturnDataCopy? range program = some (asm, target))
+      compileStackGuardedReturnDataCopyBounds? range program = some (asm, target))
     (hBoundary :
-      StackGuardedNoReturnDataCopyFallbackScratchReady range program initial)
+      StackGuardedReturnDataCopyBoundsFallbackScratchReady range program initial)
     (hInitialPerm : initial.executionEnv.perm = true) :
     StackGuardedSufficientGasConclusion cfg range program asm target shared
       store initial referenceResult :=
@@ -21655,8 +22172,8 @@ theorem
     hSpec hExprResultContracts hInitialCodeImageRel
     hSourceFuelRun hCompileTarget hBoundary hInitialPerm
 
-theorem
-    compileStackGuardedNoReturnDataCopy?_runResult_existsSourceRun_exprResultContracts_sufficientGas_no_out_of_gas_X
+private theorem
+    compileStackGuardedReturnDataCopyBounds?_runResult_existsSourceRun_exprResultContracts_sufficientGas_no_out_of_gas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -21675,9 +22192,9 @@ theorem
         RecursiveBridgeSourceRun program shared store sourceFuel
           referenceResult)
     (hCompileTarget :
-      compileStackGuardedNoReturnDataCopy? range program = some (asm, target))
+      compileStackGuardedReturnDataCopyBounds? range program = some (asm, target))
     (hBoundary :
-      StackGuardedNoReturnDataCopyFallbackScratchReady range program initial)
+      StackGuardedReturnDataCopyBoundsFallbackScratchReady range program initial)
     (hInitialPerm : initial.executionEnv.perm = true) :
     StackGuardedNoOutOfGasConclusion cfg range program asm target shared
       store initial referenceResult :=
@@ -21685,8 +22202,8 @@ theorem
     hSpec hExprResultContracts hInitialCodeImageRel
     hSourceFuelRun hCompileTarget hBoundary hInitialPerm
 
-theorem
-    compileStackGuardedNoReturnDataCopy?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
+private theorem
+    compileStackGuardedReturnDataCopyBounds?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -21706,9 +22223,9 @@ theorem
         RecursiveBridgeSourceRun program shared store sourceFuel
           referenceResult)
     (hCompileTarget :
-      compileStackGuardedNoReturnDataCopy? range program = some (asm, target))
+      compileStackGuardedReturnDataCopyBounds? range program = some (asm, target))
     (hBoundary :
-      StackGuardedNoReturnDataCopyFallbackScratchReady range program initial)
+      StackGuardedReturnDataCopyBoundsFallbackScratchReady range program initial)
     (hInitialPerm : initial.executionEnv.perm = true) :
     StackGuardedSufficientGasConclusion cfg range program asm target shared
       store initial referenceResult :=
@@ -21716,8 +22233,8 @@ theorem
     hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel
     hSourceFuelRun hCompileTarget hBoundary hInitialPerm
 
-theorem
-    compileStackGuardedNoReturnDataCopy?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
+private theorem
+    compileStackGuardedReturnDataCopyBounds?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -21737,9 +22254,9 @@ theorem
         RecursiveBridgeSourceRun program shared store sourceFuel
           referenceResult)
     (hCompileTarget :
-      compileStackGuardedNoReturnDataCopy? range program = some (asm, target))
+      compileStackGuardedReturnDataCopyBounds? range program = some (asm, target))
     (hBoundary :
-      StackGuardedNoReturnDataCopyFallbackScratchReady range program initial)
+      StackGuardedReturnDataCopyBoundsFallbackScratchReady range program initial)
     (hInitialPerm : initial.executionEnv.perm = true) :
     StackGuardedNoOutOfGasConclusion cfg range program asm target shared
       store initial referenceResult :=
@@ -21748,7 +22265,7 @@ theorem
     hSourceFuelRun hCompileTarget hBoundary hInitialPerm
 
 theorem
-    compileStackGuardedNoReturnDataCopy?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_X
+    compileStackGuardedReturnDataCopyBounds?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -21768,20 +22285,20 @@ theorem
         RecursiveBridgeSourceRun program shared store sourceFuel
           referenceResult)
     (hCompileTarget :
-      compileStackGuardedNoReturnDataCopy? range program = some (asm, target))
+      compileStackGuardedReturnDataCopyBounds? range program = some (asm, target))
     (hBoundary :
-      StackGuardedNoReturnDataCopyFallbackScratchReady range program initial)
+      StackGuardedReturnDataCopyBoundsFallbackScratchReady range program initial)
     (hInitialPerm : initial.executionEnv.perm = true) :
     StackGuardedSufficientGasConclusion cfg range program asm target shared
       store initial referenceResult :=
-  compileStackGuardedNoReturnDataCopy?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
+  compileStackGuardedReturnDataCopyBounds?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
     hSpec
     (RecursiveBridgeExprNoOutOfFuelContracts.of_userCallResultContracts
       hExprUserCallResultContracts) hInitialCodeImageRel
     hSourceFuelRun hCompileTarget hBoundary hInitialPerm
 
 theorem
-    compileStackGuardedNoReturnDataCopy?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_no_out_of_gas_X
+    compileStackGuardedReturnDataCopyBounds?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_no_out_of_gas_X
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     {cfg : Reference.StateRelConfig}
     {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
@@ -21801,19 +22318,19 @@ theorem
         RecursiveBridgeSourceRun program shared store sourceFuel
           referenceResult)
     (hCompileTarget :
-      compileStackGuardedNoReturnDataCopy? range program = some (asm, target))
+      compileStackGuardedReturnDataCopyBounds? range program = some (asm, target))
     (hBoundary :
-      StackGuardedNoReturnDataCopyFallbackScratchReady range program initial)
+      StackGuardedReturnDataCopyBoundsFallbackScratchReady range program initial)
     (hInitialPerm : initial.executionEnv.perm = true) :
     StackGuardedNoOutOfGasConclusion cfg range program asm target shared
       store initial referenceResult :=
-  compileStackGuardedNoReturnDataCopy?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
+  compileStackGuardedReturnDataCopyBounds?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
     hSpec
     (RecursiveBridgeExprNoOutOfFuelContracts.of_userCallResultContracts
       hExprUserCallResultContracts) hInitialCodeImageRel
     hSourceFuelRun hCompileTarget hBoundary hInitialPerm
 
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -21882,7 +22399,7 @@ theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_t
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
       hCheckedCompileTarget)
 
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -21951,7 +22468,7 @@ theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_t
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
       hCheckedCompileTarget)
 
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -22017,7 +22534,7 @@ theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_t
     hExprNoSuccessfulOutOfFuel.to_resultContracts hInitialCodeImageRel
     hSourceFuelRun hCheckedCompileTarget hInitialPerm
 
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -22456,6 +22973,99 @@ private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsRe
     ⟨sourceFuel, sourceOutcome, targetFuel, targetOutcome, gasBound,
       hSourceRun, hOutcome, hWholeRel, hAccepted, hBytes, hEncoding,
       hOutOfGas, hProjection, hTrace, hGasEq, hRunsAbove⟩
+
+/--
+No-CALL sufficient-gas root that permits `RETURNDATACOPY`.
+
+The checked compiler still supplies the no-CALL/CREATE fragment boundary.  The
+extra target premise is the precise condition missing from the old no-RDC
+route: every executed `RETURNDATACOPY` in the gas-aware replay path must read
+within the current return-data buffer.
+-/
+theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_core_returnDataCopyBounds_fallthrough_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+          program =
+        some (asm, target))
+    (hTargetCoreChecks :
+      Assembly.GasAware.XStepTrace.XBlockReplayCoreNonGasReady asm target
+        (Assembly.GasAware.validJumps target))
+    (hTargetReturnDataCopyBounds :
+      Assembly.GasAware.XStepTrace.XBlockPathReturnDataCopyBoundsReady
+        asm target)
+    (hTargetFallthrough :
+      ∀ {targetFuel targetState}
+        (_hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (canonicalEntryState initial) (.running targetState)),
+        Assembly.GasAware.XStepTrace.XFallthroughStopContinuationReady
+          targetState) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            EvmYul.EVM.X evmFuel
+                                (Assembly.GasAware.validJumps target)
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) =
+                              .ok result ∧
+                            Assembly.GasAware.XResultAgrees targetOutcome
+                              result := by
+  refine
+    compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_X
+      hExprNoSuccessfulOutOfFuel hInitialCodeImageRel hSourceFuelRun
+      hCheckedCompileTarget
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_blockPathChecks_of_core_returnDataCopyBounds
+        hCheckedCompileTarget hTargetCoreChecks hTargetReturnDataCopyBounds)
+      ?_
+  intro targetFuel targetOutcome hTrace
+  cases targetOutcome with
+  | running targetState =>
+      exact
+        Assembly.GasAware.XStepTrace.XTraceDoneContinuation.running_of_fallthrough_stop
+          (hTargetFallthrough hTrace)
+  | halted halt =>
+      exact Assembly.GasAware.XStepTrace.XTraceDoneContinuation.halted
 
 /--
 No-out-of-gas projection of the preferred trace-local sufficient-gas theorem.
@@ -23447,7 +24057,7 @@ private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAll
     hCheckedCompileTarget hInitialPerm
     hActualStackHeadroom.toXTraceHeadroomFacts
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -23497,7 +24107,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
       hCheckedCompileTarget)
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -23544,7 +24154,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
     hExprNoSuccessfulOutOfFuel.to_resultContracts hInitialCodeImageRel
     hSourceFuelRun hCheckedCompileTarget hInitialPerm
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -23594,7 +24204,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
       hCheckedCompileTarget)
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -23644,7 +24254,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
     (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
       hCheckedCompileTarget)
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -23691,7 +24301,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
     hExprNoSuccessfulOutOfFuel.to_resultContracts hInitialCodeImageRel
     hSourceFuelRun hCheckedCompileTarget hInitialPerm
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}

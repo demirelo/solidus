@@ -177,8 +177,8 @@ run_summary_case \
   2 \
   blocked \
   call,delegatecall,staticcall,returndatacopy,returndatasize,gas \
-  call,delegatecall,staticcall \
-  "external call/create primitives"
+  gas \
+  "open external-boundary"
 
 run_summary_case \
   fallback_receive \
@@ -206,9 +206,9 @@ run_summary_case \
   TryCatchBox \
   4 \
   blocked \
-  call,returndatacopy,returndatasize,revert,log2 \
-  call \
-  "external call/create primitives"
+  call,returndatacopy,returndatasize,revert,log2,gas \
+  gas \
+  "open external-boundary"
 
 run_summary_case \
   error_panic \
@@ -236,9 +236,9 @@ run_summary_case \
   FactoryBox \
   4 \
   blocked \
-  create,create2 \
-  create,create2 \
-  "external call/create primitives"
+  create,create2,gas \
+  gas \
+  "open external-boundary"
 
 run_summary_case \
   storage_array \

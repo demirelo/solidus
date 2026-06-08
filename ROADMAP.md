@@ -1,5 +1,332 @@
 # Roadmap
 
+## External Boundary Refactor
+
+Last updated: 2026-06-08 05:46 PDT.
+
+Independent reassessment: the recommendation is directionally right for the
+CALL-family plus CREATE/CREATE2 suspension corridor. The CREATE/CREATE2 blocker
+is not just that `RecursiveBridgeSupport.lean` is huge; the brittle part is that
+calls and creates are still represented by proof corridors instead of one
+extension point. `EXTCODESIZE`, `EXTCODECOPY`, and `EXTCODEHASH` are also
+external-world queries, but they are intentionally out of this carrier lane and
+will be implemented more like `BALANCE`: through state/query preservation rather
+than by broadening the CALL/CREATE suspension interface. The current tree already
+has the right semantic ingredients for this slice: `OpenResult` can suspend at
+calls and creates, `OpenTrace` records both, and
+`SourceOpenTraceExternalResponsesAdmissible` packages call/create response
+admissibility. But the API still exposes separate `CallKind` / `CreateKind`,
+separate response predicates, and many negative `not_call_or_createKind` lemmas.
+That makes adding CREATE/CREATE2 to a formerly call-only proof corridor a global
+carrier change.
+
+Refactor target:
+
+- [x] Introduce a first-class external boundary classifier in
+  `OpenExternal`: one positive `BoundaryKind` with `.call` and `.create`
+  constructors, operation classifiers for Yul/EVM, and local projection lemmas
+  back to legacy `CallKind`/`CreateKind`.
+- [x] Add generic boundary response packaging in `OpenExternal`: one response
+  predicate record over call and create responses, one
+  `OpenTrace.BoundaryResponsesSatisfy`, append/split lemmas, and projection
+  lemmas to the existing call-only/create-only predicates.
+- [x] Change source-facing admissibility to prefer a single
+  `SourceOpenTraceExternalResponsesAdmissible` boundary predicate, with
+  compatibility projections for existing call-only and create-only theorem
+  corridors.
+- [x] Route target open stepping through the positive boundary classifier
+  (`BoundaryKind.ofEVMOperation?`) and keep old
+  `openStepAfterChecks_call`/`_create`/`_not_call_or_createKind` lemmas as
+  compatibility wrappers.
+- [ ] Keep the boundary classifier/response package scoped to CALL-family plus
+  `CREATE`/`CREATE2` until this corridor is complete. `RETURNDATACOPY` is
+  separate: it should be covered by return-data buffer preservation/replay after
+  call/create responses, not by issuing a new external request.
+  2026-06-07 11:56 PDT update: the no-CALL gas-aware route now has a checked
+  return-data-bounds replay corridor for `RETURNDATACOPY`:
+  `XBlockPathReturnDataCopyBoundsReady` composes with core non-gas checks and
+  no-CALL/CREATE to produce `XBlockPathChecksReady`, and
+  `compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_core_returnDataCopyBounds_fallthrough_X`
+  exposes the base source-static checked compile route without the old
+  no-`RETURNDATACOPY` gate. The remaining open work is to derive this bounds
+  replay obligation from the call/create return-data preservation trace instead
+  of requiring it as a target-side premise.
+  2026-06-07 13:05 PDT update: the CALL-family open-runtime spine now has an
+  additive RETURNDATACOPY-bounds entrance:
+  `compileCheckedCALLFamilyRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady_returnDataCopyBounds`.
+  It avoids the no-`RETURNDATACOPY` checked gate by deriving
+  `CurrentNoCallPathChecksReady` from current no-CALL residual resources plus
+  `CurrentNoCallReturnDataCopyBoundsReady`, then feeds the existing
+  CALL/CREATE gas-ready replay corridor.
+  2026-06-07 13:28 PDT update: the stack-safe CALL-family main spine now has a
+  non-no-`RETURNDATACOPY` checked compiler wrapper,
+  `compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafe?`,
+  plus trace-local, global-response, and top assumption packages for the
+  return-data-copy-bounds route. The new top package exposes
+  `openXReplayAbove` and `openXReplaySomeGas`; the remaining final-observation
+  / committed-low-gas endpoint work is no longer an RDC gate but part of the
+  active CALL/CREATE-family committed-safety helper refactor.
+  2026-06-07 13:39 PDT update: the return-data-copy-bounds route now also
+  reaches the stack/static committed-safety and contract final-observation
+  endpoints. `LayerAudit` exposes the CALL-family top interface through
+  `RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeReturnDataCopyBoundsTopAssumptions`,
+  including final-observation, at-gas, outcome-safety, and result-or-failure
+  methods; the no-RDC top pins were removed from the public audit surface.
+  2026-06-07 13:58 PDT update: the legacy CALL-family no-RDC top route is now
+  private compatibility plumbing in `OpenRuntime`, not a public caller-facing
+  interface. The preferred top route remains the explicit
+  return-data-copy-bounds package; lower no-RDC lemmas may still exist as
+  same-file proof bricks while the CALL/CREATE family is being generalized.
+  2026-06-07 14:02 PDT update: the older CALL-family no-RDC checked gates,
+  direct replay/final-observation wrappers, and trace-local/global-response
+  assumption packages in `OpenRuntime` have also been demoted to private
+  compatibility plumbing. The only CALL-family route intended for public use is
+  the explicit return-data-copy-bounds spine; the generic contract observation
+  record was hoisted to a top-level public definition because later CALL
+  endpoints use it as a neutral conclusion shape.
+  2026-06-07 20:12 PDT update: the public top package no longer exposes
+  `CurrentNoCallReturnDataCopyBoundsReady` as a raw field. It stores the
+  generated block-path certificate,
+  `XBlockPathReturnDataCopyBoundsReady`, and derives the current-block
+  certificate through
+  `currentNoCallReturnDataCopyBoundsReady_of_blockPathReturnDataCopyBounds`;
+  `LayerAudit` pins both the generator and the top-package accessor.
+  2026-06-07 20:36 PDT update: the public top package no longer stores the
+  block-path certificate either. The checked CALL-family stack-safe route now
+  carries an executable target-side RDC-bounds witness and exposes
+  `compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafe?_currentNoCallReturnDataCopyBoundsReady`;
+  the top-package accessor derives `CurrentNoCallReturnDataCopyBoundsReady`
+  from `checked`, so callers no longer provide any return-data-copy bounds
+  premise. The current generator is conservative: it discharges the current
+  no-CALL certificate from the target no-`RETURNDATACOPY` check plus the local
+  non-CALL emitted-instruction lemma.
+  2026-06-08 05:25 PDT update: the public audit surface no longer exports the
+  raw canonical-entry top package. `LayerAudit` exposes direct checked
+  imported-Yul CALL/CREATE entry wrappers whose visible premises are the source
+  run, initial code-image relation, checked compiler equality, source trace
+  acceptance, shared-response external-world readiness, and fuel/gas bounds;
+  the old top package is constructed internally.
+  2026-06-08 05:46 PDT update: the checked CALL/CREATE public conclusion
+  aliases are direct equality/result-or-failure formulas over the canonical
+  entry state. The support smoke now pins direct single-result user calls in
+  declaration, assignment, nested expression, user-call argument, and
+  control-condition positions, plus CALL/CALLCODE/DELEGATECALL/STATICCALL,
+  CREATE/CREATE2, BALANCE/EXT* expression or statement lowering, and the
+  object-builtin frontend path that resolves object/data pseudo-builtins before
+  core Yul lowering.
+  2026-06-07 14:16 PDT update: there is no external-compatibility reason to
+  keep a public no-RDC CALL route. The older ordinary-CALL stack/spill
+  no-RDC corridor in `OpenRuntime` has been demoted to private proof plumbing
+  too. The remaining public no-RDC names in this area are pre-existing no-CALL
+  stack-guard audit pins, not the intended CALL/CREATE public interface; the
+  CALL/CREATE-facing route remains the explicit return-data-copy-bounds spine.
+  2026-06-07 14:21 PDT update: the stale no-CALL no-RDC wrappers that lived in
+  `OpenRuntime` are private now, and `LayerAudit` no longer exposes no-RDC
+  aliases for the imported-Yul open-runtime regression block. Textual no-RDC
+  references still exist in no-CALL stack-guard proofs and `StackGuardAudit`;
+  those are lower-route compatibility/prospecting artifacts, not the public
+  CALL/CREATE spine.
+  2026-06-07 14:41 PDT update: no-RDC is not being preserved for external
+  compatibility. The assembly layer now proves that no-RDC plus no-CALL/CREATE
+  replay implies `XBlockPathReturnDataCopyBoundsReady`, and the lower no-CALL
+  checked/spill wrappers expose RDC-bounds facts through that bridge. The
+  corresponding audit pins now point at return-data-copy-bounds facts; several
+  local no-RDC target/replay lemmas in `NoCallRuntime` were made private.
+  2026-06-07 14:47 PDT update: the shorter stack-guarded no-CALL compiler
+  surface now has `compileStackGuardedReturnDataCopyBounds?` and
+  `compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?` public spellings,
+  with matching sufficient-gas/no-out-of-gas and RDC-bounds wrappers. The
+  remaining exported planned-prealloc no-RDC names are retained only as
+  cross-module private `OpenRuntime` fallback plumbing until that fallback can
+  be renamed without disrupting the active CALL/CREATE-family branch.
+  2026-06-07 14:55 PDT update: the `OpenRuntime` private planned-prealloc
+  fallback now calls `compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?`
+  directly. The old `compileStackGuardedNoReturnDataCopyPlannedPrealloc?`
+  route and its planned-prealloc no-RDC lemmas are private inside
+  `NoCallRuntime`; no-RDC remains only as an internal proof witness used to
+  derive the public RDC-bounds facts for old no-CALL paths.
+  2026-06-07 15:00 PDT update: the public stack-guard audit examples now use
+  `compileStackGuardedReturnDataCopyBounds?` and the bundled
+  `StackGuardedReturnDataCopyBoundsFallbackScratchReady` premise instead of
+  the old adaptive no-RDC compiler route. The old
+  `compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?` and
+  `compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?`
+  routes are private `NoCallRuntime` proof plumbing.
+  2026-06-07 15:08 PDT update: the conservative stack-safe no-RDC chooser and
+  the raw non-planned adaptive/conservative source-owned no-RDC spill compiler
+  blocks are private `NoCallRuntime` proof plumbing now, and their
+  `StackGuardAudit` pins were removed. Cross-module greps for those old helper
+  names are clean. Remaining textual no-RDC names are either legacy exact /
+  live-layout no-CALL stack-resource audit surfaces or the lower planned-prealloc
+  route still consumed by the active `OpenRuntime` fallback; they are not the
+  public CALL/CREATE spine, which remains the explicit RDC-bounds package.
+  2026-06-07 15:16 PDT update: the remaining `LayerAudit` no-RDC stack-resource
+  and whole-program tripwire examples were removed. `StackGuardAudit`,
+  `LayerAudit`, and the CALL-family proof artifacts no longer expose
+  `NoReturnDataCopy` pins; the visible audit surface is the RDC-bounds route.
+  Foundational no-RDC predicates still exist in `Assembly.GasAware`, and a few
+  old no-CALL checked-compile records remain in `NoCallRuntime` as compatibility
+  scaffolding while the CALL/CREATE branch lands.
+  2026-06-07 15:23 PDT update: most of that remaining `NoCallRuntime`
+  scaffolding is private now too: 202 stale public no-RDC declarations were
+  demoted. The only public no-RDC names left in `NoCallRuntime` are the 15
+  cross-module hooks still imported by private `OpenRuntime` no-CALL fallback
+  code. Eliminating those requires moving or rewriting that fallback proof, so
+  it should wait until the active CALL/CREATE branch is stable.
+  2026-06-07 15:31 PDT update: the planned-prealloc no-CALL fallback's
+  empty-open-replay helper now derives
+  `CurrentNoCallReturnDataCopyBoundsReady` from
+  `compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_blockPathReturnDataCopyBounds`
+  and passes RDC-bounds evidence through the open replay spine instead of
+  constructing `XBlockReplayNoReturnDataCopy` locally. The live-layout
+  convenience theorem and the live branch's block-replay no-RDC helper are
+  private/audit-unpinned now. The remaining public no-RDC declarations in
+  `NoCallRuntime` are down to 14 older branch/compile facts still consumed by
+  private `OpenRuntime` compatibility code; the public audit/proof-artifact
+  surface remains the explicit RDC-bounds route.
+  2026-06-07 15:35 PDT update: six live-branch convenience facts
+  (`compileLive`, assembly compile, target no-RDC, jumpdest, decode safety, and
+  no-CALL/CREATE) are private now. `OpenRuntime` derives those facts directly
+  from the already-unpacked source-static/bytecode compiler result, so the
+  remaining public no-RDC declarations in `NoCallRuntime` are down to 8. Those
+  remaining names are the actual live/adaptive branch compiler gates and branch
+  fact providers still mentioned by private `OpenRuntime` compatibility code;
+  the next cleanup should introduce neutral RDC-bounds branch facts before
+  demoting them.
+  2026-06-07 15:51 PDT update: the neutral RDC-bounds branch facts are now the
+  `OpenRuntime` interface, and the stale lower-case no-RDC public wrappers have
+  been removed from the audit surface too. Case-insensitive public declaration
+  greps for `NoCallRuntime`, `OpenRuntime`, `LayerAudit`, and `StackGuardAudit`
+  are clean for `noReturnDataCopy` / `NoReturnDataCopy`; old no-RDC theorem
+  names in `NoCallRuntime` are private proof bricks only. `LayerAudit`,
+  `StackGuardAudit`, and the CALL-family proof artifacts grep clean for textual
+  no-RDC names. The remaining blocker is still the active CALL/CREATE-family
+  `RecursiveBridgeSupport` refactor, which stops before the RDC modules build.
+  2026-06-07 15:57 PDT update: the broader public-helper scan is clean outside
+  foundational assembly predicates too. The old `OpenGasAware`
+  `CurrentNoCallPathChecksReady`/residual no-RDC helper theorems are private,
+  `OpenRuntime` derives private compatibility path checks through
+  `CurrentNoCallReturnDataCopyBoundsReady`, and the `LayerAudit` aliases to
+  no-RDC-premise response/residual helpers were removed. Public/audit-facing
+  routes now expose path checks or return-data-copy-bounds readiness, not
+  no-RDC premises.
+  2026-06-07 16:03 PDT update: the isolated private no-RDC CALL-family top
+  assumptions package was deleted entirely; the public/audit spine remains
+  `RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeReturnDataCopyBoundsTopAssumptions`.
+  Case-sensitive and lower-case public no-RDC declaration scans for
+  `NoCallRuntime`, `OpenRuntime`, `OpenGasAware`, `LayerAudit`, and
+  `StackGuardAudit` are clean, and `LayerAudit`/`StackGuardAudit`/CALL-family
+  proof artifacts grep clean for textual no-RDC names. The remaining private
+  no-RDC trace/global packages are compatibility scaffolding for older private
+  helper chains and should wait until the active CALL/CREATE branch is stable
+  before further deletion. The current `OpenRuntime` build still stops first in
+  `RecursiveBridgeSupport` on the CREATE-aware recursive bridge, before reaching
+  RDC code.
+  2026-06-07 16:09 PDT update: the stale private no-RDC cleanup reached a
+  fixed point by reference count: 23 unreferenced private `OpenRuntime`
+  no-RDC helper wrappers were deleted, including old ordinary-CALL replay
+  adapters and unused CALL-family final-observation/external-world endpoints.
+  The remaining private no-RDC declarations in `OpenRuntime` all have live
+  internal references, mostly the compatibility compiler gates, path-check
+  derivation bricks, trace-local/global assumption packages, and private
+  planned-prealloc fallback chain. Public and audit-facing surfaces remain
+  RDC-bounds based.
+  2026-06-07 16:14 PDT update: the stale CALL-family no-RDC island is gone:
+  deleted the ordinary-CALL no-RDC trace-local assumption package, the
+  CALL-family no-RDC trace-local/global-response assumption packages, and the
+  now-isolated CALL-family no-RDC checked compiler gate plus helper lemmas.
+  `OpenRuntime` no longer has the CALL-family no-RDC assumptions or compiler
+  route; remaining no-RDC names there are ordinary-CALL planned-prealloc
+  compatibility and the private no-RDC-to-RDC path-check bridge.
+  2026-06-07 16:21 PDT update: deleted the dead private
+  `compileCheckedCALLRegularOpenStackSafeOrNoCallSpillPlannedPrealloc?`
+  chooser and its only helper. The live planned-prealloc route is the broader
+  call-aware/no-CALL fallback chooser; the removed chooser was an older
+  exact-CALL-or-no-CALL compatibility path and had no references outside its
+  own definition. Public/audit no-RDC scans remain clean. The remaining
+  ordinary-CALL no-RDC names are still live private compatibility scaffolding
+  until an ordinary-CALL RDC-bounds checker or checked CALL-to-CALL-family gate
+  lift replaces that branch safely.
+  2026-06-07 16:29 PDT update: ordinary CALL now has that neutral checked
+  stack-safe entrance:
+  `compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafe?`,
+  plus public replay and committed-safety wrappers with explicit
+  `CurrentNoCallReturnDataCopyBoundsReady` premises. The interrupted
+  `OpenRuntime` stack/static path-check refactor was repaired so the shared
+  helper takes neutral current no-CALL path-check evidence; legacy no-RDC
+  adapters derive that evidence privately. The remaining ordinary-CALL no-RDC
+  route is the private planned-prealloc compatibility chooser, whose deletion
+  should wait for the active CALL/CREATE-family `RecursiveBridgeSupport`
+  branch because `OpenRuntime` still cannot be body-checked past that import.
+  2026-06-07 16:34 PDT update: the unreferenced private CALL-family
+  stack/static replay helper
+  `compileCheckedCALLFamilyRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasStackStaticReady`
+  was deleted. Its committed-safety sibling already consumes neutral
+  `CurrentNoCallPathChecksOfResidualReady` evidence and remains the live route
+  under the public return-data-copy-bounds spine.
+  2026-06-07 16:47 PDT update: the private ordinary-CALL planned-prealloc true
+  branch now routes through the public ordinary-CALL RDC-bounds theorem by
+  bridging the older conservative checker into
+  `compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafe?`.
+  The old ordinary-CALL no-RDC replay endpoints and their dead path-check /
+  stack-bound convenience helpers were deleted, and the remaining true-branch
+  wrappers were renamed to `...returnDataCopyBounds`.
+  2026-06-07 16:59 PDT update: the planned-prealloc selector true branch now
+  uses the exact RDC-aware ordinary-CALL checker directly. The old conservative
+  no-RDC exact checker is derived only for the false/fallback proof split, and
+  the selector-level trace-local, branch-sensitive, liveness, and contract
+  final-observation wrappers all carry the conditional
+  `CurrentNoCallReturnDataCopyBoundsReady` premise for `branch = true`. The
+  remaining blocker is validation past the active `RecursiveBridgeSupport`
+  CALL/CREATE-family branch, which still stops before `OpenRuntime` can be
+  body-checked.
+- [x] Add the first loop-carrier bridge bricks:
+  `SourceExprRawPreludeOpenPathSoundWhenWithCreate.ok_singleton_source_state`
+  and
+  `runLoopSource_resolves_inv_evalValues_singleton_ok_source_of_cond_open_withCreate`.
+  These let loop condition splitting use the single external-response package
+  and project the stronger `OpenResultPathRelWithCreate` only where a
+  source-only fact is needed.
+- [x] Add CREATE-aware generated-`for` lowering/list plumbing for ordinary
+  and typed-continuation sequence heads. The new builders consume
+  `SourceOpenLoopHeadPathSoundWhenAtExactHiddenCtxWithCreate` directly instead
+  of proving the old call-only loop head and wrapping it afterward.
+- [x] Lift the loop condition-stopped / condition-zero proof bricks to
+  `WithCreate`: raw loop-head and direct-continuation path constructors,
+  condition-stopped/zero semantic branch wrappers, and direct/statement
+  condition splitters now consume the unified external-response package and
+  produce `OpenResultPathRelWithCreate`.
+- [x] Add the `WithCreate` lowering-frontier carrier layer for the CALL-family
+  proof: generic family frontiers for ordinary sequences, typed continuations,
+  and generated loop continuations, CALL-family aliases, recursive
+  `of_frontiers_le` packagers, and low-fuel/fuel-offset generated-loop
+  adapters. Focused `RecursiveBridgeSupport` checking confirms these new
+  carrier bricks elaborate.
+- [ ] Finish lifting the productive direct generated-loop branch to
+  `WithCreate`. Statement-head nonzero body/post splitters and loop callbacks
+  are already CREATE-aware, but the direct `runLoopSource`/`runForLoop`
+  continuation stack is still call-only. The first focused error is the
+  CALL-family generated-loop continuation where expression recursion returns
+  `SourceExprRawPreludeOpenPathSoundWhenWithCreate` but
+  `sourceRunLoopContinuationPathSound_generated_condition_body_post_of_checked_facts_callFamilySafe`
+  still consumes `SourceExprRawPreludeOpenPathSoundWhen`. The next proof step is
+  the direct nonzero body/post splitter family with
+  `OpenResultPathRelWithCreate`.
+- [ ] Retarget the remaining CALL-family structural dispatchers and recursive
+  user-call helper layers to the `WithCreate` callback family. The productive
+  direct generated-loop branch must be green first; after that, the remaining
+  focused errors are stale structural/public consumers still expecting the
+  plain checked sequence/typed-continuation carrier.
+- [ ] After the structural dispatchers are lifted, resume CREATE/CREATE2 proof
+  work by making the public CALL-family route use the single call/create
+  external-response admissibility package rather than adding more ad hoc
+  call/create premise pairs. Do not add `EXTCODE*` here; that family belongs to
+  the BALANCE-style state/query preservation track.
+- [ ] Longer-term split modules only after the abstraction is live:
+  `OpenExternal` into core/events/path, then statement/loop/public slices of
+  recursive bridge support. File splitting without the boundary abstraction is
+  not expected to make future opcode families cheap.
+
 ## Yul Object / Deployment Code-Image Interface
 
 2026-06-06 12:59 CEST: the object runtime now has suffix-aware public wrappers.
@@ -17,9 +344,54 @@ relations, but the default object path now has canonical wrappers using
 the checked `canonicalTerminalRel_H_return` projection, so the default object
 route is not vacuous with respect to terminal `H_return`.
 
+## CREATE/CREATE2 Pause Checkpoint
+
+Last updated: 2026-06-07 22:55 PDT.
+
+CREATE/CREATE2 are now in the public CALL-family/open-boundary corridor. The
+source/open vocabulary and path relations include `CreateRequest`,
+`CreateResponse`, CREATE/CREATE2 sites, source suspension, and the unified
+boundary response package. The CALL-family safety/coverage route admits `CALL`,
+`CALLCODE`, `DELEGATECALL`, `STATICCALL`, `CREATE`, and `CREATE2`. External
+account-code queries (`EXTCODESIZE`, `EXTCODECOPY`, `EXTCODEHASH`) are not
+boundary events; they are covered through the external code-image/state-query
+relation, like `BALANCE`.
+
+Current focused check:
+`lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean`.
+
+Current frontier:
+
+- [x] Add CREATE/CREATE2 open-world source vocabulary and response relation.
+- [x] Extend low-level open-result/path relation to carry create responses.
+- [x] Stop treating CREATE/CREATE2 as rejected CALL-family primitives in the
+  feature-coverage route.
+- [ ] Finish threading the `WithCreate` carrier through the recursive
+  CALL-family statement dispatchers.
+- [ ] Add/adapt the generated loop-head/loop-continuation helpers so loop
+  conditions, bodies, post blocks, and recursive loop continuations consume
+  the unified external-response package and produce `OpenResultPathRelWithCreate`.
+- [ ] Keep the older exact-CALL dispatcher corridor plain, or restore it to
+  plain where accidental `WithCreate` retargeting landed; only the CALL-family
+  corridor should require the create-admissibility premise.
+- [ ] Re-run the focused recursive bridge check, then rebuild the public
+  `OpenRuntime`/`LayerAudit` spine before committing.
+
+Current focused blocker: the productive generated-loop `WithCreate` frontier now
+exists, but the late canonical CALL-family frontier/public wrapper is still an
+older call-only surface. In
+`EvmCompiler/Yul/RecursiveBridgeSupport.lean`, the canonical sequence/kont
+frontier package reconstructs a generated-loop recursive callback from
+`callOpenLoopContinuationPathCallFamilyLoweringFrontiersUpToWithCreate...`,
+while its enclosing structural wrapper still expects the plain
+`CALLOpenLoopContinuationPathCallFamilyRecursiveAt`/plain checked sequence
+carrier. The next proof step is to retarget the canonical CALL-family frontier
+and dispatcher-body wrappers to the `WithCreate`/unified external-response route,
+not to broaden this lane to `EXTCODE*`.
+
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-06 15:50 CEST.
+Last updated: 2026-06-08 05:36 PDT.
 
 ### Current Assessment
 
@@ -27,16 +399,34 @@ This is the authoritative current CALL status. Older detailed chronology is
 kept below for theorem-history context; where wording below sounds broader or
 staler, this section wins.
 
-2026-06-06 14:59 CEST addendum: added a stronger public CALL-family top package
-`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTopAssumptions`.
-It packages the exact final checked compiler result together with the source
-run, initial code-image relation, and target runtime, derives the older
-canonical CALL-family top assumptions from checked compilation, and exposes
-named final-observation / at-gas / outcome-safety / result-or-failure
-conclusion wrappers over the external-world carrier.
-`LayerAudit` pins this stronger top package and wrappers, so the preferred
-audit surface no longer asks callers to traffic in route-local replay/layout
-proof artifacts.
+2026-06-08 05:36 PDT addendum: the checked CALL/CREATE conclusion aliases in
+`LayerAudit` are now direct final-observation / at-gas / outcome-safety /
+result-or-failure formulas over the canonical entry state. They no longer expand
+to the raw canonical-entry top-assumption package; only the proof bodies call the
+internal `OpenRuntime` route. The Solidity bridge summary also classifies
+`BALANCE` with the ready account state/query surface alongside the `EXT*`
+account-code queries.
+
+2026-06-08 05:25 PDT addendum: the public CALL/CREATE audit surface is now the
+direct checked imported-Yul entrypoint. It takes the source run, initial
+code-image relation, checked compiler equality, source trace acceptance,
+shared-response external-world readiness, and fuel/gas bounds as visible
+premises. The RDC-capable canonical-entry top package is still used internally
+to reach the final-observation / at-gas / outcome-safety /
+result-or-failure endpoints, but external callers no longer traffic in the raw
+top package, route-local replay/layout proof artifacts, or the legacy no-RDC
+CALL-family top route.
+
+2026-06-07 13:58 PDT addendum: the legacy no-RDC CALL-family top route has
+also been demoted inside `OpenRuntime`; it is private proof plumbing now. There
+is no intended public no-RDC CALL-family top interface for external callers.
+
+2026-06-07 14:02 PDT addendum: the lower CALL-family no-RDC checked gates,
+route wrappers, and trace-local/global-response packages are private too. This
+leaves the RDC-bounds top package as the caller-facing CALL-family spine while
+retaining old no-RDC facts only as same-file compatibility bricks. The generic
+contract final-observation record is no longer publicly aliased through the
+no-RDC package.
 
 2026-06-06 15:22 CEST addendum: tightened the audit surface around that top
 package. `LayerAudit` no longer advertises the lower unbundled
@@ -48,9 +438,69 @@ adequacy condition for selected internal user-call body clocks,
 `SourceOpenDispatcherTraceAccepted` selects a finite source-open trace whose
 responses preserve the shared-state relation, `initial.executionEnv.perm = true`
 is the canonical entry/static-mode permission condition, and
-`OpenXCallFamilyExternalWorldReadyFor` is the open-world
-response-gas/result-tracking contract. None is a route-local replay, layout,
-certificate, or compiler-generated table.
+`OpenXBoundaryFamilySharedResponseExternalWorldReadyFor` is the open-world
+boundary contract: response-gas admissibility plus committed shared-response
+safety for CALL/CREATE sites. Strict low-gas boundary result tracking is
+derived internally from that shared-response package. None is a route-local
+replay, layout, certificate, or compiler-generated table.
+
+2026-06-07 21:29 PDT addendum: the CREATE/CREATE2 live corridor now uses the
+same boundary-family external-world theorem spine as CALL. The public
+RDC-capable top wrappers take
+`OpenXBoundaryFamilySharedResponseExternalWorldReadyFor`, not the broader
+strict boundary package, and convert it internally through committed response
+safety. This leaves CREATE/CREATE2 effects abstract in exactly the intended
+open-world sense: source and target issue the same boundary request and preserve
+all shared committed-safe responses, while concrete account creation,
+address-collision, nonce, initcode execution, and code-installation adequacy
+remain a later real-chain refinement theorem.
+
+2026-06-07 21:36 PDT addendum: the public top replay helpers
+`openXReplayAbove` and `openXReplaySomeGas` have also moved off the CALL-only
+response-gas trace carrier. They now consume
+`OpenXBoundaryFamilyResponseGasTraceAdmissibleReadyFor`, matching the
+CALL/CREATE boundary replay theorem used by the final safety wrappers.
+
+2026-06-07 21:39 PDT addendum: the obsolete RDC trace-local/global-response
+CALL-only assumption packages are now private same-file proof plumbing in
+`OpenRuntime`. The import-visible top replay and final safety route is the
+RDC-capable top-assumption package with boundary response-gas and shared
+committed-response readiness.
+
+2026-06-07 21:41 PDT addendum: `OpenXCallFamilyExternalWorldReadyFor` itself
+has also been demoted from the import-visible audit surface. The completion
+artifact now pins only the boundary/shared-response external-world carriers and
+the RDC-capable top replay/final-safety wrappers.
+
+2026-06-07 22:04 PDT addendum: the broader boundary strict/external-world
+compatibility package is now internal too. `LayerAudit` and the proof artifacts
+pin `OpenXBoundaryFamilySharedResponseExternalWorldReadyFor` plus its direct
+response-gas/gas-budget projections; strict low-gas result tracking is derived
+inside `OpenRuntime` from committed shared-response safety.
+
+2026-06-07 22:30 PDT addendum: the public CALL/CREATE top package no longer
+carries `CurrentNoCallInstrCoreResidualResources` or an explicit
+`CurrentNoCallReturnDataCopyBoundsReady` field. The return-data-copy bounds are
+generated from the checked compiler result, residual path checks are derived
+internally, and the public replay/final wrappers now take the source-side
+writable-entry fact `shared.executionEnv.perm = true`; `OpenRuntime` proves the
+target form `initial.executionEnv.perm = true` from the initial shared-state
+relation.
+
+2026-06-07 22:38 PDT addendum: the private RDC CALL-family trace/global
+assumption packages now follow the same source-writable boundary, deriving the
+target writable-entry fact locally instead of carrying it as package state.
+After rebuilding `OpenRuntime` and `LayerAudit`, the audit aliases and proof
+artifact checks print the public/source-side permission premise.
+
+2026-06-07 22:52 PDT addendum: the checked CALL/CREATE replay surface now has a
+canonical-entry runtime wrapper. `OpenRuntime` proves that an initial
+code-image relation transports to `canonicalEntryState initial`, and that
+`Assembly.RuntimeAssumptions asm target (canonicalEntryState initial)` builds
+the bundled `RecursiveBridgeTargetRuntime` for that canonical state. The new
+wrapper therefore removes the caller-facing PC/empty-stack proof burden for the
+canonical-entry theorem shape while keeping the remaining runtime policy
+assumptions explicit.
 
 ### Stale-Path Cleanup Inventory
 
@@ -69,11 +519,11 @@ are still proof plumbing for the public top wrappers.
   them as private proof plumbing so the public namespace presents the compact
   top-assumption API instead of two parallel endpoint families.
 - [x] Historically contingent old gas-route naming:
-  renamed the live API to say what it proves rather than what failed route it
-  replaced: the `OpenRuntime` carrier/namespace is now
-  `OpenXCallFamilyExternalWorldReadyFor`, with matching `LayerAudit`
-  abbreviations, renamed gas audit artifacts, and private compiled endpoint
-  suffixes using `sourceBridgeExternalWorldReady`.
+  the formerly live CALL-only carrier
+  `OpenXCallFamilyExternalWorldReadyFor` has been superseded by boundary
+  response-gas/shared-response readiness. The CALL-only carrier and its
+  eliminators are now private same-file compatibility plumbing in
+  `OpenRuntime`, and `LayerAudit`/proof artifacts no longer pin them.
   Keep old wording only in historical log entries that describe earlier route
   changes.
 - [x] Remaining global-response-gas replay alias:
@@ -106,6 +556,42 @@ are still proof plumbing for the public top wrappers.
   theorem families in `OpenRuntime` are adapters beneath the external-world
   endpoint. They are no longer pinned in `LayerAudit`; keep them internal
   because the top external-world wrappers still depend on this adapter chain.
+
+  2026-06-07 21:48 PDT addendum: the lower replay/committed-safe adapter chain
+  has been internalized further. The old CALL-only gas/strict/global-response
+  replay adapters and the lower boundary-strict adapter are now private; the
+  import-visible lower replay bridge kept for the proof artifact is the
+  boundary response-gas `openXReplayAbove` theorem used by the top package.
+
+  2026-06-07 21:50 PDT addendum: the isolated non-trace
+  `OpenXCallFamilyReturnedGasBudgetReadyFor` and
+  `OpenXCallFamilyGasBudgetReadyFor` carriers and their constructors are also
+  private same-file plumbing. The current public route uses the trace/boundary
+  response-gas carriers instead.
+
+  2026-06-07 21:56 PDT addendum: the old response-strict low-gas frontier
+  block is now private too, including its namespace helper lemmas and the
+  same-file committed-safety bridge. `LayerAudit` and the proof artifacts expose
+  no `OpenXCommittedSafeBelow...Response`,
+  `OpenXTraceObservationOrFailureBelowOfResponse...`, or
+  `OpenXAllOutcomeTracesSafely...Response` names; the visible route remains the
+  boundary response-gas/shared-response package.
+
+  2026-06-07 22:02 PDT addendum: the older CALL-only gas-budget and
+  response-tracking carrier route is also private now. This includes
+  `OpenXCallFamilyResponseGas...`, `OpenXCallFamilyGasBudget...`,
+  `OpenXCallFamily...Response...TraceReadyFor`, and the old
+  `OpenXCurrentRunningInstrGasBudget...` no-call-or-CALL helpers plus their
+  stack/static gas-budget wrappers. `LayerAudit` no longer advertises those
+  CALL-only gas-budget aliases; it keeps the boundary-family gas-budget and
+  boundary-or-no-call helpers that the current external-world artifact uses.
+
+  2026-06-07 22:04 PDT addendum: the broad
+  `OpenXBoundaryFamilyExternalWorldReadyFor` package, its strict
+  `OpenXBoundaryFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor`
+  input package, and the shared-response-to-broad conversion are now private
+  same-file proof plumbing. The public replacement is the shared-response
+  external-world carrier with direct response-gas and gas-budget projections.
 - [x] Raw generated-evidence terminal-prelude aliases:
   the terminal path already quarantines older helpers under explicit
   `RawGeneratedEvidence` names. Current search finds no live `LayerAudit` or
@@ -128,9 +614,15 @@ Last audited: 2026-06-06 15:50 CEST.
   mentions; the external-world carrier constructors now cover those weaker
   premise variants before entering the top-assumption wrappers. Trim these
   theorem blocks rather than keeping a parallel public endpoint family.
+
+  2026-06-07 21:46 PDT addendum: the remaining lower final-observation
+  wrappers that took CALL-only response-gas/global-response readiness are now
+  private same-file proof plumbing. The import-visible final safety surface is
+  the RDC-capable top-assumption wrapper over boundary/shared-response
+  readiness.
 - [x] Lower response/result-tracking pins in `LayerAudit`:
-  the current audit artifacts only need `OpenXCallFamilyExternalWorldReadyFor`,
-  two carrier projection facts, and the top-assumption wrappers. The many
+  the current audit artifacts only need the boundary shared-response carrier,
+  its conversion/projection facts, and the top-assumption wrappers. The many
   `openXCurrentRunningInstrCallResponse...`,
   `openXCallFamilyResponse...`, `openXAllOutcomeTraces...`, and
   response-specialized `openXCommittedSafeBelow...` aliases are unreferenced
@@ -841,6 +1333,13 @@ shape. The near-term goal is request/response preservation for `CREATE` and
 `CREATE2` in the same open-world sense as CALL-family preservation; concrete
 chain creation semantics stay outside the compiler proof until a later
 adequacy theorem.
+
+2026-06-07 21:29 PDT update: the separate open-creation corridor is now part of
+the boundary-family proof spine rather than a future design sketch. The live
+public theorem surface is generalized over CALL/CREATE boundary instructions
+and exposes shared committed-response safety as the endpoint-facing
+external-world premise; concrete-world creation adequacy is still intentionally
+out of scope for this compiler theorem.
 
 Yul object/dialect builtin checkpoint: `EvmCompiler.Yul.ObjectModel` gives the
 checked top-layer object adapter for `datasize`, `dataoffset`, `datacopy`,
@@ -3329,12 +3828,10 @@ Immediate proof tasks:
 8. [x] Extend/audit the same abstract-response architecture across the CALL
    family for the current ordinary-CALL route. The low-level open-call
    representation already has `CALLCODE`, `DELEGATECALL`, and `STATICCALL`
-   kinds; the current imported-Yul `CallSafe` accepted-fragment gate admits
-   ordinary `CALL` and explicitly rejects `CALLCODE`, `DELEGATECALL`,
-   `STATICCALL`, `CREATE`, and `CREATE2`. These checked rejections are temporary
-   boundary facts for the ordinary-CALL theorem and should be removed when the
-   source bridge widens to the rest of the CALL family; `CREATE`/`CREATE2`
-   remain separate creation-semantics work.
+   kinds. The older ordinary-CALL-only `CallSafe` checkpoint has been superseded
+   by the public open-boundary route: `CALL`, `CALLCODE`, `DELEGATECALL`,
+   `STATICCALL`, `CREATE`, and `CREATE2` are admitted as abstract
+   request/response boundary operations rather than concrete-world semantics.
    - [ ] CALL-family widening plan:
      - [ ] Replace the imported-Yul `CallSafe` ordinary-CALL-only classifier
        with a `CallFamilySafe`/kind-parametric classifier that accepts
@@ -3399,9 +3896,9 @@ Immediate proof tasks:
        `DELEGATECALL`, and `STATICCALL` from the public accepted-fragment audit
        once the widened source bridge is checked. The old `CallSafe` rejection
        pins are no longer exported from `LayerAudit`; the live
-       `CallFamilySafe` audit accepts `CALL`, `CALLCODE`, `DELEGATECALL`, and
-       `STATICCALL`, and still rejects `CREATE`/`CREATE2` pending the separate
-       creation corridor.
+       `CallFamilySafe` audit accepts `CALL`, `CALLCODE`, `DELEGATECALL`,
+       `STATICCALL`, `CREATE`, and `CREATE2` through the open-boundary
+       request/response corridor.
 9. [ ] Run the final assumption audit: public theorem grep for replay/call
    callbacks, compiler artifacts, generated layout/evidence inputs, stale
    direct let/assign CALL scaffolding, and proof holes/axioms.
@@ -4049,19 +4546,16 @@ no-CALL path-check field has now been reduced as well: `Yul.OpenGasAware` proves
 `CurrentNoCallPathChecksReady.of_core_noReturnDataCopy_current_no_call`, deriving
 path checks for ordinary emitted blocks from core non-gas replay checks,
 target no-`RETURNDATACOPY`, and the current instruction's local no-CALL fact.
-`Yul.OpenRuntime` adds the explicit
-`compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?`
-gate and the no-RDC OpenX wrapper
-`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_codeImage_noReturnDataCopy`,
-which now also consumes only the actual-trace readiness bundle and no longer
-asks for global `XBlockReplayCoreNonGasReady`. The remaining CALL work is
-lifting this checked imported-Yul open bridge to the final public open/gas-aware
-target theorem, deriving exact running-block replay/code preservation plus final
+`Yul.OpenRuntime` no longer routes the checked regular-open CALL spine through
+the old no-`RETURNDATACOPY` compiler gate.  The planned-prealloc selector now
+uses the RDC-aware ordinary-CALL stack-safe checker on its true branch and the
+stack-guarded no-CALL RDC-bounds fallback on its false branch; remaining
+no-RDC mentions in this file are private adapters for older trace-readiness
+proofs, not public compiler gates. The remaining CALL work is lifting this
+checked imported-Yul open bridge to the final public open/gas-aware target
+theorem, deriving exact running-block replay/code preservation plus final
 fallthrough facts from checked compiler facts and the selected source trace
-contract, and
-extending/generalizing it to the CALL family. `RETURNDATACOPY` remains an
-explicit gas-aware boundary on this route, matching the existing no-CALL EVM
-root, not a completed CALL-family feature.
+contract, and extending/generalizing it to the CALL/CREATE family.
 
 Current closeout status:
 
@@ -6605,9 +7099,10 @@ Remaining work:
      external-world premise.
    - [ ] Preserve the Solidity frontend path and planned Yul-object path while
      deleting only stale proof internals.
-   - [ ] Keep `CALLCODE`, `DELEGATECALL`, `STATICCALL`, `CREATE`, `CREATE2`,
-     and external account-code inspection rejected by explicit checked feature
-     coverage until each has its own open-boundary semantics and proof.
+   - [x] Keep the legacy exact-CALL corridor quarantined while the public
+     CALL-family corridor admits `CALLCODE`, `DELEGATECALL`, `STATICCALL`,
+     `CREATE`, and `CREATE2`; external account-code inspection is handled by
+     state/query and code-image preservation rather than by a new boundary event.
 
 5. [ ] Connect the open CALL boundary to the EVM target.
    - [x] Name the actual-prestate external-response admissibility relation and
@@ -6631,23 +7126,30 @@ Remaining work:
      revert observations consistently across imported Yul, source,
      compiler-open, and EVM layers.
 
-6. [ ] Add ordinary CALL to the public compiler spine.
-   - [ ] Update checked feature coverage so ordinary `CALL` is admitted by the
-     preferred public theorem while unproved external families remain rejected.
-   - [ ] Add the CALL-capable public theorem over finite open CALL interaction
-     traces, universally quantified over arbitrary related black-box responses
-     on each concrete trace.
-   - [ ] Keep the existing no-CALL theorem only as a proved fragment until the
-     CALL theorem has passed the same audit gates.
-   - [ ] Rename public no-CALL runtime/spine names where they become
-     misleading once CALL is admitted; remove old compatibility aliases.
+6. [ ] Finish cleanup after the CALL/CREATE-family public compiler spine.
+   - [x] Checked feature coverage now admits `CALL`, `CALLCODE`,
+     `DELEGATECALL`, `STATICCALL`, `CREATE`, and `CREATE2` on the preferred
+     public open-boundary route. `BALANCE` and `EXTCODESIZE`/`EXTCODECOPY`/
+     `EXTCODEHASH` are admitted through the state/query plus external code-image
+     preservation route, not as suspending boundary events.
+   - [x] The public CALL-family theorem is finite-trace/open-boundary shaped:
+     the source and compiled executions expose the same external request sites
+     and resume under matching abstract responses on the selected concrete
+     trace.
+   - [x] The old no-CALL theorem is now a compatibility fragment, not the
+     preferred public Solidity/Yul object-image route.
+   - [ ] Rename remaining compatibility no-CALL runtime/spine names where they
+     are misleading; remove old compatibility aliases once no downstream audit
+     pins still need them.
    - [x] Route `LayerAudit` to the CALL-capable Functions public theorem once
      the bridge is fully checked. `LayerAudit.FunctionsOpenCALLBoundary` now
      pins the Functions-to-compiled-open theorem and checked compiler-target
      extractor; `LayerAudit.ImportedYulBoundary` intentionally stays on the
      no-internal-CALL gas-aware root until the higher wrapper is generalized.
-   - [ ] Confirm the public theorem proves storage equality and result equality
-     through the strengthened storage/result relation in the main spine.
+   - [x] Confirm the public theorem proves storage equality and result/outcome
+     equality through the strengthened storage/result spine, with external
+     effects exposed only through equal request sites plus matching abstract
+     responses.
    - [x] Confirm the Functions-level public theorem has no stale
      compiler-generated evidence,
      replay certificate, all-callees-preserve premise, direct CALL statement
@@ -6804,10 +7306,9 @@ actual modules rather than preserved through audit aliases.
        from `RecursiveBridgeFullSourceAccepted`, because full source validity
        deliberately accepts all primitives and user calls. Successful checked
       compilation constructs only the object-builtin user-call coverage. Local
-      code-image coverage is now discharged through the code-image bridge;
-      external account-code inspection, create, and external-call coverage
-      remain semantic bridge boundaries until their explicit contracts are
-      proved.
+      and external code-image coverage is now discharged through the code-image
+      bridge; CALL/CREATE coverage is routed through the open-boundary semantic
+      contract.
      - [x] Shrink `RecursiveBridgeCompileResources`: lower-object source
        acceptedness is constructed from `RecursiveBridgeSourceAccepted`, so the
        resource package was reduced to the generated function program's
@@ -6872,10 +7373,10 @@ actual modules rather than preserved through audit aliases.
      `ExecutionEnv.codeBytes`, object/data `datacopy` lowers to concrete
      `CODECOPY`, and the bridge has reusable wrappers under the explicit
      agreement `source.executionEnv.codeBytes = target.executionEnv.code`.
-   - [ ] Add checked semantics and compiler bridge support for
-     `EXTCODESIZE`/`EXTCODECOPY`/`EXTCODEHASH`, or state and prove the exact
-     external-account/code oracle relation that makes them full semantics
-     rather than a fragment exclusion.
+   - [x] Add checked semantics and compiler bridge support for
+     `EXTCODESIZE`/`EXTCODECOPY`/`EXTCODEHASH` through the external code-image
+     and state/query preservation relation, making them state queries rather
+     than open-boundary suspension events.
    - [x] Add computed solc-Yul object/data image support for `datasize`,
      `dataoffset`, `datacopy`, `loadimmutable`, `setimmutable`, and
      `linkersymbol` in the Solidity frontend path, including nested object/data
@@ -6896,20 +7397,21 @@ actual modules rather than preserved through audit aliases.
      source `ExecutionEnv.codeBytes` image is the assembled target bytecode,
      `LayerAudit` now points at the code-image top theorem, and the structural
      feature checker re-admits local `CODESIZE`/`CODECOPY`.
-   - [ ] Add checked semantics and compiler bridge support for
-     `CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL` and `CREATE`/`CREATE2`, or
-     state and prove an explicit external-interaction oracle relation that is
-     part of the full source/target semantics rather than a safety rejection.
+   - [x] Add checked semantics and compiler bridge support for
+     `CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL` and `CREATE`/`CREATE2` by
+     proving an explicit open external-interaction relation that is part of the
+     source/target semantics rather than a safety rejection.
      - [x] Retire the concrete child/world route with the deleted `World`
        module and the removed closed precompile/child-dispatch support branch.
        The replacement route is the open CALL-family request/response boundary
        in `EvmCompiler.Yul.OpenExternal`, with source/compiler/EVM call-site
        extraction from existing state relations.
-     - [x] Add CALL-admitting feature coverage for the next recursive bridge
-       surface: `Reference.Safe.FeatureCoverage.externalBoundaryExceptCALL*`
-       and `Program.RecursiveBridgeCALLFeatureCoverage` admit ordinary `CALL`
-       while still checking out `CALLCODE`, `DELEGATECALL`, `STATICCALL`,
-       external account-code inspection, and `CREATE`/`CREATE2`.
+     - [x] Add CALL/CREATE-family feature coverage for the recursive bridge
+       surface. The legacy `externalBoundaryExceptCALL*` route remains as
+       compatibility scaffolding, while `CallFamilySafe` / external-code-image
+       coverage admits `CALL`, `CALLCODE`, `DELEGATECALL`, `STATICCALL`,
+       `CREATE`, and `CREATE2`; external account-code inspection is handled by
+       the state/query code-image route.
      - [ ] Finish the open argument semantics so nested CALL-family expression
        evaluation suspends at the same request/response boundary instead of
        using closed `evalArgs`/`primCall` branches. The open
@@ -9570,8 +10072,8 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   - [x] Remove the artificial lowerer gap for external call/create primitives:
     `Prim.toBasicOp?` now maps `CREATE`, `CALL`, `CALLCODE`,
     `DELEGATECALL`, `CREATE2`, and `STATICCALL` to the corresponding
-    structured/basic EVM opcodes. The accepted bridge still rejects them until
-    the open external-call/create and static-mode result contracts are proved.
+    structured/basic EVM opcodes. The accepted bridge now routes them through
+    the checked open external-call/create request/response contracts.
   - [x] Admit `LOG0` through `LOG4` in `Reference.Safe.primitive` with checked primitive
     contracts for varstore preservation, non-`Ok` state preservation, and
     non-checkpoint/nonrelatable error behavior.
@@ -9657,12 +10159,12 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
    - Current status: `EvmCompiler.Yul` imports Nethermind `EvmYul.Yul.Ast`, defines an explicit `Program.Supported` accepted-fragment predicate, lowers accepted contracts to the object layer, and exposes composed compiler-facing bridge theorems. `Yul.Program.run` is now the independent imported Nethermind-Yul `callDispatcher` source interpreter; the old lowering-defined execution is quarantined as `Yul.Lowered.run`.
    - Solidity front-half checkpoint: `scripts/solidity_to_yul_lean.py` invokes `solc --standard-json`, imports solc's Yul JSON AST structurally, emits bridge JSON or typed `EvmCompiler.Solidity.Frontend.Program`, accepts normalized bridge JSON back via `--input-format bridge-json`, documents that bridge contract with `scripts/bridge-json-v3.schema.json`, can persist creation/runtime bridge files with `--bridge-json-dir`, and provides conversions into the current `EvmCompiler.Yul.Program` backend entrypoint plus an object-preserving `EvmCompiler.Objects.Program` path. `EvmCompiler.Solidity.BridgeJson` decodes the normalized bridge JSON inside Lean, so the executable bytecode/artifact paths now keep solc-facing AST normalization in Python, write a temporary normalized-JSON sidecar, and hand Lean only that sidecar path before backend compilation; constructor-style `lean-ir` emission remains available for inspection. Generated Lean modules now expose both the checked backend handoff artifacts (`Yul.Program.compileChecked?`, `Assembly.compile?`, and encoded bytecode) and executable unchecked backend artifacts (`Program.compileUnchecked?` / `Program.bytecodeUnchecked?`) for the typed front-end path. The script also has `--format bytecode`, which asks Lean to compute `Program.bytecodeImageUnchecked?`: a code image with object/data pseudo-builtins resolved from this backend's emitted byte lengths and with child-object/data payload bytes appended. Runtime objects and creation objects can now emit bytecode hex from Solidity/Yul AST input without solc byte offsets. The typed front-end IR preserves data sections structurally as `DataSection` records with optional names and byte payloads instead of anonymous hex strings, records solc's mixed child-object/data payload order with `ObjectItemRef`, computes named local data-section `datasize` from those typed bytes, computes local named `dataoffset` from the emitted code image base and ordered payload stream, resolves child object `datasize`/`dataoffset` from recursively emitted child images, lowers `datacopy` to backend `codecopy`, and handles immutable placeholders in the executable image path by marker-computing Lean byte offsets for `loadimmutable` sites and expanding creation `setimmutable` patches to `mstore`. The executable smoke surface now includes dynamic calldata bytes/strings, `uint256[]` ABI round trips, environmental primitive reads, Solidity loops through solc's helper Yul, and memory struct allocation/field access through solc's memory helpers. The object-preserving path carries typed data sections and nested objects into the backend object layer, while still lowering each object's code through the existing Yul bridge. The checked object/data path now gates through solc-style validation, checked function compilation, computed payload layout, immutable patching, target bytecode encoding, and the public code-image bridge relation.
    - Abstraction repair in progress: `Yul.SourceLowered.runState` is the compiler-facing lowering path into the repaired source tower (`Objects.Source` -> `Functions.Source` -> `Locals.Source`) so the imported-Yul bridge has a clean target that does not expose stack layouts or function return-frame conventions.
-   - Target reference version: Lake pins `EvmYulLean` to the corrected fork branch `codex/solidity-switch-semantics` at `2cf8181c562abca3e35c600c9514e35c46260d46`, which includes selected-branch switch semantics, omitted-default-as-empty-block notation, and halting `SELFDESTRUCT` behavior.
+   - Target reference version: Lake pins `EvmYulLean` to commit `314a6457b9998cc2759ca7c4840f2732a10084c3`, which includes selected-branch switch semantics, omitted-default-as-empty-block notation, halting `SELFDESTRUCT` behavior, and the external account-code/state semantics needed by the current `BALANCE`/`EXT*` coverage.
    - Recursive theorem target: `SourceBridgeFacts.CheckedBlockLoweringSound` names the fuel-induction goal from checked Yul block lowering to `SourceResultBlockSound`; `SourceBridgeFacts.CheckedStmtBlockLoweringSound` names the single-statement version keyed to the actual `Stmt.toFunctionsList?` head/dispatcher lowerer; `SourceBridgeFacts.FreshCoversLayout` plus the fresh-aware `CheckedBlockLoweringSoundFresh` / `CheckedStmtBlockLoweringSoundFresh` variants capture the invariant that compiler-generated temporaries are fresh for the current source layout; `SourceBridgeFacts.CheckedDispatcherLoweringSound` is the root-dispatcher companion shaped around the exact `Stmt.toFunctionsList?` body equation produced by `Program.toObjects?`; and `Yul.Program.DispatcherSourceSound` bundles the dispatcher body soundness and result projection for the public source/assembly/bytecode wrappers. `checkedStmtBlockLoweringSound_stop_call` consumes real lowerer output for the no-temporary terminal target, and `checkedStmtBlockLoweringSoundFresh_selfdestruct_lit_call`, `checkedStmtBlockLoweringSoundFresh_return_lit_lit_call`, and `checkedStmtBlockLoweringSoundFresh_revert_lit_lit_call` consume real lowerer output plus the fresh-state/layout invariant for generated terminal preludes. `checkedDispatcherLoweringSound_of_stmtBlockLoweringSound` and `checkedDispatcherLoweringSound_of_stmtBlockLoweringSoundFresh` lift the single-statement theorem to the dispatcher theorem; `checkedDispatcherLoweringSound_selfdestruct_lit_call`, `checkedDispatcherLoweringSound_return_lit_lit_call`, and `checkedDispatcherLoweringSound_revert_lit_lit_call` package the generated-prelude literal terminal cases at the dispatcher boundary from only the dispatcher-shape equation, initial-scope equation, and terminal/revert contracts. The matching checked-spine assembly wrappers `compile_preserves_of_dispatcher_return_lit_lit_prelude_call_checked_compileAccepted`, `compile_preserves_of_dispatcher_revert_lit_lit_prelude_call_checked_compileAccepted`, and `compile_preserves_of_dispatcher_selfdestruct_lit_prelude_call_checked_compileAccepted` now route through those checked dispatcher constructors and generic result adapters instead of the older generated-prelude decomposition proof; the checked-spine bytecode/gas-aware wrappers `compile_whole_program_result_sound_of_dispatcher_return_lit_lit_prelude_call_checked_compileAccepted`, `compile_whole_program_result_sound_of_dispatcher_revert_lit_lit_prelude_call_checked_compileAccepted`, and `compile_whole_program_result_sound_of_dispatcher_selfdestruct_lit_prelude_call_checked_compileAccepted` compose the same checked assembly facts through the bytecode theorem. `LayerAudit` points the default assembly and bytecode aliases for those cases at the checked-spine wrappers while keeping older raw/compositional routes under explicit names. `Yul.Program.dispatcherSourceSound_of_checked_dispatcher_lowering` recovers the actual compiled dispatcher body from `toObjects?`, and `sourceBridge_of_checked_dispatcher_lowering_sound` plus the matching assembly/bytecode wrappers consume the checked dispatcher-lowering theorem target directly. `Reference.Imported.exists_exec_dispatcher_of_runResult_succ_ok`, `Yul.Program.DispatcherRunResultSound`, and `Yul.Program.DispatcherObservationSound` lift that boundary to the real imported `Reference.runResult`, with source-bridge/assembly/bytecode wrappers starting from a successful imported run plus ordinary/terminal/revert observation contracts instead of a raw dispatcher-body `exec` or prebuilt result adapter. This is the intended boundary for the full imported-Yul recursive proof: callers should not pass independent body/result callbacks once the checked constructor exists.
    - Imported-Yul argument order is now separated from lower stack-order primitive evaluation by `ExprArgStackPreludeSound`, `PrimitiveStackSoundAt`, and `exprValuePreludeSound_prim_of_arg_stack_prelude`: generated preludes can be proved once in the source tower, while per-primitive lemmas state only the named source-order-to-stack-order semantic contract. Zero-result state-changing primitives now have reusable binary/ternary contract constructors and concrete wrappers for `mstore`, `mstore8`, `mcopy`, `calldatacopy`, and `returndatacopy`, so higher bridge proofs do not expose the relation plumbing for those families. Terminal prelude composition now has the same source-facing shape via `generatedPrelude_runOpen_append_exists`, `sourceResultBlockRunBridge_terminalStackPrelude_of_exec`, `sourceResultBlockRunBridge_terminalStackPrelude_of_arg_sound`, and the public `SourceResultBlockSound` lift `sourceResultBlockSound_terminalStackPrelude_of_arg_sound`; `sourceResultBlockSound_selfdestruct_lit_prelude_call_compositional`, `sourceResultBlockSound_return_lit_lit_prelude_call_compositional`, and `sourceResultBlockSound_revert_lit_lit_prelude_call_compositional` are the first concrete terminal-prelude theorems routed through that wrapper. The clean `return(offset, size)`, `revert(offset, size)`, and `selfdestruct(recipient)` paths now also reach compositional dispatcher `SourceBridge`, assembly compile-preserves, and bytecode/gas-aware wrapper theorems.
-   - Accepted compiler-facing subset currently includes literals, variables, primitive calls that map to the verified structured primitive surface including `gas`, blocks, lets, switches, optimizer-style `for`, break/continue/leave, user-function declarations, statement-level user calls, and one-result user-call expressions lowered through fresh temporaries.
-   - Accepted imported-reference bridge subset is still narrower at the proof boundary: it rejects external account-code inspection and external-call/create primitives in `Reference.Safe` until the corresponding state/result relations are proved against the imported reference semantics. Local code-image primitives (`CODESIZE`/`CODECOPY`) are admitted through the explicit `codeBytes` relation. `RETURN`, `REVERT`, and `SELFDESTRUCT` are accepted at the safe-boundary; concrete dispatcher terminal coverage now reaches the gas-aware bytecode theorem for `stop()`, zero/literal `return`/`revert`, writable `selfdestruct(0)`, and the generated-prelude literal-argument terminal variants, with auto wrappers deriving generated temporary names, fresh-name distinctness, and literal argument lowerer evidence from compiler output.
-   - Rejected by accepted lowering for now: external call/create builtins, unresolved object pseudo-builtins outside the computed object/data frontend path, and any construct that fails lower-layer WF or bounded inline expansion.
+   - Accepted compiler-facing subset currently includes literals, variables, primitive calls that map to the verified structured primitive surface, blocks, lets, switches, optimizer-style `for`, break/continue/leave, user-function declarations, statement-level user calls, and one-result user-call expressions lowered through fresh temporaries.
+   - Accepted imported-reference bridge subset now has a public external-code-image/CALL-family route: `CALL`, `CALLCODE`, `DELEGATECALL`, `STATICCALL`, `CREATE`, and `CREATE2` are modeled as open boundary requests with abstract matching responses, while `BALANCE` and `EXTCODESIZE`/`EXTCODECOPY`/`EXTCODEHASH` are covered by state/query plus code-image preservation. Local code-image primitives (`CODESIZE`/`CODECOPY`) are admitted through the explicit `codeBytes` relation. `RETURN`, `REVERT`, and `SELFDESTRUCT` are accepted at the safe-boundary; concrete dispatcher terminal coverage now reaches the gas-aware bytecode theorem for `stop()`, zero/literal `return`/`revert`, writable `selfdestruct(0)`, and the generated-prelude literal-argument terminal variants, with auto wrappers deriving generated temporary names, fresh-name distinctness, and literal argument lowerer evidence from compiler output.
+   - Rejected by accepted lowering for now: direct resource/position observers such as `gas()`, `msize()`, and `pc()`, unresolved object pseudo-builtins outside the computed object/data frontend path, verbatim/EOF dialect builtins, and any construct that fails lower-layer WF or bounded inline expansion.
    - Public theorem status: `Yul.Program.compile_preserves_checked` still records the quarantined compiler-facing `Yul.Lowered.run` path, while `Yul.Program.compile_source_preserves_checked_of_compileAccepted`, `Yul.Program.compile_preserves_of_reference_source_runs_compileAccepted`, and `Yul.Program.compile_whole_program_result_sound_of_reference_source_runs_compileAccepted` are the active source-facing route through `Yul.SourceLowered.run`. `Reference.SourceBridge` / `Reference.LoweredBridge` remain legacy compatibility surfaces and are not the intended public imported-source spine.
 
 ## Source-Complete Repair Plan
@@ -9931,8 +10433,8 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
    - [x] Add the checked imported-semantics gap classifier for code-image ops
      and `CREATE`/`CREATE2`, separate from the external-call boundary
      classifier for `CALL`, `CALLCODE`, `DELEGATECALL`, and `STATICCALL`.
-   - [ ] Add explicit Yul-level code-image semantics plus a compiler byte-image bridge before re-admitting `CODESIZE`, `CODECOPY`, `EXTCODESIZE`, `EXTCODECOPY`, or `EXTCODEHASH`.
-   - [x] Add checked rejection facts for external call/create primitives at the current imported-Yul bridge boundary: `CREATE`, `CREATE2`, `CALL`, `CALLCODE`, `DELEGATECALL`, and `STATICCALL`.
+   - [x] Add explicit Yul-level code-image semantics plus a compiler byte-image bridge before re-admitting `CODESIZE`, `CODECOPY`, `EXTCODESIZE`, `EXTCODECOPY`, and `EXTCODEHASH`.
+   - [x] Replace the old checked rejection facts for external call/create primitives (`CREATE`, `CREATE2`, `CALL`, `CALLCODE`, `DELEGATECALL`, and `STATICCALL`) with the public open-boundary feature route.
    - [x] Add the target-runtime no-call/create constructor, so programs whose
      emitted assembly syntactically contains no call/create opcodes discharge
      `ExternalInteractionAssumption` without a separate agreement premise.
@@ -9941,9 +10443,9 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
      support branch are gone; live `CALL` work now stops at the `OpenExternal`
      request/response boundary with an arbitrary opaque response-state
      transformer, plus
-     the pending open argument semantics for nested `CALL`s. `CREATE`,
-     `CREATE2`, `CALLCODE`, `DELEGATECALL`, and `STATICCALL` remain future
-     external-operation coverage.
+     the open argument semantics for nested CALL-family expressions. `CREATE`,
+     `CREATE2`, `CALLCODE`, `DELEGATECALL`, and `STATICCALL` now use the same
+     public open-boundary request/response route.
    - [ ] Continue the primitive bridge table for remaining state/machine/environment reads and memory/storage/code/external primitives using family-specific semantic relations, rather than treating them all as pure bound-argument stack operators.
    - [x] Change Yul expression lowering for primitive/function/terminal argument lists to bind each argument immediately after its own prelude (`Expr.List.lowerBound1?`), matching imported Yul's right-to-left argument evaluation and avoiding delayed reads across later argument effects.
    - [x] Add checked lowering decomposition for bound binary primitive arguments and a compiler-output-aware `add(left, right)` bridge theorem that composes the generated hidden-argument prelude with generic `toStackSeq?` target replay and the target `ADD` proof.

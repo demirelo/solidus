@@ -111,14 +111,13 @@ if compatibility.get("status") != "blocked":
         f"unexpected ExternalCallBox backend compatibility: {compatibility!r}"
     )
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-required_blockers = {"call", "delegatecall", "staticcall"}
-missing_blockers = sorted(required_blockers - unsupported)
-if missing_blockers:
+if unsupported != {"gas"}:
     raise SystemExit(
-        f"ExternalCallBox summary missing external blockers: {missing_blockers!r}"
+        f"ExternalCallBox summary expected only gas as a backend blocker: "
+        f"{unsupported!r}"
     )
 notes = compatibility.get("notes", [])
-if not any("external call/create primitives" in note for note in notes):
+if not any("open external-boundary" in note for note in notes):
     raise SystemExit(
         f"ExternalCallBox summary missing external-call note: {compatibility!r}"
     )

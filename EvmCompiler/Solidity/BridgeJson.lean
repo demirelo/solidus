@@ -1,6 +1,17 @@
 import EvmCompiler.Solidity.Frontend
 import Lean.Data.Json
 
+/-
+Decoder for normalized `evm-compiler.solc-yul-bridge.v3` files.
+
+The bridge file carries a full selected Yul object tree: dispatcher code,
+function declarations, typed data sections, child objects, and the mixed
+object/data item order emitted by solc.  It also preserves primitive calls over
+the current verified external surface: CALL-family and CREATE-family boundaries,
+BALANCE account-state queries, and EXT* account-code queries. Yul object
+builtins stay separate until the computed object-image frontend resolves them.
+-/
+
 namespace EvmCompiler
 namespace Solidity
 namespace Frontend

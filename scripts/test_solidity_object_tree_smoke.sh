@@ -123,10 +123,10 @@ if compatibility.get("status") != "blocked":
         f"unexpected FactoryBox backend compatibility: {compatibility!r}"
     )
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-missing_blockers = sorted({"create", "create2"} - unsupported)
-if missing_blockers:
+if unsupported != {"gas"}:
     raise SystemExit(
-        f"FactoryBox summary missing create blockers: {missing_blockers!r}"
+        f"FactoryBox summary expected only gas as a backend blocker: "
+        f"{unsupported!r}"
     )
 primitive_entries = runtime_summary.get("calls", {}).get("primitive", {}).get("names", [])
 primitives = {
@@ -134,13 +134,13 @@ primitives = {
     for entry in primitive_entries
     if isinstance(entry, dict)
 }
-missing_primitives = sorted({"create", "create2"} - primitives)
+missing_primitives = sorted({"create", "create2", "gas"} - primitives)
 if missing_primitives:
     raise SystemExit(
         f"FactoryBox summary missing create primitives: {missing_primitives!r}"
     )
 notes = compatibility.get("notes", [])
-if not any("external call/create primitives" in note for note in notes):
+if not any("open external-boundary" in note for note in notes):
     raise SystemExit(
         f"FactoryBox summary missing create/backend note: {compatibility!r}"
     )
@@ -189,7 +189,8 @@ print(f"object_tree_contracts={check_counts['checkedContracts']}")
 print(f"object_tree_backend_check_objects={backend_counts['checkedObjects']}")
 print(f"object_tree_backend_check_passed={backend_counts['passedObjects']}")
 print(f"object_tree_backend_check_failed={backend_counts['failedObjects']}")
-print("object_tree_child_backend_check=pass")
+print("object_tree_child_creation_backend_check=pass")
+print("object_tree_child_runtime_backend_check=pass")
 print("object_tree_factory_backend_first_none=to_yul_contract")
 print(f"object_tree_summary_calls={runtime_summary['counts']['calls']}")
 print("object_tree_factory_runtime_child_subobjects=yes")

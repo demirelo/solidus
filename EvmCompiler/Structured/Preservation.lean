@@ -75,7 +75,23 @@ theorem primStep_run_with_pc
     (hRun : step.run state = .ok final) :
     step.run { state with pc := pc } =
       .ok { final with pc := pc + EvmYul.UInt256.ofNat 1 } := by
-  cases step <;>
+  cases step
+  case returndatacopy =>
+    cases hPop : state.stack.pop3 with
+    | none =>
+        simp [Assembly.PrimStep.run, hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨stack, mstart, rstart, size⟩
+        by_cases hBounds :
+            state.returnData.size < rstart.toNat + size.toNat
+        · simp [Assembly.PrimStep.run, hPop, hBounds] at hRun
+        · simp [Assembly.PrimStep.run, hPop, hBounds,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC, Id.run] at hRun ⊢
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  all_goals
     simp [Assembly.PrimStep.run, EvmYul.EVM.execBinOp,
       EvmYul.EVM.execUnOp, EvmYul.EVM.execTriOp,
       EvmYul.EVM.executionEnvOp, EvmYul.EVM.unaryExecutionEnvOp,
@@ -101,7 +117,23 @@ theorem primStep_run_with_pc_execLength
       .ok { final with
         pc := pc + EvmYul.UInt256.ofNat 1,
         execLength := execLength } := by
-  cases step <;>
+  cases step
+  case returndatacopy =>
+    cases hPop : state.stack.pop3 with
+    | none =>
+        simp [Assembly.PrimStep.run, hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨stack, mstart, rstart, size⟩
+        by_cases hBounds :
+            state.returnData.size < rstart.toNat + size.toNat
+        · simp [Assembly.PrimStep.run, hPop, hBounds] at hRun
+        · simp [Assembly.PrimStep.run, hPop, hBounds,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC, Id.run] at hRun ⊢
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  all_goals
     simp [Assembly.PrimStep.run, EvmYul.EVM.execBinOp,
       EvmYul.EVM.execUnOp, EvmYul.EVM.execTriOp,
       EvmYul.EVM.executionEnvOp, EvmYul.EVM.unaryExecutionEnvOp,

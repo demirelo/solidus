@@ -11,49 +11,45 @@ as a claim about deployed EVM bytecode.
 are derived from the checked assembler layout. `jumpdestCorrect` remains a
 bytecode/EVMYulLean scanner boundary because the imported jumpdest scanner is
 opaque. The remaining fields name the semantic choices intentionally not
-modeled by the gasless source language or not yet derived from the source step
-relation: gas accounting, possible out-of-gas interruption, the gas-erased state
-projection, and the call/create bridge to the gas-aware EVM runner.
+  modeled by the gasless source language or not yet derived from the source step
+  relation: gas accounting, possible out-of-gas interruption, and the gas-erased
+  state projection.
 -/
 structure RuntimeAssumptions
     (program : Program) (target : TargetProgram) (initial : EVMState) :
     Prop where
-  decodeWindow : Bytecode.TargetFitsDecodeWindow target
-  jumpdestCorrect : Bytecode.JumpdestCorrect target
-  outOfGasPolicy : OutOfGasPolicyAssumption program initial
-  currentContractProjection : CurrentContractProjectionAssumption program initial
-  externalInteraction : ExternalInteractionAssumption program target initial
+    decodeWindow : Bytecode.TargetFitsDecodeWindow target
+    jumpdestCorrect : Bytecode.JumpdestCorrect target
+    outOfGasPolicy : OutOfGasPolicyAssumption program initial
+    currentContractProjection : CurrentContractProjectionAssumption program initial
 
-namespace RuntimeAssumptions
+  namespace RuntimeAssumptions
 
 def withExplicitBoundaries {program : Program} {target : TargetProgram}
     {initial : EVMState}
     (decodeWindow : Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Bytecode.JumpdestCorrect target)
-    (outOfGasPolicy : OutOfGasPolicyAssumption program initial)
-    (currentContractProjection :
-      CurrentContractProjectionAssumption program initial)
-    (externalInteraction :
-      ExternalInteractionAssumption program target initial) :
-    RuntimeAssumptions program target initial where
-  decodeWindow := decodeWindow
-  jumpdestCorrect := jumpdestCorrect
-  outOfGasPolicy := outOfGasPolicy
-  currentContractProjection := currentContractProjection
-  externalInteraction := externalInteraction
+      (outOfGasPolicy : OutOfGasPolicyAssumption program initial)
+      (currentContractProjection :
+        CurrentContractProjectionAssumption program initial) :
+      RuntimeAssumptions program target initial where
+    decodeWindow := decodeWindow
+    jumpdestCorrect := jumpdestCorrect
+    outOfGasPolicy := outOfGasPolicy
+    currentContractProjection := currentContractProjection
 
-def withNoCallCreate {program : Program} {target : TargetProgram}
+  def withNoCallCreate {program : Program} {target : TargetProgram}
     {initial : EVMState}
     (decodeWindow : Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Bytecode.JumpdestCorrect target)
-    (outOfGasPolicy : OutOfGasPolicyAssumption program initial)
-    (currentContractProjection :
-      CurrentContractProjectionAssumption program initial)
-    (hNoCallCreate : program.usesCallCreate = false) :
+      (outOfGasPolicy : OutOfGasPolicyAssumption program initial)
+      (currentContractProjection :
+        CurrentContractProjectionAssumption program initial)
+      (hNoCallCreate : program.usesCallCreate = false) :
     RuntimeAssumptions program target initial :=
+  let _hNoCallCreate := hNoCallCreate
   withExplicitBoundaries decodeWindow jumpdestCorrect outOfGasPolicy
-    currentContractProjection
-    (ExternalInteractionAssumption.noCallCreate hNoCallCreate)
+      currentContractProjection
 
 end RuntimeAssumptions
 

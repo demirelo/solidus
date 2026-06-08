@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Compile Solidity through solc's Yul AST into Lean-facing artifacts.
 
-The current Lean compiler entrypoint accepts `EvmCompiler.Yul.Program`, which
-wraps Nethermind's `EvmYul.Yul.Ast.YulContract`.  This tool keeps the Solidity
-front half structural: it asks solc for `irAst` or `irOptimizedAst`, converts
-the JSON Yul AST into that Lean AST, and never reparses pretty-printed Yul text.
+The Solidity-facing Lean frontend accepts a typed selected Yul object tree:
+dispatcher code, functions, data sections, child objects, and solc's mixed
+object/data item order.  This tool keeps that front half structural: it asks
+solc for `irAst` or `irOptimizedAst`, normalizes the JSON Yul AST into bridge
+JSON or `EvmCompiler.Solidity.Frontend.Program`, and never reparses
+pretty-printed Yul text.  Bytecode/artifact paths use the computed object-image
+entrypoints; lower `EvmCompiler.Yul.Program` conversions remain available for
+proof and debugging boundaries.
 """
 
 from __future__ import annotations
@@ -474,19 +478,29 @@ OBJECT_BUILTINS = {
     "setimmutable",
     "loadimmutable",
     "linkersymbol",
+    "memoryguard",
 }
 
-UNSUPPORTED_DIALECT_BUILTINS = {
-    "dataloadn",
-    "auxdataloadn",
-    "eofcreate",
-    "returncontract",
-    "rjump",
-    "rjumpi",
-    "callf",
-    "retf",
-    "jumpf",
-}
+UNSUPPORTED_DIALECT_BUILTINS = (
+    {
+        "pc",
+        "jump",
+        "jumpi",
+        "jumpdest",
+        "dataloadn",
+        "auxdataloadn",
+        "eofcreate",
+        "returncontract",
+        "rjump",
+        "rjumpi",
+        "callf",
+        "retf",
+        "jumpf",
+    }
+    | {f"push{i}" for i in range(33)}
+    | {f"dup{i}" for i in range(1, 17)}
+    | {f"swap{i}" for i in range(1, 17)}
+)
 
 RESERVED_BINDING_NAMES = (
     set(PRIMITIVE_OPS)
@@ -495,14 +509,7 @@ RESERVED_BINDING_NAMES = (
     | {
         "memoryguard",
         "clz",
-        "jump",
-        "jumpi",
-        "jumpdest",
-        "pc",
     }
-    | {f"push{i}" for i in range(33)}
-    | {f"dup{i}" for i in range(1, 17)}
-    | {f"swap{i}" for i in range(1, 17)}
 )
 
 LEAN_EXPR = "EvmYul.Yul.Ast.Expr"
@@ -531,7 +538,8 @@ BACKEND_EXTERNAL_EFFECT_PRIMITIVES = {
     "create",
     "create2",
 }
-BACKEND_EXTERNAL_ACCOUNT_CODE_PRIMITIVES = {
+BACKEND_EXTERNAL_ACCOUNT_QUERY_PRIMITIVES = {
+    "balance",
     "extcodesize",
     "extcodecopy",
     "extcodehash",
@@ -545,11 +553,12 @@ BACKEND_OBJECT_BUILTINS_COMPUTED = {
     "datacopy",
     "loadimmutable",
     "setimmutable",
+    "memoryguard",
 }
-BACKEND_BLOCKING_PRIMITIVES = (
-    BACKEND_EXTERNAL_EFFECT_PRIMITIVES
-    | BACKEND_EXTERNAL_ACCOUNT_CODE_PRIMITIVES
-)
+BACKEND_BLOCKING_PRIMITIVES: Set[str] = {
+    "gas",
+    "msize",
+}
 
 BRIDGE_JSON_SCHEMA = "evm-compiler.solc-yul-bridge.v3"
 BRIDGE_JSON_PROVENANCE_SCHEMA = "evm-compiler.bridge-json-provenance.v1"
@@ -1312,10 +1321,16 @@ def parse_expr(node: Any, ctx: Optional[ParseContext] = None) -> Expr:
     if node_type == "YulLiteral":
         kind = node.get("kind")
         value = node.get("value")
-        if kind == "number" and isinstance(value, str):
-            return Lit(parse_uint256(value))
-        if kind == "bool" and isinstance(value, str):
-            return Lit(1 if value == "true" else 0)
+        if kind == "number":
+            if isinstance(value, str):
+                return Lit(parse_uint256(value))
+            if isinstance(value, int) and not isinstance(value, bool):
+                return Lit(parse_uint256(str(value)))
+        if kind == "bool":
+            if isinstance(value, bool):
+                return Lit(1 if value else 0)
+            if isinstance(value, str):
+                return Lit(1 if value == "true" else 0)
         hex_value = node.get("hexValue")
         if kind == "string" and isinstance(hex_value, str):
             return BytesLit(
@@ -1427,6 +1442,56 @@ def block_has_immediate_function_definition(node: Json) -> bool:
     )
 
 
+def parse_for_init_block_with_scope(pre_node: Json, ctx: ParseContext) -> List[Stmt]:
+    if pre_node.get("nodeType") != "YulBlock":
+        fail(
+            f"Expected YulForLoop pre block, got {pre_node.get('nodeType')!r} "
+            f"at {node_src(pre_node)}"
+        )
+    statements = pre_node.get("statements", [])
+    if not isinstance(statements, list):
+        fail(f"Expected statements list in YulForLoop pre block at {node_src(pre_node)}")
+
+    local_functions: Dict[str, str] = {}
+    for stmt in statements:
+        if isinstance(stmt, dict) and stmt.get("nodeType") == "YulFunctionDefinition":
+            source_name = yul_function_name(stmt)
+            if source_name in local_functions:
+                fail(
+                    f"Duplicate Yul function {source_name!r} in for-loop init "
+                    f"block at {node_src(stmt)}"
+                )
+            ctx.declare_identifiers([source_name], "function", stmt)
+            local_functions[source_name] = ctx.fresh_generated_function_name(
+                source_name
+            )
+
+    ctx.push_function_scope(local_functions)
+    try:
+        for stmt in statements:
+            if isinstance(stmt, dict) and stmt.get("nodeType") == "YulFunctionDefinition":
+                source_name = yul_function_name(stmt)
+                ctx.hoisted_functions.append(
+                    (local_functions[source_name], parse_function_def(stmt, ctx))
+                )
+        return [
+            parse_stmt(stmt, ctx)
+            for stmt in statements
+            if not (
+                isinstance(stmt, dict)
+                and stmt.get("nodeType") == "YulFunctionDefinition"
+            )
+        ]
+    except BaseException:
+        ctx.pop_function_scope()
+        raise
+
+
+def pop_for_init_function_scope_if_present(pre_node: Json, ctx: ParseContext) -> None:
+    if block_has_immediate_function_definition(pre_node):
+        ctx.pop_function_scope()
+
+
 def parse_stmt(node: Any, ctx: Optional[ParseContext] = None) -> Stmt:
     if not isinstance(node, dict):
         fail(f"Expected Yul statement object, got {node!r}")
@@ -1484,8 +1549,6 @@ def parse_stmt(node: Any, ctx: Optional[ParseContext] = None) -> Stmt:
         body_node = node.get("body")
         if not all(isinstance(part, dict) for part in [pre_node, post_node, body_node]):
             fail(f"Expected YulForLoop pre/post/body blocks at {node_src(node)}")
-        if block_has_immediate_function_definition(pre_node):
-            fail(f"Yul for-loop init blocks cannot define functions at {node_src(node)}")
         if ctx is None:
             pre = parse_block(pre_node)
             loop = For(
@@ -1497,12 +1560,23 @@ def parse_stmt(node: Any, ctx: Optional[ParseContext] = None) -> Stmt:
 
         ctx.push_identifier_scope()
         try:
-            pre = parse_block(pre_node, ctx, creates_scope=False)
-            loop = For(
-                parse_expr(node["condition"], ctx),
-                parse_block(post_node, ctx),
-                parse_block(body_node, ctx),
-            )
+            if block_has_immediate_function_definition(pre_node):
+                pre = parse_for_init_block_with_scope(pre_node, ctx)
+                try:
+                    loop = For(
+                        parse_expr(node["condition"], ctx),
+                        parse_block(post_node, ctx),
+                        parse_block(body_node, ctx),
+                    )
+                finally:
+                    pop_for_init_function_scope_if_present(pre_node, ctx)
+            else:
+                pre = parse_block(pre_node, ctx, creates_scope=False)
+                loop = For(
+                    parse_expr(node["condition"], ctx),
+                    parse_block(post_node, ctx),
+                    parse_block(body_node, ctx),
+                )
         finally:
             ctx.pop_identifier_scope()
         return loop if not pre else Block(pre + [loop])
@@ -2635,7 +2709,8 @@ def bridge_summary_hint_strings(
     if call_kind_counts.get(CALL_DIALECT_BUILTIN, 0) > 0:
         hints.append(
             "unsupported-dialect-builtins-present: bridge JSON preserves "
-            "verbatim/EOF dialect calls, but checked executable lowering rejects them"
+            "pc/raw-EVM/verbatim/EOF dialect calls, but checked executable lowering "
+            "rejects them"
         )
     object_builtin_names = set(call_name_counts.get(CALL_OBJECT_BUILTIN, Counter()))
     unresolved_object_builtins = sorted(
@@ -2651,8 +2726,8 @@ def bridge_summary_hint_strings(
         )
     if computed_object_builtins:
         hints.append(
-            "object-builtins-computed: datasize/dataoffset/datacopy/immutable builtins "
-            "are resolved by the computed object-image path"
+            "object-builtins-computed: datasize/dataoffset/datacopy/immutable/"
+            "memoryguard builtins are resolved by the computed object-image path"
         )
     primitive_calls = call_name_counts.get(CALL_PRIMITIVE, Counter())
     external_primitives = sorted(
@@ -2664,6 +2739,16 @@ def bridge_summary_hint_strings(
         hints.append(
             "external-effect-primitives-present: "
             + ", ".join(external_primitives)
+        )
+    account_query_primitives = sorted(
+        name
+        for name in primitive_calls
+        if name in BACKEND_EXTERNAL_ACCOUNT_QUERY_PRIMITIVES
+    )
+    if account_query_primitives:
+        hints.append(
+            "external-account-query-primitives-present: "
+            + ", ".join(account_query_primitives)
         )
     if obj.subobjects:
         hints.append(
@@ -2699,25 +2784,27 @@ def bridge_summary_backend_compatibility(
     )
     notes = []
     external_primitives = sorted(
-        name for name in unsupported_primitives
+        name for name in primitive_calls
         if name in BACKEND_EXTERNAL_EFFECT_PRIMITIVES
     )
-    account_code_primitives = sorted(
-        name for name in unsupported_primitives
-        if name in BACKEND_EXTERNAL_ACCOUNT_CODE_PRIMITIVES
+    account_query_primitives = sorted(
+        name for name in primitive_calls
+        if name in BACKEND_EXTERNAL_ACCOUNT_QUERY_PRIMITIVES
     )
     if external_primitives:
         notes.append(
-            "current backend does not lower external call/create primitives"
+            "CALL/CALLCODE/DELEGATECALL/STATICCALL and CREATE/CREATE2 are "
+            "covered by the open external-boundary proof surface"
         )
-    if account_code_primitives:
+    if account_query_primitives:
         notes.append(
-            "current backend does not lower external account-code inspection primitives"
+            "BALANCE and external account-code inspection are covered by "
+            "state/query and code-image preservation"
         )
     if dialect_builtin_names:
         notes.append(
-            "verbatim and EOF dialect builtins are intentionally rejected before "
-            "executable core Yul lowering"
+            "pc/raw-EVM and verbatim/EOF dialect builtins are intentionally "
+            "rejected before executable core Yul lowering"
         )
     if linker_object_builtins:
         notes.append(
@@ -2725,7 +2812,8 @@ def bridge_summary_backend_compatibility(
         )
     if computed_object_builtins:
         notes.append(
-            "computed object/data builtins are resolved by the object-image path"
+            "computed object/data and memoryguard builtins are resolved by the "
+            "object-image path"
         )
     if unsupported_primitives or dialect_builtin_names:
         status = "blocked"

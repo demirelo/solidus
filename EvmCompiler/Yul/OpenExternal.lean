@@ -15,9 +15,9 @@ abbrev Stack := EvmYul.Stack Word
 The external call-family operations that should be compared as open
 interactions with the outside world.
 
-This deliberately excludes `CREATE`/`CREATE2`; contract creation needs its own
-request shape because the returned address and deployed code are part of the
-observable interaction.
+`CREATE`/`CREATE2` use `CreateKind` because their request/response payloads are
+different, but the generic open-boundary code below combines both families in
+`BoundaryKind`.
 -/
 inductive CallKind where
   | call
@@ -131,6 +131,120 @@ theorem CreateKind.toYulOperation_eq_ofYulOperation?
     (kind : CreateKind) :
     CreateKind.ofEVMOperation? kind.toEVMOperation = some kind := by
   cases kind <;> rfl
+
+/--
+One positive classifier for operations that suspend at the open external-world
+boundary.
+
+The legacy `CallKind`/`CreateKind` classifiers remain the local request-shape
+specialists. `BoundaryKind` is the extension point used by generic trace and
+stepping code: adding another suspending opcode family should extend this type
+and its operation classifiers, rather than introduce another parallel
+`With...` relation family.
+-/
+inductive BoundaryKind where
+  | call : CallKind → BoundaryKind
+  | create : CreateKind → BoundaryKind
+  deriving DecidableEq, Repr
+
+namespace BoundaryKind
+
+def toYulOperation : BoundaryKind → EvmYul.Operation .Yul
+  | .call kind => kind.toYulOperation
+  | .create kind => kind.toYulOperation
+
+def toEVMOperation : BoundaryKind → EvmYul.Operation .EVM
+  | .call kind => kind.toEVMOperation
+  | .create kind => kind.toEVMOperation
+
+def ofYulOperation? (op : EvmYul.Operation .Yul) : Option BoundaryKind :=
+  match CallKind.ofYulOperation? op with
+  | some kind => some (.call kind)
+  | none =>
+      match CreateKind.ofYulOperation? op with
+      | some kind => some (.create kind)
+      | none => none
+
+def ofEVMOperation? (op : EvmYul.Operation .EVM) : Option BoundaryKind :=
+  match CallKind.ofEVMOperation? op with
+  | some kind => some (.call kind)
+  | none =>
+      match CreateKind.ofEVMOperation? op with
+      | some kind => some (.create kind)
+      | none => none
+
+@[simp] theorem ofYulOperation?_toYulOperation
+    (kind : BoundaryKind) :
+    ofYulOperation? kind.toYulOperation = some kind := by
+  cases kind with
+  | call kind => cases kind <;> rfl
+  | create kind => cases kind <;> rfl
+
+@[simp] theorem ofEVMOperation?_toEVMOperation
+    (kind : BoundaryKind) :
+    ofEVMOperation? kind.toEVMOperation = some kind := by
+  cases kind with
+  | call kind => cases kind <;> rfl
+  | create kind => cases kind <;> rfl
+
+theorem callKind_of_ofEVMOperation?_call
+    {op : EvmYul.Operation .EVM} {kind : CallKind}
+    (hKind : ofEVMOperation? op = some (.call kind)) :
+    CallKind.ofEVMOperation? op = some kind := by
+  unfold ofEVMOperation? at hKind
+  cases hCall : CallKind.ofEVMOperation? op with
+  | none =>
+      cases hCreate : CreateKind.ofEVMOperation? op with
+      | none =>
+          simp [hCall, hCreate] at hKind
+      | some createKind =>
+          simp [hCall, hCreate] at hKind
+  | some callKind =>
+      simp [hCall] at hKind
+      cases hKind
+      rfl
+
+theorem createKind_of_ofEVMOperation?_create
+    {op : EvmYul.Operation .EVM} {kind : CreateKind}
+    (hKind : ofEVMOperation? op = some (.create kind)) :
+    CreateKind.ofEVMOperation? op = some kind := by
+  unfold ofEVMOperation? at hKind
+  cases hCall : CallKind.ofEVMOperation? op with
+  | none =>
+      cases hCreate : CreateKind.ofEVMOperation? op with
+      | none =>
+          simp [hCall, hCreate] at hKind
+      | some createKind =>
+          simp [hCall, hCreate] at hKind
+          cases hKind
+          rfl
+  | some callKind =>
+      simp [hCall] at hKind
+
+theorem ofEVMOperation?_none_iff
+    {op : EvmYul.Operation .EVM} :
+    ofEVMOperation? op = none ↔
+      CallKind.ofEVMOperation? op = none ∧
+        CreateKind.ofEVMOperation? op = none := by
+  unfold ofEVMOperation?
+  cases hCall : CallKind.ofEVMOperation? op with
+  | some callKind =>
+      simp [hCall]
+  | none =>
+      cases hCreate : CreateKind.ofEVMOperation? op with
+      | some createKind =>
+          simp [hCall, hCreate]
+      | none =>
+          simp [hCall, hCreate]
+
+theorem ofEVMOperation?_none
+    {op : EvmYul.Operation .EVM}
+    (hCall : CallKind.ofEVMOperation? op = none)
+    (hCreate : CreateKind.ofEVMOperation? op = none) :
+    ofEVMOperation? op = none :=
+  ofEVMOperation?_none_iff.mpr ⟨hCall, hCreate⟩
+
+end BoundaryKind
 
 /--
 The request that is visible to the external environment.
@@ -973,6 +1087,50 @@ def evmOperands? : CreateKind → Stack → Option (Stack × CreateOperands)
       some (stackRest, kind.canonicalOperands operands) := by
   cases kind <;> rfl
 
+theorem exists_operands_of_reverse_args_length
+    (kind : CreateKind) {values : List Word}
+    (hLength : values.length = kind.inputArity) :
+    ∃ operands : CreateOperands,
+      values = (kind.args operands).reverse := by
+  cases kind
+  · cases values with
+    | nil => simp [CreateKind.inputArity] at hLength
+    | cons initSize values =>
+      cases values with
+      | nil => simp [CreateKind.inputArity] at hLength
+      | cons initOffset values =>
+        cases values with
+        | nil => simp [CreateKind.inputArity] at hLength
+        | cons value values =>
+          cases values with
+          | nil =>
+              exact
+                ⟨{ value := value
+                   initOffset := initOffset
+                   initSize := initSize
+                   saltArg := EvmYul.UInt256.ofNat 0 }, rfl⟩
+          | cons _ _ => simp [CreateKind.inputArity] at hLength
+  · cases values with
+    | nil => simp [CreateKind.inputArity] at hLength
+    | cons salt values =>
+      cases values with
+      | nil => simp [CreateKind.inputArity] at hLength
+      | cons initSize values =>
+        cases values with
+        | nil => simp [CreateKind.inputArity] at hLength
+        | cons initOffset values =>
+          cases values with
+          | nil => simp [CreateKind.inputArity] at hLength
+          | cons value values =>
+            cases values with
+            | nil =>
+                exact
+                  ⟨{ value := value
+                     initOffset := initOffset
+                     initSize := initSize
+                     saltArg := salt }, rfl⟩
+            | cons _ _ => simp [CreateKind.inputArity] at hLength
+
 def yulCreateSite?
     (state : EvmYul.Yul.State) (kind : CreateKind) (args : List Word) :
     Option CreateSite :=
@@ -1073,6 +1231,64 @@ theorem createSite_eq_of_args
 
 end CreateKind
 
+namespace BoundaryKind
+
+def toBasicOp : BoundaryKind → Structured.BasicOp
+  | .call kind => kind.toBasicOp
+  | .create kind => kind.toBasicOp
+
+@[simp] theorem toBasicOp?_toYulOperation (kind : BoundaryKind) :
+    Prim.toBasicOp? kind.toYulOperation = some kind.toBasicOp := by
+  cases kind with
+  | call kind =>
+      simp [BoundaryKind.toYulOperation, BoundaryKind.toBasicOp]
+  | create kind =>
+      simp [BoundaryKind.toYulOperation, BoundaryKind.toBasicOp]
+
+theorem toBasicOp_eq_ofYulOperation?_toBasicOp?
+    {yulOp : EvmYul.Operation .Yul} {kind : BoundaryKind}
+    {op : Structured.BasicOp}
+    (hKind : BoundaryKind.ofYulOperation? yulOp = some kind)
+    (hBasic : Prim.toBasicOp? yulOp = some op) :
+    op = kind.toBasicOp := by
+  cases kind with
+  | call callKind =>
+      have hCall :
+          CallKind.ofYulOperation? yulOp = some callKind := by
+        unfold BoundaryKind.ofYulOperation? at hKind
+        cases hCall : CallKind.ofYulOperation? yulOp with
+        | none =>
+            cases hCreate : CreateKind.ofYulOperation? yulOp with
+            | none =>
+                simp [hCall, hCreate] at hKind
+            | some found =>
+                simp [hCall, hCreate] at hKind
+        | some found =>
+            simp [hCall] at hKind
+            cases hKind
+            rfl
+      simpa [BoundaryKind.toBasicOp] using
+        CallKind.toBasicOp_eq_ofYulOperation? hCall hBasic
+  | create createKind =>
+      have hCreate :
+          CreateKind.ofYulOperation? yulOp = some createKind := by
+        unfold BoundaryKind.ofYulOperation? at hKind
+        cases hCall : CallKind.ofYulOperation? yulOp with
+        | some found =>
+            simp [hCall] at hKind
+        | none =>
+            cases hCreate : CreateKind.ofYulOperation? yulOp with
+            | none =>
+                simp [hCall, hCreate] at hKind
+            | some found =>
+                simp [hCall, hCreate] at hKind
+                cases hKind
+                rfl
+      simpa [BoundaryKind.toBasicOp] using
+        CreateKind.toBasicOp_eq_ofYulOperation? hCreate hBasic
+
+end BoundaryKind
+
 /--
 An abstract mutation of contract-visible internal state while the caller frame is
 suspended at an external call.
@@ -1149,6 +1365,38 @@ def failureZero : CreateResponse where
   internalMutation := ReentrantStateMutation.identity
 
 end CreateResponse
+
+/--
+One response predicate for all currently modeled external boundary events.
+
+This is deliberately a record instead of another call/create theorem family:
+generic trace code should carry one `BoundaryResponsesSatisfy` certificate and
+project the call/create components only at compatibility boundaries.
+-/
+structure BoundaryResponsePredicate : Type where
+  call : CallResponse → Prop
+  create : CreateResponse → Prop
+
+namespace BoundaryResponsePredicate
+
+def callOnly (responseRel : CallResponse → Prop) :
+    BoundaryResponsePredicate where
+  call := responseRel
+  create := fun _ => True
+
+def createOnly (responseRel : CreateResponse → Prop) :
+    BoundaryResponsePredicate where
+  call := fun _ => True
+  create := responseRel
+
+def both
+    (callResponseRel : CallResponse → Prop)
+    (createResponseRel : CreateResponse → Prop) :
+    BoundaryResponsePredicate where
+  call := callResponseRel
+  create := createResponseRel
+
+end BoundaryResponsePredicate
 
 /--
 The caller-local memory update induced by a response. This is shared by the Yul
@@ -1924,9 +2172,12 @@ Open analogue of imported `Yul.evalValues`.
 
 Non-external primitive calls still delegate to the imported closed primitive
 semantics after their arguments are evaluated. CALL-family primitive calls
-suspend at `CallKind.yulPrimitiveEvalValuesOpenCall?`, and internal user calls
-run through `YulOpen.call` so CALL-family operations in callee bodies remain
-visible to the open boundary.
+suspend at `CallKind.yulPrimitiveEvalValuesOpenCall?`. CREATE-family primitive
+calls suspend at `CreateKind.yulPrimitiveEvalValuesOpenCreate?`; if a CREATE
+opcode has malformed operands, the open semantics reports invalid arguments
+instead of falling through to the imported closed interpreter's default branch.
+Internal user calls run through `YulOpen.call` so external operations in callee
+bodies remain visible to the open boundary.
 -/
 def evalValues (fuel : Nat) (expr : Expr)
     (codeOverride : Option Contract) (state : State) :
@@ -1949,7 +2200,10 @@ def evalValues (fuel : Nat) (expr : Expr)
                   | some create =>
                       .create (YulOpenResult.liftExceptCreate create)
                   | none =>
-                      .done (EvmYul.Yul.primCall fuel' pair.1 prim pair.2)
+                      match CreateKind.ofYulOperation? prim with
+                      | some _ => .error .InvalidArguments
+                      | none =>
+                          .done (EvmYul.Yul.primCall fuel' pair.1 prim pair.2)
       | .Call (.inr functionName) args =>
           YulOpenResult.bind
             (reverseResult (evalArgs fuel' args.reverse codeOverride state))
@@ -1987,8 +2241,11 @@ def execPrimCall (fuel : Nat) (prim : EvmYul.Operation .Yul)
               fun result =>
                 .done (EvmYul.Yul.multifill' vars (.ok result))
         | none =>
-            .done (EvmYul.Yul.multifill' vars
-              (EvmYul.Yul.primCall fuel pair.1 prim pair.2))
+            match CreateKind.ofYulOperation? prim with
+            | some _ => .error .InvalidArguments
+            | none =>
+                .done (EvmYul.Yul.multifill' vars
+                  (EvmYul.Yul.primCall fuel pair.1 prim pair.2))
 
 def execCall (fuel : Nat) (functionName : EvmYul.Yul.Ast.YulFunctionName)
     (vars : List EvmYul.Identifier) (codeOverride : Option Contract)
@@ -2267,12 +2524,35 @@ theorem evalValues_prim_call_closed_of_evalArgs_done_no_open
     (hCreate :
       CreateKind.yulPrimitiveEvalValuesOpenCreate?
           stateAfterArgs prim rawValues.reverse =
-        none) :
+        none)
+    (hNotCreate :
+      CreateKind.ofYulOperation? prim = none) :
   evalValues fuel.succ (.Call (.inl prim) args) codeOverride state =
       .done
         (EvmYul.Yul.primCall fuel stateAfterArgs prim rawValues.reverse) := by
   simp [evalValues, reverseResult, YulOpenResult.map, YulOpenResult.ok,
-    hArgs, hCall, hCreate]
+    hArgs, hCall, hCreate, hNotCreate]
+
+theorem evalValues_prim_create_invalidArgs_of_evalArgs_done_no_open
+    {fuel : Nat} {prim : EvmYul.Operation .Yul} {args : List Expr}
+    {codeOverride : Option Contract} {state stateAfterArgs : State}
+    {rawValues : List Word} {kind : CreateKind}
+    (hArgs :
+      evalArgs fuel args.reverse codeOverride state =
+        .done (.ok (stateAfterArgs, rawValues)))
+    (hCall :
+      CallKind.yulPrimitiveEvalValuesOpenCall?
+          stateAfterArgs prim rawValues.reverse =
+        none)
+    (hCreate :
+      CreateKind.yulPrimitiveEvalValuesOpenCreate?
+          stateAfterArgs prim rawValues.reverse =
+        none)
+    (hKind : CreateKind.ofYulOperation? prim = some kind) :
+  evalValues fuel.succ (.Call (.inl prim) args) codeOverride state =
+      .error .InvalidArguments := by
+  simp [evalValues, reverseResult, YulOpenResult.map, YulOpenResult.ok,
+    hArgs, hCall, hCreate, hKind]
 
 theorem evalValues_prim_create_suspends_of_evalArgs_done
     {fuel : Nat} {prim : EvmYul.Operation .Yul} {args : List Expr}
@@ -2443,37 +2723,95 @@ depend on the two suspended calls, since the external response relation for
 stateful calls is usually determined by the source/target pre-call states
 captured by those continuations.
 -/
-inductive OpenResultRel
+inductive OpenResultRelWithCreate
     {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
     (callResponseRel :
       OpenCall (OpenResult ε₁ α) →
         OpenCall (OpenResult ε₂ β) → CallResponse → Prop)
-    (doneRel : Except ε₁ α → Except ε₂ β → Prop) :
+    (doneRel : Except ε₁ α → Except ε₂ β → Prop)
+    (createResponseRel :
+      OpenCreate (OpenResult ε₁ α) →
+        OpenCreate (OpenResult ε₂ β) → CreateResponse → Prop) :
     OpenResult ε₁ α → OpenResult ε₂ β → Prop where
   | done {sourceDone : Except ε₁ α} {targetDone : Except ε₂ β} :
       doneRel sourceDone targetDone →
-      OpenResultRel callResponseRel doneRel
+      OpenResultRelWithCreate callResponseRel doneRel createResponseRel
         (.done sourceDone) (.done targetDone)
   | call
       {sourceCall : OpenCall (OpenResult ε₁ α)}
       {targetCall : OpenCall (OpenResult ε₂ β)} :
       sourceCall.site = targetCall.site →
       (∀ response, callResponseRel sourceCall targetCall response →
-        OpenResultRel callResponseRel doneRel
+        OpenResultRelWithCreate callResponseRel doneRel createResponseRel
           (sourceCall.resume response) (targetCall.resume response)) →
-      OpenResultRel callResponseRel doneRel
+      OpenResultRelWithCreate callResponseRel doneRel createResponseRel
         (.call sourceCall) (.call targetCall)
   | create
       {sourceCreate : OpenCreate (OpenResult ε₁ α)}
       {targetCreate : OpenCreate (OpenResult ε₂ β)} :
       sourceCreate.site = targetCreate.site →
-      (∀ response,
-        OpenResultRel callResponseRel doneRel
+      (∀ response, createResponseRel sourceCreate targetCreate response →
+        OpenResultRelWithCreate callResponseRel doneRel createResponseRel
           (sourceCreate.resume response) (targetCreate.resume response)) →
-      OpenResultRel callResponseRel doneRel
+      OpenResultRelWithCreate callResponseRel doneRel createResponseRel
         (.create sourceCreate) (.create targetCreate)
 
+abbrev OpenResultRel
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    (callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop)
+    (doneRel : Except ε₁ α → Except ε₂ β → Prop) :
+    OpenResult ε₁ α → OpenResult ε₂ β → Prop :=
+  OpenResultRelWithCreate callResponseRel doneRel (fun _ _ _ => True)
+
 namespace OpenResultRel
+
+theorem done
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {sourceDone : Except ε₁ α} {targetDone : Except ε₂ β}
+    (hDone : doneRel sourceDone targetDone) :
+    OpenResultRel callResponseRel doneRel
+      (.done sourceDone) (.done targetDone) :=
+  OpenResultRelWithCreate.done hDone
+
+theorem call
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {sourceCall : OpenCall (OpenResult ε₁ α)}
+    {targetCall : OpenCall (OpenResult ε₂ β)}
+    (hSite : sourceCall.site = targetCall.site)
+    (hResume :
+      ∀ response, callResponseRel sourceCall targetCall response →
+        OpenResultRel callResponseRel doneRel
+          (sourceCall.resume response) (targetCall.resume response)) :
+    OpenResultRel callResponseRel doneRel
+      (.call sourceCall) (.call targetCall) :=
+  OpenResultRelWithCreate.call hSite hResume
+
+theorem create
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {sourceCreate : OpenCreate (OpenResult ε₁ α)}
+    {targetCreate : OpenCreate (OpenResult ε₂ β)}
+    (hSite : sourceCreate.site = targetCreate.site)
+    (hResume :
+      ∀ response,
+        OpenResultRel callResponseRel doneRel
+          (sourceCreate.resume response) (targetCreate.resume response)) :
+    OpenResultRel callResponseRel doneRel
+      (.create sourceCreate) (.create targetCreate) :=
+  OpenResultRelWithCreate.create hSite (fun response _ => hResume response)
 
 theorem bind
     {ε₁ : Type u} {ε₂ : Type v}
@@ -2527,9 +2865,87 @@ theorem bind
       rw [OpenResult.bind_create, OpenResult.bind_create]
       exact OpenResultRel.create hSite (by
         intro response
-        exact ih response)
+        exact ih response trivial)
 
 end OpenResultRel
+
+namespace OpenResultRelWithCreate
+
+theorem bind
+    {ε₁ : Type u} {ε₂ : Type v}
+    {α : Type w} {β : Type} {γ : Type} {δ : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {createResponseRel :
+      OpenCreate (OpenResult ε₁ α) →
+        OpenCreate (OpenResult ε₂ β) → CreateResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {callResponseRel' :
+      OpenCall (OpenResult ε₁ γ) →
+        OpenCall (OpenResult ε₂ δ) → CallResponse → Prop}
+    {createResponseRel' :
+      OpenCreate (OpenResult ε₁ γ) →
+        OpenCreate (OpenResult ε₂ δ) → CreateResponse → Prop}
+    {doneRel' : Except ε₁ γ → Except ε₂ δ → Prop}
+    {source : OpenResult ε₁ α} {target : OpenResult ε₂ β}
+    {sourceNext : α → OpenResult ε₁ γ}
+    {targetNext : β → OpenResult ε₂ δ}
+    (hRel :
+      OpenResultRelWithCreate callResponseRel doneRel createResponseRel
+        source target)
+    (hDone :
+      ∀ {sourceDone targetDone},
+        doneRel sourceDone targetDone →
+          OpenResultRelWithCreate callResponseRel' doneRel'
+            createResponseRel'
+            (match sourceDone with
+            | .ok value => sourceNext value
+            | .error err => .done (.error err))
+            (match targetDone with
+            | .ok value => targetNext value
+            | .error err => .done (.error err)))
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel'
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenResult.bind (sourceCall.resume response) sourceNext }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenResult.bind (targetCall.resume response) targetNext }
+          response →
+        callResponseRel sourceCall targetCall response)
+    (hCreateResponse :
+      ∀ {sourceCreate targetCreate response},
+        createResponseRel'
+          { site := sourceCreate.site
+            resume := fun response =>
+              OpenResult.bind (sourceCreate.resume response) sourceNext }
+          { site := targetCreate.site
+            resume := fun response =>
+              OpenResult.bind (targetCreate.resume response) targetNext }
+          response →
+        createResponseRel sourceCreate targetCreate response) :
+    OpenResultRelWithCreate callResponseRel' doneRel' createResponseRel'
+      (OpenResult.bind source sourceNext)
+      (OpenResult.bind target targetNext) := by
+  induction hRel with
+  | @done sourceDone targetDone hDoneRel =>
+      cases sourceDone <;> cases targetDone <;>
+        exact hDone hDoneRel
+  | call hSite _hResume ih =>
+      rw [OpenResult.bind_call, OpenResult.bind_call]
+      exact OpenResultRelWithCreate.call hSite (by
+        intro response hResponse
+        exact ih response (hCallResponse hResponse))
+  | create hSite _hResume ih =>
+      rw [OpenResult.bind_create, OpenResult.bind_create]
+      exact OpenResultRelWithCreate.create hSite (by
+        intro response hResponse
+        exact ih response (hCreateResponse hResponse))
+
+end OpenResultRelWithCreate
 
 namespace CreateSite
 
@@ -2616,6 +3032,89 @@ def ResponsesSatisfy
     | none => responseRel event.response
     | some _ => True
 
+def CreateResponsesSatisfy
+    (responseRel : CreateResponse → Prop) (trace : OpenTrace) : Prop :=
+  ∀ event, event ∈ trace →
+    match event.create? with
+    | none => True
+    | some (_site, response) => responseRel response
+
+def BoundaryResponsesSatisfy
+    (responseRel : BoundaryResponsePredicate) (trace : OpenTrace) : Prop :=
+  ∀ event, event ∈ trace →
+    match event.create? with
+    | none => responseRel.call event.response
+    | some (_site, response) => responseRel.create response
+
+namespace BoundaryResponsesSatisfy
+
+theorem append
+    {responseRel : BoundaryResponsePredicate} {left right : OpenTrace}
+    (hLeft : BoundaryResponsesSatisfy responseRel left)
+    (hRight : BoundaryResponsesSatisfy responseRel right) :
+    BoundaryResponsesSatisfy responseRel (left ++ right) := by
+  intro event hMem
+  rcases List.mem_append.mp hMem with hMem | hMem
+  · exact hLeft event hMem
+  · exact hRight event hMem
+
+theorem left_of_append
+    {responseRel : BoundaryResponsePredicate} {left right : OpenTrace}
+    (hTrace : BoundaryResponsesSatisfy responseRel (left ++ right)) :
+    BoundaryResponsesSatisfy responseRel left := by
+  intro event hMem
+  exact hTrace event (List.mem_append_left _ hMem)
+
+theorem right_of_append
+    {responseRel : BoundaryResponsePredicate} {left right : OpenTrace}
+    (hTrace : BoundaryResponsesSatisfy responseRel (left ++ right)) :
+    BoundaryResponsesSatisfy responseRel right := by
+  intro event hMem
+  exact hTrace event (List.mem_append_right _ hMem)
+
+theorem to_responsesSatisfy
+    {responseRel : BoundaryResponsePredicate} {trace : OpenTrace}
+    (hTrace : BoundaryResponsesSatisfy responseRel trace) :
+    ResponsesSatisfy responseRel.call trace := by
+  intro event hMem
+  cases hCreate : event.create? with
+  | none =>
+      simpa [ResponsesSatisfy, hCreate] using hTrace event hMem
+  | some create =>
+      simpa [ResponsesSatisfy, hCreate]
+
+theorem to_createResponsesSatisfy
+    {responseRel : BoundaryResponsePredicate} {trace : OpenTrace}
+    (hTrace : BoundaryResponsesSatisfy responseRel trace) :
+    CreateResponsesSatisfy responseRel.create trace := by
+  intro event hMem
+  cases hCreate : event.create? with
+  | none =>
+      simpa [CreateResponsesSatisfy, hCreate]
+  | some create =>
+      simpa [CreateResponsesSatisfy, hCreate] using hTrace event hMem
+
+theorem of_responsesSatisfy_of_createResponsesSatisfy
+    {callResponseRel : CallResponse → Prop}
+    {createResponseRel : CreateResponse → Prop}
+    {trace : OpenTrace}
+    (hCall : ResponsesSatisfy callResponseRel trace)
+    (hCreate : CreateResponsesSatisfy createResponseRel trace) :
+    BoundaryResponsesSatisfy
+      (BoundaryResponsePredicate.both callResponseRel createResponseRel)
+      trace := by
+  intro event hMem
+  cases hCreate? : event.create? with
+  | none =>
+      simpa [BoundaryResponsePredicate.both, hCreate?] using
+        hCall event hMem
+  | some create =>
+      rcases create with ⟨site, response⟩
+      simpa [BoundaryResponsePredicate.both, hCreate?] using
+        hCreate event hMem
+
+end BoundaryResponsesSatisfy
+
 theorem append
     {responseRel : CallResponse → Prop} {left right : OpenTrace}
     (hLeft : ResponsesSatisfy responseRel left)
@@ -2639,6 +3138,34 @@ theorem right_of_append
     ResponsesSatisfy responseRel right := by
   intro event hMem
   exact hTrace event (List.mem_append_right _ hMem)
+
+namespace CreateResponsesSatisfy
+
+theorem append
+    {responseRel : CreateResponse → Prop} {left right : OpenTrace}
+    (hLeft : CreateResponsesSatisfy responseRel left)
+    (hRight : CreateResponsesSatisfy responseRel right) :
+    CreateResponsesSatisfy responseRel (left ++ right) := by
+  intro event hMem
+  rcases List.mem_append.mp hMem with hMem | hMem
+  · exact hLeft event hMem
+  · exact hRight event hMem
+
+theorem left_of_append
+    {responseRel : CreateResponse → Prop} {left right : OpenTrace}
+    (hTrace : CreateResponsesSatisfy responseRel (left ++ right)) :
+    CreateResponsesSatisfy responseRel left := by
+  intro event hMem
+  exact hTrace event (List.mem_append_left _ hMem)
+
+theorem right_of_append
+    {responseRel : CreateResponse → Prop} {left right : OpenTrace}
+    (hTrace : CreateResponsesSatisfy responseRel (left ++ right)) :
+    CreateResponsesSatisfy responseRel right := by
+  intro event hMem
+  exact hTrace event (List.mem_append_right _ hMem)
+
+end CreateResponsesSatisfy
 
 end OpenTrace
 
@@ -3450,6 +3977,650 @@ theorem bind_nil
 
 end OpenResultPathRel
 
+inductive OpenResultPathRelWithCreate
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    (callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop)
+    (doneRel : Except ε₁ α → Except ε₂ β → Prop)
+    (createResponseRel :
+      OpenCreate (OpenResult ε₁ α) →
+        OpenCreate (OpenResult ε₂ β) → CreateResponse → Prop) :
+    OpenTrace → OpenResult ε₁ α → OpenResult ε₂ β → Prop where
+  | done {sourceDone : Except ε₁ α} {targetDone : Except ε₂ β} :
+      doneRel sourceDone targetDone →
+      OpenResultPathRelWithCreate callResponseRel doneRel createResponseRel []
+        (.done sourceDone) (.done targetDone)
+  | call
+      {sourceCall : OpenCall (OpenResult ε₁ α)}
+      {targetCall : OpenCall (OpenResult ε₂ β)}
+      {response : CallResponse} {trace : OpenTrace} :
+      sourceCall.site = targetCall.site →
+      callResponseRel sourceCall targetCall response →
+      OpenResultPathRelWithCreate callResponseRel doneRel createResponseRel
+        trace (sourceCall.resume response) (targetCall.resume response) →
+      OpenResultPathRelWithCreate callResponseRel doneRel createResponseRel
+        (OpenEvent.call sourceCall.site response :: trace)
+        (.call sourceCall) (.call targetCall)
+  | create
+      {sourceCreate : OpenCreate (OpenResult ε₁ α)}
+      {targetCreate : OpenCreate (OpenResult ε₂ β)}
+      {response : CreateResponse} {trace : OpenTrace} :
+      sourceCreate.site = targetCreate.site →
+      createResponseRel sourceCreate targetCreate response →
+      OpenResultPathRelWithCreate callResponseRel doneRel createResponseRel
+        trace (sourceCreate.resume response) (targetCreate.resume response) →
+      OpenResultPathRelWithCreate callResponseRel doneRel createResponseRel
+        (OpenEvent.create sourceCreate.site response :: trace)
+        (.create sourceCreate) (.create targetCreate)
+
+namespace OpenResultPathRelWithCreate
+
+theorem toOpenResultPathRel
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {createResponseRel :
+      OpenCreate (OpenResult ε₁ α) →
+        OpenCreate (OpenResult ε₂ β) → CreateResponse → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β}
+    (hRel :
+      OpenResultPathRelWithCreate callResponseRel doneRel createResponseRel
+        trace source target) :
+    OpenResultPathRel callResponseRel doneRel trace source target := by
+  induction hRel with
+  | done hDone =>
+      exact OpenResultPathRel.done hDone
+  | call hSite hResponse _hTail ih =>
+      exact OpenResultPathRel.call hSite hResponse ih
+  | create hSite _hResponse _hTail ih =>
+      exact OpenResultPathRel.create hSite ih
+
+theorem resolves
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {createResponseRel :
+      OpenCreate (OpenResult ε₁ α) →
+        OpenCreate (OpenResult ε₂ β) → CreateResponse → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β}
+    (hRel :
+      OpenResultPathRelWithCreate callResponseRel doneRel createResponseRel
+        trace source target) :
+    ∃ sourceDone targetDone,
+      OpenResultResolves source trace sourceDone ∧
+        OpenResultResolves target trace targetDone ∧
+          doneRel sourceDone targetDone :=
+  hRel.toOpenResultPathRel.resolves
+
+theorem of_resolves_of_responsesSatisfy
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {callResponseRel : CallResponse → Prop}
+    {createResponseRel : CreateResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β}
+    {sourceDone : Except ε₁ α} {targetDone : Except ε₂ β}
+    (hSource : OpenResultResolves source trace sourceDone)
+    (hTarget : OpenResultResolves target trace targetDone)
+    (hCallResponses : OpenTrace.ResponsesSatisfy callResponseRel trace)
+    (hCreateResponses :
+      OpenTrace.CreateResponsesSatisfy createResponseRel trace)
+    (hDone : doneRel sourceDone targetDone) :
+    OpenResultPathRelWithCreate
+      (fun _sourceCall _targetCall response => callResponseRel response)
+      doneRel
+      (fun _sourceCreate _targetCreate response => createResponseRel response)
+      trace source target := by
+  induction hSource generalizing target with
+  | done =>
+      cases hTarget
+      exact OpenResultPathRelWithCreate.done hDone
+  | @call sourceCall response trace sourceDone hSource ih =>
+      cases target with
+      | done targetDone =>
+          cases hTarget
+      | call targetCall =>
+          rcases OpenResultResolves.call_inv hTarget with
+            ⟨targetResponse, hEvent, hTargetTail⟩
+          have hSite : sourceCall.site = targetCall.site :=
+            congrArg OpenEvent.site hEvent
+          have hResponse : response = targetResponse :=
+            congrArg OpenEvent.response hEvent
+          subst targetResponse
+          apply OpenResultPathRelWithCreate.call (sourceCall := sourceCall)
+            (targetCall := targetCall) hSite
+          · exact
+              hCallResponses
+                (OpenEvent.call sourceCall.site response) (by simp)
+          · exact ih hTargetTail (by
+              intro event hMem
+              exact hCallResponses event (List.mem_cons_of_mem _ hMem)) (by
+              intro event hMem
+              exact hCreateResponses event (List.mem_cons_of_mem _ hMem)) hDone
+      | create targetCreate =>
+          rcases OpenResultResolves.create_inv hTarget with
+            ⟨targetResponse, hEvent, _hTargetTail⟩
+          have hImpossible :
+              none =
+                some (targetCreate.site, targetResponse) :=
+            congrArg OpenEvent.create? hEvent
+          simp at hImpossible
+  | @create sourceCreate response trace sourceDone hSource ih =>
+      cases target with
+      | done targetDone =>
+          cases hTarget
+      | call targetCall =>
+          rcases OpenResultResolves.call_inv hTarget with
+            ⟨targetResponse, hEvent, _hTargetTail⟩
+          have hImpossible :
+              some (sourceCreate.site, response) = none :=
+            congrArg OpenEvent.create? hEvent
+          simp at hImpossible
+      | create targetCreate =>
+          rcases OpenResultResolves.create_inv hTarget with
+            ⟨targetResponse, hEvent, hTargetTail⟩
+          have hSite : sourceCreate.site = targetCreate.site := by
+            have hSome :
+                some (sourceCreate.site, response) =
+                  some (targetCreate.site, targetResponse) :=
+              congrArg OpenEvent.create? hEvent
+            have hPair :
+                (sourceCreate.site, response) =
+                  (targetCreate.site, targetResponse) := by
+              injection hSome with hPair
+            exact congrArg Prod.fst hPair
+          have hResponse : response = targetResponse := by
+            have hSome :
+                some (sourceCreate.site, response) =
+                  some (targetCreate.site, targetResponse) :=
+              congrArg OpenEvent.create? hEvent
+            have hPair :
+                (sourceCreate.site, response) =
+                  (targetCreate.site, targetResponse) := by
+              injection hSome with hPair
+            exact congrArg Prod.snd hPair
+          subst targetResponse
+          apply OpenResultPathRelWithCreate.create (sourceCreate := sourceCreate)
+            (targetCreate := targetCreate) hSite
+          · exact
+              hCreateResponses
+                (OpenEvent.create sourceCreate.site response) (by simp)
+          · exact ih hTargetTail (by
+              intro event hMem
+              exact hCallResponses event (List.mem_cons_of_mem _ hMem)) (by
+              intro event hMem
+              exact hCreateResponses event (List.mem_cons_of_mem _ hMem)) hDone
+
+theorem bind
+    {ε₁ : Type u} {ε₂ : Type v}
+    {α : Type w} {β : Type} {γ : Type} {δ : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {createResponseRel :
+      OpenCreate (OpenResult ε₁ α) →
+        OpenCreate (OpenResult ε₂ β) → CreateResponse → Prop}
+    {callResponseRel' :
+      OpenCall (OpenResult ε₁ γ) →
+        OpenCall (OpenResult ε₂ δ) → CallResponse → Prop}
+    {doneRel' : Except ε₁ γ → Except ε₂ δ → Prop}
+    {createResponseRel' :
+      OpenCreate (OpenResult ε₁ γ) →
+        OpenCreate (OpenResult ε₂ δ) → CreateResponse → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β}
+    {sourceNext : α → OpenResult ε₁ γ}
+    {targetNext : β → OpenResult ε₂ δ}
+    (hRel :
+      OpenResultPathRelWithCreate callResponseRel doneRel createResponseRel
+        trace source target)
+    (hDone :
+      ∀ {sourceDone targetDone},
+        doneRel sourceDone targetDone →
+          ∃ tailTrace,
+            OpenResultPathRelWithCreate callResponseRel' doneRel'
+              createResponseRel' tailTrace
+              (match sourceDone with
+              | .ok value => sourceNext value
+              | .error err => .done (.error err))
+              (match targetDone with
+              | .ok value => targetNext value
+              | .error err => .done (.error err)))
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel sourceCall targetCall response →
+          callResponseRel'
+            { site := sourceCall.site
+              resume := fun response =>
+                OpenResult.bind (sourceCall.resume response) sourceNext }
+            { site := targetCall.site
+              resume := fun response =>
+                OpenResult.bind (targetCall.resume response) targetNext }
+            response)
+    (hCreateResponse :
+      ∀ {sourceCreate targetCreate response},
+        createResponseRel sourceCreate targetCreate response →
+          createResponseRel'
+            { site := sourceCreate.site
+              resume := fun response =>
+                OpenResult.bind (sourceCreate.resume response) sourceNext }
+            { site := targetCreate.site
+              resume := fun response =>
+                OpenResult.bind (targetCreate.resume response) targetNext }
+            response) :
+    ∃ tailTrace,
+      OpenResultPathRelWithCreate callResponseRel' doneRel'
+        createResponseRel' (trace ++ tailTrace)
+        (OpenResult.bind source sourceNext)
+        (OpenResult.bind target targetNext) := by
+  induction hRel with
+  | @done sourceDone targetDone hDoneRel =>
+      cases sourceDone <;> cases targetDone <;>
+        simpa using hDone hDoneRel
+  | @call sourceCall targetCall response trace hSite hResponse _hTail ih =>
+      rcases ih with ⟨tailTrace, hTail⟩
+      refine ⟨tailTrace, ?_⟩
+      simpa [OpenResult.bind_call] using
+        (OpenResultPathRelWithCreate.call
+          (sourceCall :=
+            { site := sourceCall.site
+              resume := fun response =>
+                OpenResult.bind (sourceCall.resume response) sourceNext })
+          (targetCall :=
+            { site := targetCall.site
+              resume := fun response =>
+                OpenResult.bind (targetCall.resume response) targetNext })
+          hSite (hCallResponse hResponse) hTail)
+  | @create sourceCreate targetCreate response trace hSite hResponse _hTail ih =>
+      rcases ih with ⟨tailTrace, hTail⟩
+      refine ⟨tailTrace, ?_⟩
+      simpa [OpenResult.bind_create] using
+        (OpenResultPathRelWithCreate.create
+          (sourceCreate :=
+            { site := sourceCreate.site
+              resume := fun response =>
+                OpenResult.bind (sourceCreate.resume response) sourceNext })
+          (targetCreate :=
+            { site := targetCreate.site
+              resume := fun response =>
+                OpenResult.bind (targetCreate.resume response) targetNext })
+          hSite (hCreateResponse hResponse) hTail)
+
+theorem bind_selected_ok
+    {ε₁ : Type u} {ε₂ : Type v}
+    {α : Type w} {β : Type} {γ : Type} {δ : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {createResponseRel :
+      OpenCreate (OpenResult ε₁ α) →
+        OpenCreate (OpenResult ε₂ β) → CreateResponse → Prop}
+    {callResponseRel' :
+      OpenCall (OpenResult ε₁ γ) →
+        OpenCall (OpenResult ε₂ δ) → CallResponse → Prop}
+    {doneRel' : Except ε₁ γ → Except ε₂ δ → Prop}
+    {createResponseRel' :
+      OpenCreate (OpenResult ε₁ γ) →
+        OpenCreate (OpenResult ε₂ δ) → CreateResponse → Prop}
+    {trace prefixTail : OpenTrace}
+    {source : OpenResult ε₁ α} {target : OpenResult ε₂ β}
+    {sourceValue : α} {targetValue : β}
+    {sourceNext : α → OpenResult ε₁ γ}
+    {targetNext : β → OpenResult ε₂ δ}
+    (hRel :
+      OpenResultPathRelWithCreate callResponseRel doneRel createResponseRel
+        trace source target)
+    (hSource :
+      OpenResultResolves source trace (.ok sourceValue))
+    (hTarget :
+      OpenResultResolves target trace (.ok targetValue))
+    (hNext :
+      OpenResultPathRelWithCreate callResponseRel' doneRel'
+        createResponseRel' prefixTail
+        (sourceNext sourceValue) (targetNext targetValue))
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel sourceCall targetCall response →
+          callResponseRel'
+            { site := sourceCall.site
+              resume := fun response =>
+                OpenResult.bind (sourceCall.resume response) sourceNext }
+            { site := targetCall.site
+              resume := fun response =>
+                OpenResult.bind (targetCall.resume response) targetNext }
+            response)
+    (hCreateResponse :
+      ∀ {sourceCreate targetCreate response},
+        createResponseRel sourceCreate targetCreate response →
+          createResponseRel'
+            { site := sourceCreate.site
+              resume := fun response =>
+                OpenResult.bind (sourceCreate.resume response) sourceNext }
+            { site := targetCreate.site
+              resume := fun response =>
+                OpenResult.bind (targetCreate.resume response) targetNext }
+            response) :
+    OpenResultPathRelWithCreate callResponseRel' doneRel' createResponseRel'
+      (trace ++ prefixTail) (OpenResult.bind source sourceNext)
+      (OpenResult.bind target targetNext) := by
+  induction hRel generalizing sourceValue targetValue with
+  | @done sourceDone targetDone hDone =>
+      cases hSource
+      cases hTarget
+      simpa using hNext
+  | @call sourceCall targetCall response trace hSite hResponse _hTail ih =>
+      rcases OpenResultResolves.call_inv hSource with
+        ⟨sourceResponse, hSourceEvent, hSourceTail⟩
+      have hSourceResponse : response = sourceResponse :=
+        congrArg OpenEvent.response hSourceEvent
+      subst sourceResponse
+      rcases OpenResultResolves.call_inv hTarget with
+        ⟨targetResponse, hTargetEvent, hTargetTail⟩
+      have hTargetResponse : response = targetResponse :=
+        congrArg OpenEvent.response hTargetEvent
+      subst targetResponse
+      simpa [OpenResult.bind_call] using
+        (OpenResultPathRelWithCreate.call
+          (sourceCall :=
+            { site := sourceCall.site
+              resume := fun response =>
+                OpenResult.bind (sourceCall.resume response)
+                  sourceNext })
+          (targetCall :=
+            { site := targetCall.site
+              resume := fun response =>
+                OpenResult.bind (targetCall.resume response)
+                  targetNext })
+          hSite (hCallResponse hResponse)
+          (ih hSourceTail hTargetTail hNext))
+  | @create sourceCreate targetCreate response trace hSite hResponse _hTail ih =>
+      rcases OpenResultResolves.create_inv hSource with
+        ⟨sourceResponse, hSourceEvent, hSourceTail⟩
+      have hSourceResponse : response = sourceResponse := by
+        have hSome :
+            some (sourceCreate.site, response) =
+              some (sourceCreate.site, sourceResponse) :=
+          congrArg OpenEvent.create? hSourceEvent
+        have hPair :
+            (sourceCreate.site, response) =
+              (sourceCreate.site, sourceResponse) := by
+          injection hSome with hPair
+        exact congrArg Prod.snd hPair
+      subst sourceResponse
+      rcases OpenResultResolves.create_inv hTarget with
+        ⟨targetResponse, hTargetEvent, hTargetTail⟩
+      have hTargetResponse : response = targetResponse := by
+        have hSome :
+            some (sourceCreate.site, response) =
+              some (targetCreate.site, targetResponse) :=
+          congrArg OpenEvent.create? hTargetEvent
+        have hPair :
+            (sourceCreate.site, response) =
+              (targetCreate.site, targetResponse) := by
+          injection hSome with hPair
+        exact congrArg Prod.snd hPair
+      subst targetResponse
+      simpa [OpenResult.bind_create] using
+        (OpenResultPathRelWithCreate.create
+          (sourceCreate :=
+            { site := sourceCreate.site
+              resume := fun response =>
+                OpenResult.bind (sourceCreate.resume response)
+                  sourceNext })
+          (targetCreate :=
+            { site := targetCreate.site
+              resume := fun response =>
+                OpenResult.bind (targetCreate.resume response)
+                  targetNext })
+          hSite (hCreateResponse hResponse)
+          (ih hSourceTail hTargetTail hNext))
+
+theorem bind_nil
+    {ε₁ : Type u} {ε₂ : Type v}
+    {α : Type w} {β : Type} {γ : Type} {δ : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {createResponseRel :
+      OpenCreate (OpenResult ε₁ α) →
+        OpenCreate (OpenResult ε₂ β) → CreateResponse → Prop}
+    {callResponseRel' :
+      OpenCall (OpenResult ε₁ γ) →
+        OpenCall (OpenResult ε₂ δ) → CallResponse → Prop}
+    {doneRel' : Except ε₁ γ → Except ε₂ δ → Prop}
+    {createResponseRel' :
+      OpenCreate (OpenResult ε₁ γ) →
+        OpenCreate (OpenResult ε₂ δ) → CreateResponse → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β}
+    {sourceNext : α → OpenResult ε₁ γ}
+    {targetNext : β → OpenResult ε₂ δ}
+    (hRel :
+      OpenResultPathRelWithCreate callResponseRel doneRel createResponseRel
+        trace source target)
+    (hDone :
+      ∀ {sourceDone targetDone},
+        doneRel sourceDone targetDone →
+          OpenResultPathRelWithCreate callResponseRel' doneRel'
+            createResponseRel' []
+            (match sourceDone with
+            | .ok value => sourceNext value
+            | .error err => .done (.error err))
+            (match targetDone with
+            | .ok value => targetNext value
+            | .error err => .done (.error err)))
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel sourceCall targetCall response →
+          callResponseRel'
+            { site := sourceCall.site
+              resume := fun response =>
+                OpenResult.bind (sourceCall.resume response) sourceNext }
+            { site := targetCall.site
+              resume := fun response =>
+                OpenResult.bind (targetCall.resume response) targetNext }
+            response)
+    (hCreateResponse :
+      ∀ {sourceCreate targetCreate response},
+        createResponseRel sourceCreate targetCreate response →
+          createResponseRel'
+            { site := sourceCreate.site
+              resume := fun response =>
+                OpenResult.bind (sourceCreate.resume response) sourceNext }
+            { site := targetCreate.site
+              resume := fun response =>
+                OpenResult.bind (targetCreate.resume response) targetNext }
+            response) :
+    OpenResultPathRelWithCreate callResponseRel' doneRel' createResponseRel'
+      trace (OpenResult.bind source sourceNext)
+      (OpenResult.bind target targetNext) := by
+  induction hRel with
+  | @done sourceDone targetDone hDoneRel =>
+      cases sourceDone <;> cases targetDone <;>
+        simpa using hDone hDoneRel
+  | @call sourceCall targetCall response trace hSite hResponse _hTail ih =>
+      simpa [OpenResult.bind_call] using
+        (OpenResultPathRelWithCreate.call
+          (sourceCall :=
+            { site := sourceCall.site
+              resume := fun response =>
+                OpenResult.bind (sourceCall.resume response) sourceNext })
+          (targetCall :=
+            { site := targetCall.site
+              resume := fun response =>
+                OpenResult.bind (targetCall.resume response) targetNext })
+          hSite (hCallResponse hResponse) ih)
+  | @create sourceCreate targetCreate response trace hSite hResponse _hTail ih =>
+      simpa [OpenResult.bind_create] using
+        (OpenResultPathRelWithCreate.create
+          (sourceCreate :=
+            { site := sourceCreate.site
+              resume := fun response =>
+                OpenResult.bind (sourceCreate.resume response) sourceNext })
+          (targetCreate :=
+            { site := targetCreate.site
+              resume := fun response =>
+                OpenResult.bind (targetCreate.resume response) targetNext })
+          hSite (hCreateResponse hResponse) ih)
+
+end OpenResultPathRelWithCreate
+
+namespace OpenResultPathRel
+
+theorem withCreate_of_createResponsesSatisfy
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {createResponsePred : CreateResponse → Prop}
+    {createResponseRel :
+      OpenCreate (OpenResult ε₁ α) →
+        OpenCreate (OpenResult ε₂ β) → CreateResponse → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β}
+    (hRel : OpenResultPathRel callResponseRel doneRel trace source target)
+    (hCreateResponses :
+      OpenTrace.CreateResponsesSatisfy createResponsePred trace)
+    (hCreateResponse :
+      ∀ {sourceCreate targetCreate response},
+        createResponsePred response →
+          createResponseRel sourceCreate targetCreate response) :
+    OpenResultPathRelWithCreate callResponseRel doneRel createResponseRel trace
+      source target := by
+  induction hRel with
+  | done hDone =>
+      exact OpenResultPathRelWithCreate.done hDone
+  | @call sourceCall targetCall response trace hSite hResponse _hTail ih =>
+      exact
+        OpenResultPathRelWithCreate.call hSite hResponse
+          (ih (by
+            intro event hMem
+            exact hCreateResponses event (List.mem_cons_of_mem _ hMem)))
+  | @create sourceCreate targetCreate response trace hSite _hTail ih =>
+      have hResponse : createResponsePred response :=
+        hCreateResponses (OpenEvent.create sourceCreate.site response)
+          (by simp)
+      exact
+        OpenResultPathRelWithCreate.create hSite
+          (hCreateResponse hResponse)
+          (ih (by
+            intro event hMem
+            exact hCreateResponses event (List.mem_cons_of_mem _ hMem)))
+
+end OpenResultPathRel
+
+namespace OpenResultRelWithCreate
+
+theorem path_of_resolves_of_responsesSatisfy_map
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {callResponsePred : CallResponse → Prop}
+    {createResponsePred : CreateResponse → Prop}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {createResponseRel :
+      OpenCreate (OpenResult ε₁ α) →
+        OpenCreate (OpenResult ε₂ β) → CreateResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β} {sourceDone : Except ε₁ α}
+    (hRel :
+      OpenResultRelWithCreate callResponseRel doneRel createResponseRel
+        source target)
+    (hResolves : OpenResultResolves source trace sourceDone)
+    (hCallResponses : OpenTrace.ResponsesSatisfy callResponsePred trace)
+    (hCreateResponses :
+      OpenTrace.CreateResponsesSatisfy createResponsePred trace)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponsePred response →
+          callResponseRel sourceCall targetCall response)
+    (hCreateResponse :
+      ∀ {sourceCreate targetCreate response},
+        createResponsePred response →
+          createResponseRel sourceCreate targetCreate response) :
+    OpenResultPathRelWithCreate callResponseRel doneRel createResponseRel
+      trace source target := by
+  induction hResolves generalizing target with
+  | done =>
+      cases hRel with
+      | done hDone =>
+          exact OpenResultPathRelWithCreate.done hDone
+  | @call sourceCall response trace sourceDone hTail ih =>
+      cases hRel with
+      | call hSite hResume =>
+          have hResponse : callResponsePred response :=
+            hCallResponses
+              (OpenEvent.call sourceCall.site response) (by simp)
+          apply OpenResultPathRelWithCreate.call hSite
+          · exact hCallResponse hResponse
+          · apply ih
+              (hRel := hResume response (hCallResponse hResponse))
+            · intro event hMem
+              exact hCallResponses event (List.mem_cons_of_mem _ hMem)
+            · intro event hMem
+              exact hCreateResponses event (List.mem_cons_of_mem _ hMem)
+  | @create sourceCreate response trace sourceDone hTail ih =>
+      cases hRel with
+      | create hSite hResume =>
+          have hResponse : createResponsePred response :=
+            hCreateResponses
+              (OpenEvent.create sourceCreate.site response) (by simp)
+          apply OpenResultPathRelWithCreate.create hSite
+          · exact hCreateResponse hResponse
+          · apply ih
+              (hRel := hResume response (hCreateResponse hResponse))
+            · intro event hMem
+              exact hCallResponses event (List.mem_cons_of_mem _ hMem)
+            · intro event hMem
+              exact hCreateResponses event (List.mem_cons_of_mem _ hMem)
+
+theorem path_of_resolves_of_responsesSatisfy
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {callResponseRel : CallResponse → Prop}
+    {createResponseRel : CreateResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β} {sourceDone : Except ε₁ α}
+    (hRel :
+      OpenResultRelWithCreate
+        (fun _sourceCall _targetCall response => callResponseRel response)
+        doneRel
+        (fun _sourceCreate _targetCreate response =>
+          createResponseRel response)
+        source target)
+    (hResolves : OpenResultResolves source trace sourceDone)
+    (hCallResponses : OpenTrace.ResponsesSatisfy callResponseRel trace)
+    (hCreateResponses :
+      OpenTrace.CreateResponsesSatisfy createResponseRel trace) :
+    OpenResultPathRelWithCreate
+      (fun _sourceCall _targetCall response => callResponseRel response)
+      doneRel
+      (fun _sourceCreate _targetCreate response =>
+        createResponseRel response)
+      trace source target :=
+  path_of_resolves_of_responsesSatisfy_map hRel hResolves hCallResponses
+    hCreateResponses
+    (by
+      intro sourceCall targetCall response hResponse
+      exact hResponse)
+    (by
+      intro sourceCreate targetCreate response hResponse
+      exact hResponse)
+
+end OpenResultRelWithCreate
+
 namespace OpenResultRel
 
 /--
@@ -3499,7 +4670,7 @@ theorem path_of_resolves_of_responsesSatisfy_map
       cases hRel with
       | create hSite hResume =>
           apply OpenResultPathRel.create hSite
-          apply ih (hRel := hResume response)
+          apply ih (hRel := hResume response trivial)
           intro event hMem
           exact hResponses event (List.mem_cons_of_mem _ hMem)
 

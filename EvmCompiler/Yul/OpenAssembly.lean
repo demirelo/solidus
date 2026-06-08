@@ -28,6 +28,12 @@ def evmCallResult (call : OpenExternal.OpenCall EVMState) :
     { site := call.site
       resume := fun response => .done (.ok (call.resume response)) }
 
+def evmCreateResult (create : OpenExternal.OpenCreate EVMState) :
+    OpenExternal.OpenResult EVMException EVMState :=
+  .create
+    { site := create.site
+      resume := fun response => .done (.ok (create.resume response)) }
+
 theorem evmCallResult_resolves
     (call : OpenExternal.OpenCall EVMState)
     (response : OpenExternal.CallResponse) :
@@ -38,12 +44,29 @@ theorem evmCallResult_resolves
   exact OpenExternal.OpenResultResolves.call
     OpenExternal.OpenResultResolves.done
 
+theorem evmCreateResult_resolves
+    (create : OpenExternal.OpenCreate EVMState)
+    (response : OpenExternal.CreateResponse) :
+    OpenExternal.OpenResultResolves (evmCreateResult create)
+      [OpenExternal.OpenEvent.create create.site response]
+      (.ok (create.resume response)) := by
+  unfold evmCreateResult
+  exact OpenExternal.OpenResultResolves.create
+    OpenExternal.OpenResultResolves.done
+
 def evmInstructionCallResult (call : OpenExternal.OpenCall EVMState) :
     OpenExternal.OpenResult EVMException EVMState :=
   .call
     { site := call.site
       resume := fun response =>
         .done (.ok (EvmYul.EVM.State.incrPC (call.resume response))) }
+
+def evmInstructionCreateResult (create : OpenExternal.OpenCreate EVMState) :
+    OpenExternal.OpenResult EVMException EVMState :=
+  .create
+    { site := create.site
+      resume := fun response =>
+        .done (.ok (EvmYul.EVM.State.incrPC (create.resume response))) }
 
 theorem evmInstructionCallResult_resolves
     (call : OpenExternal.OpenCall EVMState)
@@ -55,6 +78,16 @@ theorem evmInstructionCallResult_resolves
   exact OpenExternal.OpenResultResolves.call
     OpenExternal.OpenResultResolves.done
 
+theorem evmInstructionCreateResult_resolves
+    (create : OpenExternal.OpenCreate EVMState)
+    (response : OpenExternal.CreateResponse) :
+    OpenExternal.OpenResultResolves (evmInstructionCreateResult create)
+      [OpenExternal.OpenEvent.create create.site response]
+      (.ok (EvmYul.EVM.State.incrPC (create.resume response))) := by
+  unfold evmInstructionCreateResult
+  exact OpenExternal.OpenResultResolves.create
+    OpenExternal.OpenResultResolves.done
+
 namespace PrimOp
 
 def openStep (op : Assembly.PrimOp) (state : EVMState) :
@@ -64,13 +97,20 @@ def openStep (op : Assembly.PrimOp) (state : EVMState) :
       match OpenExternal.CallKind.evmOpenCall? state kind with
       | some call => evmCallResult call
       | none => .done (.error EvmYul.EVM.ExecutionException.StackUnderflow)
-  | none => .done (op.step state)
+  | none =>
+      match OpenExternal.CreateKind.ofEVMOperation? op.toEVM with
+      | some kind =>
+          match OpenExternal.CreateKind.evmOpenCreate? state kind with
+          | some create => evmCreateResult create
+          | none => .done (.error EvmYul.EVM.ExecutionException.StackUnderflow)
+      | none => .done (op.step state)
 
-theorem openStep_of_not_callKind
+theorem openStep_of_not_call_or_createKind
     {op : Assembly.PrimOp} {state : EVMState}
-    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none) :
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hCreateKind : OpenExternal.CreateKind.ofEVMOperation? op.toEVM = none) :
     openStep op state = .done (op.step state) := by
-  simp [openStep, hKind]
+  simp [openStep, hCallKind, hCreateKind]
 
 theorem openStep_of_call
     {op : Assembly.PrimOp} {state : EVMState}
@@ -90,12 +130,33 @@ theorem openStep_of_callKind_no_call
       .done (.error EvmYul.EVM.ExecutionException.StackUnderflow) := by
   simp [openStep, hKind, hCall]
 
-theorem openStep_resolves_closed_of_not_callKind
+theorem openStep_of_create
+    {op : Assembly.PrimOp} {state : EVMState}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind)
+    (hCreate : OpenExternal.CreateKind.evmOpenCreate? state kind = some create) :
+    openStep op state = evmCreateResult create := by
+  simp [openStep, hCallKind, hKind, hCreate]
+
+theorem openStep_of_createKind_no_create
+    {op : Assembly.PrimOp} {state : EVMState}
+    {kind : OpenExternal.CreateKind}
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind)
+    (hCreate : OpenExternal.CreateKind.evmOpenCreate? state kind = none) :
+    openStep op state =
+      .done (.error EvmYul.EVM.ExecutionException.StackUnderflow) := by
+  simp [openStep, hCallKind, hKind, hCreate]
+
+theorem openStep_resolves_closed_of_not_call_or_createKind
     {op : Assembly.PrimOp} {state state' : EVMState}
-    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hCreateKind : OpenExternal.CreateKind.ofEVMOperation? op.toEVM = none)
     (hStep : op.step state = .ok state') :
     OpenExternal.OpenResultResolves (openStep op state) [] (.ok state') := by
-  rw [openStep_of_not_callKind hKind, hStep]
+  rw [openStep_of_not_call_or_createKind hCallKind hCreateKind, hStep]
   exact OpenExternal.OpenResultResolves.done
 
 theorem openStep_resolves_error_of_callKind_no_call
@@ -120,6 +181,20 @@ theorem openStep_resolves_call
       (.ok (call.resume response)) := by
   rw [openStep_of_call hKind hCall]
   exact evmCallResult_resolves call response
+
+theorem openStep_resolves_create
+    {op : Assembly.PrimOp} {state : EVMState}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind)
+    (hCreate : OpenExternal.CreateKind.evmOpenCreate? state kind = some create)
+    (response : OpenExternal.CreateResponse) :
+    OpenExternal.OpenResultResolves (openStep op state)
+      [OpenExternal.OpenEvent.create create.site response]
+      (.ok (create.resume response)) := by
+  rw [openStep_of_create hCallKind hKind hCreate]
+  exact evmCreateResult_resolves create response
 
 end PrimOp
 
@@ -177,7 +252,14 @@ def openStepInstr (instr : Assembly.TargetInstr) (state : EVMState) :
           match OpenExternal.CallKind.evmOpenCall? state kind with
           | some call => evmInstructionCallResult call
           | none => .done (.error EvmYul.EVM.ExecutionException.StackUnderflow)
-      | none => .done (Assembly.Target.stepInstr instr state)
+      | none =>
+          match OpenExternal.CreateKind.ofEVMOperation? op.toEVM with
+          | some kind =>
+              match OpenExternal.CreateKind.evmOpenCreate? state kind with
+              | some create => evmInstructionCreateResult create
+              | none =>
+                  .done (.error EvmYul.EVM.ExecutionException.StackUnderflow)
+          | none => .done (Assembly.Target.stepInstr instr state)
   | _ => .done (Assembly.Target.stepInstr instr state)
 
 theorem openStepInstr_of_non_prim
@@ -187,12 +269,13 @@ theorem openStepInstr_of_non_prim
   cases instr <;> simp [openStepInstr]
   exact False.elim (hInstr _ rfl)
 
-theorem openStepInstr_of_prim_not_callKind
+theorem openStepInstr_of_prim_not_call_or_createKind
     {op : Assembly.PrimOp} {state : EVMState}
-    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none) :
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hCreateKind : OpenExternal.CreateKind.ofEVMOperation? op.toEVM = none) :
     openStepInstr (.prim op) state =
       .done (Assembly.Target.stepInstr (.prim op) state) := by
-  simp [openStepInstr, hKind]
+  simp [openStepInstr, hCallKind, hCreateKind]
 
 theorem openStepInstr_of_prim_callKind_no_call
     {op : Assembly.PrimOp} {state : EVMState}
@@ -212,13 +295,35 @@ theorem openStepInstr_of_prim_call
     openStepInstr (.prim op) state = evmInstructionCallResult call := by
   simp [openStepInstr, hKind, hCall]
 
-theorem openStepInstr_resolves_closed_of_prim_not_callKind
+theorem openStepInstr_of_prim_createKind_no_create
+    {op : Assembly.PrimOp} {state : EVMState}
+    {kind : OpenExternal.CreateKind}
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind)
+    (hCreate : OpenExternal.CreateKind.evmOpenCreate? state kind = none) :
+    openStepInstr (.prim op) state =
+      .done (.error EvmYul.EVM.ExecutionException.StackUnderflow) := by
+  simp [openStepInstr, hCallKind, hKind, hCreate]
+
+theorem openStepInstr_of_prim_create
+    {op : Assembly.PrimOp} {state : EVMState}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind)
+    (hCreate : OpenExternal.CreateKind.evmOpenCreate? state kind = some create) :
+    openStepInstr (.prim op) state = evmInstructionCreateResult create := by
+  simp [openStepInstr, hCallKind, hKind, hCreate]
+
+theorem openStepInstr_resolves_closed_of_prim_not_call_or_createKind
     {op : Assembly.PrimOp} {state state' : EVMState}
-    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hCreateKind : OpenExternal.CreateKind.ofEVMOperation? op.toEVM = none)
     (hStep : Assembly.Target.stepInstr (.prim op) state = .ok state') :
     OpenExternal.OpenResultResolves
       (openStepInstr (.prim op) state) [] (.ok state') := by
-  rw [openStepInstr_of_prim_not_callKind hKind, hStep]
+  rw [openStepInstr_of_prim_not_call_or_createKind hCallKind hCreateKind,
+    hStep]
   exact OpenExternal.OpenResultResolves.done
 
 theorem openStepInstr_resolves_error_of_prim_callKind_no_call
@@ -245,6 +350,20 @@ theorem openStepInstr_resolves_prim_call
   rw [openStepInstr_of_prim_call hKind hCall]
   exact evmInstructionCallResult_resolves call response
 
+theorem openStepInstr_resolves_prim_create
+    {op : Assembly.PrimOp} {state : EVMState}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind)
+    (hCreate : OpenExternal.CreateKind.evmOpenCreate? state kind = some create)
+    (response : OpenExternal.CreateResponse) :
+    OpenExternal.OpenResultResolves (openStepInstr (.prim op) state)
+      [OpenExternal.OpenEvent.create create.site response]
+      (.ok (EvmYul.EVM.State.incrPC (create.resume response))) := by
+  rw [openStepInstr_of_prim_create hCallKind hKind hCreate]
+  exact evmInstructionCreateResult_resolves create response
+
 theorem prim_haltKind?_none_of_callKind
     {op : Assembly.PrimOp} {kind : OpenExternal.CallKind}
     (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind) :
@@ -253,12 +372,27 @@ theorem prim_haltKind?_none_of_callKind
     simp [Assembly.PrimOp.toEVM, OpenExternal.CallKind.ofEVMOperation?,
       Assembly.PrimOp.haltKind?] at hKind ⊢
 
+theorem prim_haltKind?_none_of_createKind
+    {op : Assembly.PrimOp} {kind : OpenExternal.CreateKind}
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind) :
+    op.haltKind? = none := by
+  cases op <;>
+    simp [Assembly.PrimOp.toEVM, OpenExternal.CreateKind.ofEVMOperation?,
+      Assembly.PrimOp.haltKind?] at hKind ⊢
+
 theorem callKind_none_of_not_isCallCreate
     {op : Assembly.PrimOp} (hNo : op.isCallCreate = false) :
     OpenExternal.CallKind.ofEVMOperation? op.toEVM = none := by
   cases op <;>
     simp [Assembly.PrimOp.isCallCreate, Assembly.PrimOp.toEVM,
       OpenExternal.CallKind.ofEVMOperation?] at hNo ⊢
+
+theorem createKind_none_of_not_isCallCreate
+    {op : Assembly.PrimOp} (hNo : op.isCallCreate = false) :
+    OpenExternal.CreateKind.ofEVMOperation? op.toEVM = none := by
+  cases op <;>
+    simp [Assembly.PrimOp.isCallCreate, Assembly.PrimOp.toEVM,
+      OpenExternal.CreateKind.ofEVMOperation?] at hNo ⊢
 
 def stepResultAfter (instr : Assembly.TargetInstr) (state : EVMState) :
     Assembly.StepResult :=
@@ -280,8 +414,9 @@ theorem openStepInstr_of_no_callCreate
   cases instr with
   | prim op =>
       simp [instrUsesCallCreate] at hNo
-      have hKind := callKind_none_of_not_isCallCreate hNo
-      simp [openStepInstr, hKind]
+      have hCallKind := callKind_none_of_not_isCallCreate hNo
+      have hCreateKind := createKind_none_of_not_isCallCreate hNo
+      simp [openStepInstr, hCallKind, hCreateKind]
   | push32 value =>
       simp [openStepInstr]
   | jump =>
@@ -396,6 +531,36 @@ theorem openStepInstrResult_resolves_prim_call
         (.ok
           (Assembly.StepResult.running
             (EvmYul.EVM.State.incrPC (call.resume response)))))
+
+theorem openStepInstrResult_resolves_prim_create
+    {op : Assembly.PrimOp} {state : EVMState}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind)
+    (hCreate : OpenExternal.CreateKind.evmOpenCreate? state kind = some create)
+    (response : OpenExternal.CreateResponse) :
+    OpenExternal.OpenResultResolves (openStepInstrResult (.prim op) state)
+      [OpenExternal.OpenEvent.create create.site response]
+    (.ok (.running (EvmYul.EVM.State.incrPC (create.resume response)))) := by
+  unfold openStepInstrResult
+  rw [openStepInstr_of_prim_create hCallKind hKind hCreate]
+  unfold evmInstructionCreateResult
+  have hHalt : (Assembly.TargetInstr.prim op).haltKind? = none := by
+    simpa [Assembly.TargetInstr.haltKind?] using
+      prim_haltKind?_none_of_createKind hKind
+  refine OpenExternal.OpenResultResolves.create ?_
+  simpa [stepResultAfter, hHalt] using
+    (OpenExternal.OpenResultResolves.done :
+      OpenExternal.OpenResultResolves
+        (.done
+          (.ok
+            (Assembly.StepResult.running
+              (EvmYul.EVM.State.incrPC (create.resume response)))))
+        []
+        (.ok
+          (Assembly.StepResult.running
+            (EvmYul.EVM.State.incrPC (create.resume response)))))
 
 def openRunListResult : List Assembly.TargetInstr → EVMState →
     OpenExternal.OpenResult EVMException Assembly.StepResult

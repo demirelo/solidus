@@ -599,6 +599,79 @@ theorem wrapped_ternaryCopyOp_state_eq_of_ok_of_nonOk
               | cons d restFinal =>
                   simp [EvmYul.Yul.ternaryCopyOp] at h
 
+theorem wrapped_quaternaryCopyOp_store_eq_of_ok
+    {op :
+      EvmYul.SharedState .Yul → Word → Word → Word → Word →
+        EvmYul.SharedState .Yul}
+    {shared sharedAfter : EvmYul.SharedState .Yul}
+    {store storeAfter : EvmYul.Yul.VarStore} {args values : List Word}
+    (h :
+      (match EvmYul.Yul.quaternaryCopyOp op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.Ok sharedAfter storeAfter, values)) :
+    storeAfter = store := by
+  cases args with
+  | nil =>
+      simp [EvmYul.Yul.quaternaryCopyOp] at h
+  | cons a rest =>
+      cases rest with
+      | nil =>
+          simp [EvmYul.Yul.quaternaryCopyOp] at h
+      | cons b restTail =>
+          cases restTail with
+          | nil =>
+              simp [EvmYul.Yul.quaternaryCopyOp] at h
+          | cons c restRest =>
+              cases restRest with
+              | nil =>
+                  simp [EvmYul.Yul.quaternaryCopyOp] at h
+              | cons d restFinal =>
+                  cases restFinal with
+                  | nil =>
+                      simp [EvmYul.Yul.quaternaryCopyOp,
+                        EvmYul.Yul.State.setSharedState] at h
+                      exact h.1.2.symm
+                  | cons e restExtra =>
+                      simp [EvmYul.Yul.quaternaryCopyOp] at h
+
+theorem wrapped_quaternaryCopyOp_state_eq_of_ok_of_nonOk
+    {op :
+      EvmYul.SharedState .Yul → Word → Word → Word → Word →
+        EvmYul.SharedState .Yul}
+    {state outState : EvmYul.Yul.State} {args values : List Word}
+    (hNonOk :
+      ∀ shared store, state ≠ (.Ok shared store : EvmYul.Yul.State))
+    (h :
+      (match EvmYul.Yul.quaternaryCopyOp op state args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (outState, values)) :
+    outState = state := by
+  cases args with
+  | nil =>
+      simp [EvmYul.Yul.quaternaryCopyOp] at h
+  | cons a rest =>
+      cases rest with
+      | nil =>
+          simp [EvmYul.Yul.quaternaryCopyOp] at h
+      | cons b restTail =>
+          cases restTail with
+          | nil =>
+              simp [EvmYul.Yul.quaternaryCopyOp] at h
+          | cons c restRest =>
+              cases restRest with
+              | nil =>
+                  simp [EvmYul.Yul.quaternaryCopyOp] at h
+              | cons d restFinal =>
+                  cases restFinal with
+                  | nil =>
+                      simp [EvmYul.Yul.quaternaryCopyOp,
+                        setSharedState_eq_self_of_nonOk hNonOk] at h
+                      exact h.1.symm
+                  | cons e restExtra =>
+                      simp [EvmYul.Yul.quaternaryCopyOp] at h
+
 theorem wrapped_binaryMachineStateOp_not_checkpoint_of_ok
     {op : EvmYul.MachineState → Word → Word → EvmYul.MachineState}
     {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
@@ -754,6 +827,41 @@ theorem wrapped_ternaryCopyOp_not_checkpoint_of_ok
                     EvmYul.Yul.State.setSharedState] at h
               | cons d restFinal =>
                   simp [EvmYul.Yul.ternaryCopyOp] at h
+
+theorem wrapped_quaternaryCopyOp_not_checkpoint_of_ok
+    {op :
+      EvmYul.SharedState .Yul → Word → Word → Word → Word →
+        EvmYul.SharedState .Yul}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {jump : EvmYul.Yul.Jump} {args values : List Word}
+    (h :
+      (match EvmYul.Yul.quaternaryCopyOp op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.Checkpoint jump, values)) :
+    False := by
+  cases args with
+  | nil =>
+      simp [EvmYul.Yul.quaternaryCopyOp] at h
+  | cons a rest =>
+      cases rest with
+      | nil =>
+          simp [EvmYul.Yul.quaternaryCopyOp] at h
+      | cons b restTail =>
+          cases restTail with
+          | nil =>
+              simp [EvmYul.Yul.quaternaryCopyOp] at h
+          | cons c restRest =>
+              cases restRest with
+              | nil =>
+                  simp [EvmYul.Yul.quaternaryCopyOp] at h
+              | cons d restFinal =>
+                  cases restFinal with
+                  | nil =>
+                      simp [EvmYul.Yul.quaternaryCopyOp,
+                        EvmYul.Yul.State.setSharedState] at h
+                  | cons e restExtra =>
+                      simp [EvmYul.Yul.quaternaryCopyOp] at h
 
 theorem wrapped_execUnOp_not_outOfFuel_of_ok
     {f : EvmYul.Primop.Unary}
@@ -1014,6 +1122,41 @@ theorem wrapped_ternaryCopyOp_not_outOfFuel_of_ok
                     EvmYul.Yul.State.setSharedState] at h
               | cons d restFinal =>
                   simp [EvmYul.Yul.ternaryCopyOp] at h
+
+theorem wrapped_quaternaryCopyOp_not_outOfFuel_of_ok
+    {op :
+      EvmYul.SharedState .Yul → Word → Word → Word → Word →
+        EvmYul.SharedState .Yul}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {args values : List Word}
+    (h :
+      (match EvmYul.Yul.quaternaryCopyOp op (.Ok shared store) args with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok (.OutOfFuel, values)) :
+    False := by
+  cases args with
+  | nil =>
+      simp [EvmYul.Yul.quaternaryCopyOp] at h
+  | cons a rest =>
+      cases rest with
+      | nil =>
+          simp [EvmYul.Yul.quaternaryCopyOp] at h
+      | cons b restTail =>
+          cases restTail with
+          | nil =>
+              simp [EvmYul.Yul.quaternaryCopyOp] at h
+          | cons c restRest =>
+              cases restRest with
+              | nil =>
+                  simp [EvmYul.Yul.quaternaryCopyOp] at h
+              | cons d restFinal =>
+                  cases restFinal with
+                  | nil =>
+                      simp [EvmYul.Yul.quaternaryCopyOp,
+                        EvmYul.Yul.State.setSharedState] at h
+                  | cons e restExtra =>
+                      simp [EvmYul.Yul.quaternaryCopyOp] at h
 
 theorem primCall_keccak256_state_eq_of_ok_of_nonOk
     {fuel : Nat} {state outState : EvmYul.Yul.State}
@@ -1707,14 +1850,19 @@ theorem primCall_returndatacopy_state_eq_of_ok_of_nonOk
           EvmYul.step
               ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul)) none =
             (fun yulState lits =>
-              match lits with
-              | [a, b, c] =>
-                  let mState' :=
-                    yulState.toSharedState.toMachineState.returndatacopy
-                      a b c
-                  .ok (yulState.setMachineState mState', .none)
-              | _ => .error .InvalidArguments) := by
-        rfl
+                match lits with
+                | [a, b, c] =>
+                    if
+                        yulState.toSharedState.returnData.size <
+                          b.toNat + c.toNat then
+                      .error .InvalidMemoryAccess
+                    else
+                      let mState' :=
+                        yulState.toSharedState.toMachineState.returndatacopy
+                          a b c
+                      .ok (yulState.setMachineState mState', .none)
+                | _ => .error .InvalidArguments) := by
+          rfl
       rw [hStep] at h
       cases args with
       | nil =>
@@ -1728,12 +1876,17 @@ theorem primCall_returndatacopy_state_eq_of_ok_of_nonOk
               | nil =>
                   simp at h
               | cons c restRest =>
-                  cases restRest with
-                  | nil =>
-                      simp [setMachineState_eq_self_of_nonOk hNonOk] at h
-                      exact h.1.symm
-                  | cons d restFinal =>
-                      simp at h
+                    cases restRest with
+                    | nil =>
+                        by_cases hBounds :
+                            state.toSharedState.returnData.size <
+                              b.toNat + c.toNat
+                        · simp [hBounds] at h
+                        · simp [hBounds,
+                            setMachineState_eq_self_of_nonOk hNonOk] at h
+                          exact h.1.symm
+                    | cons d restFinal =>
+                        simp at h
 
 theorem primCall_returndatacopy_store_eq_of_ok
     {fuel : Nat} {shared sharedAfter : EvmYul.SharedState .Yul}
@@ -1752,14 +1905,19 @@ theorem primCall_returndatacopy_store_eq_of_ok
           EvmYul.step
               ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul)) none =
             (fun yulState lits =>
-              match lits with
-              | [a, b, c] =>
-                  let mState' :=
-                    yulState.toSharedState.toMachineState.returndatacopy
-                      a b c
-                  .ok (yulState.setMachineState mState', .none)
-              | _ => .error .InvalidArguments) := by
-        rfl
+                match lits with
+                | [a, b, c] =>
+                    if
+                        yulState.toSharedState.returnData.size <
+                          b.toNat + c.toNat then
+                      .error .InvalidMemoryAccess
+                    else
+                      let mState' :=
+                        yulState.toSharedState.toMachineState.returndatacopy
+                          a b c
+                      .ok (yulState.setMachineState mState', .none)
+                | _ => .error .InvalidArguments) := by
+          rfl
       rw [hStep] at h
       cases args with
       | nil =>
@@ -1773,12 +1931,16 @@ theorem primCall_returndatacopy_store_eq_of_ok
               | nil =>
                   simp at h
               | cons c restRest =>
-                  cases restRest with
-                  | nil =>
-                      simp [EvmYul.Yul.State.setMachineState] at h
-                      exact h.1.2.symm
-                  | cons d restFinal =>
-                      simp at h
+                    cases restRest with
+                    | nil =>
+                        by_cases hBounds :
+                            shared.returnData.size < b.toNat + c.toNat
+                        · simp [EvmYul.Yul.State.toSharedState, hBounds] at h
+                        · simp [EvmYul.Yul.State.toSharedState,
+                            EvmYul.Yul.State.setMachineState, hBounds] at h
+                          exact h.1.2.symm
+                    | cons d restFinal =>
+                        simp at h
 
 theorem primCall_returndatacopy_not_checkpoint_of_ok
     {fuel : Nat} {shared : EvmYul.SharedState .Yul}
@@ -1798,14 +1960,19 @@ theorem primCall_returndatacopy_not_checkpoint_of_ok
           EvmYul.step
               ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul)) none =
             (fun yulState lits =>
-              match lits with
-              | [a, b, c] =>
-                  let mState' :=
-                    yulState.toSharedState.toMachineState.returndatacopy
-                      a b c
-                  .ok (yulState.setMachineState mState', .none)
-              | _ => .error .InvalidArguments) := by
-        rfl
+                match lits with
+                | [a, b, c] =>
+                    if
+                        yulState.toSharedState.returnData.size <
+                          b.toNat + c.toNat then
+                      .error .InvalidMemoryAccess
+                    else
+                      let mState' :=
+                        yulState.toSharedState.toMachineState.returndatacopy
+                          a b c
+                      .ok (yulState.setMachineState mState', .none)
+                | _ => .error .InvalidArguments) := by
+          rfl
       rw [hStep] at h
       cases args with
       | nil =>
@@ -1819,11 +1986,15 @@ theorem primCall_returndatacopy_not_checkpoint_of_ok
               | nil =>
                   simp at h
               | cons c restRest =>
-                  cases restRest with
-                  | nil =>
-                      simp [EvmYul.Yul.State.setMachineState] at h
-                  | cons d restFinal =>
-                      simp at h
+                    cases restRest with
+                    | nil =>
+                        by_cases hBounds :
+                            shared.returnData.size < b.toNat + c.toNat
+                        · simp [EvmYul.Yul.State.toSharedState, hBounds] at h
+                        · simp [EvmYul.Yul.State.toSharedState,
+                            EvmYul.Yul.State.setMachineState, hBounds] at h
+                    | cons d restFinal =>
+                        simp at h
 
 theorem primCall_returndatacopy_not_outOfFuel_of_ok
     {fuel : Nat} {shared : EvmYul.SharedState .Yul}
@@ -1842,14 +2013,19 @@ theorem primCall_returndatacopy_not_outOfFuel_of_ok
           EvmYul.step
               ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul)) none =
             (fun yulState lits =>
-              match lits with
-              | [a, b, c] =>
-                  let mState' :=
-                    yulState.toSharedState.toMachineState.returndatacopy
-                      a b c
-                  .ok (yulState.setMachineState mState', .none)
-              | _ => .error .InvalidArguments) := by
-        rfl
+                match lits with
+                | [a, b, c] =>
+                    if
+                        yulState.toSharedState.returnData.size <
+                          b.toNat + c.toNat then
+                      .error .InvalidMemoryAccess
+                    else
+                      let mState' :=
+                        yulState.toSharedState.toMachineState.returndatacopy
+                          a b c
+                      .ok (yulState.setMachineState mState', .none)
+                | _ => .error .InvalidArguments) := by
+          rfl
       rw [hStep] at h
       cases args with
       | nil =>
@@ -1863,16 +2039,17 @@ theorem primCall_returndatacopy_not_outOfFuel_of_ok
               | nil =>
                   simp at h
               | cons c restRest =>
-                  cases restRest with
-                  | nil =>
-                      simp [EvmYul.Yul.State.setMachineState] at h
-                  | cons d restFinal =>
-                      simp at h
+                    cases restRest with
+                    | nil =>
+                        by_cases hBounds :
+                            shared.returnData.size < b.toNat + c.toNat
+                        · simp [EvmYul.Yul.State.toSharedState, hBounds] at h
+                        · simp [EvmYul.Yul.State.toSharedState,
+                            EvmYul.Yul.State.setMachineState, hBounds] at h
+                    | cons d restFinal =>
+                        simp at h
 
 def EnvCheckpointSafe : EvmYul.Operation.EOp .Yul → Prop
-  | .EXTCODESIZE => False
-  | .EXTCODECOPY => False
-  | .EXTCODEHASH => False
   | _ => True
 
 theorem primCall_env_state_eq_of_ok_of_nonOk
@@ -1991,20 +2168,36 @@ theorem primCall_env_state_eq_of_ok_of_nonOk
             rfl
           rw [hStep] at h
           exact wrapped_executionEnvOp_state_eq_of_ok (args := args) h
-      | CODECOPY =>
-          simp [EvmYul.Yul.primCall] at h
-          have hStep :
-              EvmYul.step
-                  ((.Env .CODECOPY : EvmYul.Operation .Yul)) none =
-                EvmYul.Yul.ternaryCopyOp
-                  EvmYul.SharedState.codeBytesCopy := by
-            rfl
-          rw [hStep] at h
-          exact wrapped_ternaryCopyOp_state_eq_of_ok_of_nonOk hNonOk h
-      | EXTCODESIZE =>
-          exact False.elim hSupported
-      | EXTCODECOPY =>
-          exact False.elim hSupported
+        | CODECOPY =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .CODECOPY : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.ternaryCopyOp
+                    EvmYul.SharedState.codeBytesCopy := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_ternaryCopyOp_state_eq_of_ok_of_nonOk hNonOk h
+        | EXTCODESIZE =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .EXTCODESIZE : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.unaryStateOp EvmYul.State.extCodeSize := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_unaryStateOp_state_eq_of_ok_of_nonOk hNonOk h
+        | EXTCODECOPY =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .EXTCODECOPY : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.quaternaryCopyOp
+                    EvmYul.SharedState.extCodeCopy' := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_quaternaryCopyOp_state_eq_of_ok_of_nonOk
+              hNonOk h
       | RETURNDATASIZE =>
           simp [EvmYul.Yul.primCall] at h
           have hStep :
@@ -2015,11 +2208,18 @@ theorem primCall_env_state_eq_of_ok_of_nonOk
             rfl
           rw [hStep] at h
           exact wrapped_machineStateOp_state_eq_of_ok (args := args) h
-      | RETURNDATACOPY =>
-          exact primCall_returndatacopy_state_eq_of_ok_of_nonOk
-            hNonOk h
-      | EXTCODEHASH =>
-          exact False.elim hSupported
+        | RETURNDATACOPY =>
+            exact primCall_returndatacopy_state_eq_of_ok_of_nonOk
+              hNonOk h
+        | EXTCODEHASH =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .EXTCODEHASH : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.unaryStateOp EvmYul.State.extCodeHash := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_unaryStateOp_state_eq_of_ok_of_nonOk hNonOk h
 
 theorem primCall_env_store_eq_of_ok
     {fuel : Nat} {op : EvmYul.Operation.EOp .Yul}
@@ -2146,10 +2346,25 @@ theorem primCall_env_store_eq_of_ok
             rfl
           rw [hStep] at h
           exact wrapped_ternaryCopyOp_store_eq_of_ok h
-      | EXTCODESIZE =>
-          exact False.elim hSupported
-      | EXTCODECOPY =>
-          exact False.elim hSupported
+        | EXTCODESIZE =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .EXTCODESIZE : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.unaryStateOp EvmYul.State.extCodeSize := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_unaryStateOp_store_eq_of_ok h
+        | EXTCODECOPY =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .EXTCODECOPY : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.quaternaryCopyOp
+                    EvmYul.SharedState.extCodeCopy' := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_quaternaryCopyOp_store_eq_of_ok h
       | RETURNDATASIZE =>
           simp [EvmYul.Yul.primCall] at h
           have hStep :
@@ -2162,8 +2377,15 @@ theorem primCall_env_store_eq_of_ok
           exact wrapped_machineStateOp_store_eq_of_ok (args := args) h
       | RETURNDATACOPY =>
           exact primCall_returndatacopy_store_eq_of_ok h
-      | EXTCODEHASH =>
-          exact False.elim hSupported
+        | EXTCODEHASH =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .EXTCODEHASH : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.unaryStateOp EvmYul.State.extCodeHash := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_unaryStateOp_store_eq_of_ok h
 
 theorem primCall_env_not_checkpoint_of_ok
     {fuel : Nat} {op : EvmYul.Operation.EOp .Yul}
@@ -2304,10 +2526,25 @@ theorem primCall_env_not_checkpoint_of_ok
             rfl
           rw [hStep] at h
           exact wrapped_ternaryCopyOp_not_checkpoint_of_ok h
-      | EXTCODESIZE =>
-          exact False.elim hSupported
-      | EXTCODECOPY =>
-          exact False.elim hSupported
+        | EXTCODESIZE =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .EXTCODESIZE : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.unaryStateOp EvmYul.State.extCodeSize := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_unaryStateOp_not_checkpoint_of_ok h
+        | EXTCODECOPY =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .EXTCODECOPY : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.quaternaryCopyOp
+                    EvmYul.SharedState.extCodeCopy' := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_quaternaryCopyOp_not_checkpoint_of_ok h
       | RETURNDATASIZE =>
           simp [EvmYul.Yul.primCall] at h
           have hStep :
@@ -2322,8 +2559,15 @@ theorem primCall_env_not_checkpoint_of_ok
           cases hEq
       | RETURNDATACOPY =>
           exact primCall_returndatacopy_not_checkpoint_of_ok h
-      | EXTCODEHASH =>
-          exact False.elim hSupported
+        | EXTCODEHASH =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .EXTCODEHASH : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.unaryStateOp EvmYul.State.extCodeHash := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_unaryStateOp_not_checkpoint_of_ok h
 
 theorem primCall_env_not_outOfFuel_of_ok
     {fuel : Nat} {op : EvmYul.Operation.EOp .Yul}
@@ -2445,10 +2689,25 @@ theorem primCall_env_not_outOfFuel_of_ok
             rfl
           rw [hStep] at h
           exact wrapped_ternaryCopyOp_not_outOfFuel_of_ok h
-      | EXTCODESIZE =>
-          exact False.elim hSupported
-      | EXTCODECOPY =>
-          exact False.elim hSupported
+        | EXTCODESIZE =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .EXTCODESIZE : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.unaryStateOp EvmYul.State.extCodeSize := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_unaryStateOp_not_outOfFuel_of_ok h
+        | EXTCODECOPY =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .EXTCODECOPY : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.quaternaryCopyOp
+                    EvmYul.SharedState.extCodeCopy' := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_quaternaryCopyOp_not_outOfFuel_of_ok h
       | RETURNDATASIZE =>
           simp [EvmYul.Yul.primCall] at h
           have hStep :
@@ -2461,8 +2720,15 @@ theorem primCall_env_not_outOfFuel_of_ok
           exact wrapped_machineStateOp_not_outOfFuel_of_ok (args := args) h
       | RETURNDATACOPY =>
           exact primCall_returndatacopy_not_outOfFuel_of_ok h
-      | EXTCODEHASH =>
-          exact False.elim hSupported
+        | EXTCODEHASH =>
+            simp [EvmYul.Yul.primCall] at h
+            have hStep :
+                EvmYul.step
+                    ((.Env .EXTCODEHASH : EvmYul.Operation .Yul)) none =
+                  EvmYul.Yul.unaryStateOp EvmYul.State.extCodeHash := by
+              rfl
+            rw [hStep] at h
+            exact wrapped_unaryStateOp_not_outOfFuel_of_ok h
 
 def StackMemFlowCheckpointSafe : EvmYul.Operation.SMSFOp .Yul → Prop
   | _ => True
@@ -5805,6 +6071,30 @@ theorem primCall_codesize_ok
         [EvmYul.UInt256.ofNat shared.executionEnv.codeBytes.size])
   simp [EvmYul.Yul.executionEnvOp, EvmYul.Yul.State.executionEnv]
 
+theorem primCall_extcodesize_ok
+    (fuel : Nat) (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore) (address : Word) :
+    EvmYul.Yul.primCall fuel.succ (.Ok shared store)
+        ((.Env .EXTCODESIZE : EvmYul.Operation .Yul)) [address] =
+      .ok
+        (.Ok { shared with
+          toState := (EvmYul.State.extCodeSize shared.toState address).1 } store,
+        [(EvmYul.State.extCodeSize shared.toState address).2]) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  change
+    (match
+      EvmYul.Yul.unaryStateOp EvmYul.State.extCodeSize
+        (.Ok shared store) [address] with
+    | Except.ok (s, lit) => Except.ok (s, lit.toList)
+    | Except.error e => Except.error e) =
+      Except.ok
+        (.Ok { shared with
+          toState := (EvmYul.State.extCodeSize shared.toState address).1 } store,
+        [(EvmYul.State.extCodeSize shared.toState address).2])
+  simp [EvmYul.Yul.unaryStateOp, EvmYul.Yul.State.toState,
+    EvmYul.Yul.State.toSharedState, EvmYul.Yul.State.setSharedState]
+
 theorem primCall_calldatacopy_ok
     (fuel : Nat) (shared : EvmYul.SharedState .Yul)
     (store : EvmYul.Yul.VarStore)
@@ -5841,10 +6131,54 @@ theorem primCall_codecopy_ok
     EvmYul.Yul.State.setSharedState]
   rfl
 
+theorem primCall_extcodecopy_ok
+    (fuel : Nat) (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (address memStart codeStart size : Word) :
+    EvmYul.Yul.primCall fuel.succ (.Ok shared store)
+        ((.Env .EXTCODECOPY : EvmYul.Operation .Yul))
+          [address, memStart, codeStart, size] =
+      .ok
+        (.Ok
+          (EvmYul.SharedState.extCodeCopy' shared address memStart codeStart
+            size)
+          store,
+        []) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  simp [EvmYul.Yul.quaternaryCopyOp, EvmYul.Yul.State.toSharedState,
+    EvmYul.Yul.State.setSharedState]
+  rfl
+
+theorem primCall_extcodehash_ok
+    (fuel : Nat) (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore) (address : Word) :
+    EvmYul.Yul.primCall fuel.succ (.Ok shared store)
+        ((.Env .EXTCODEHASH : EvmYul.Operation .Yul)) [address] =
+      .ok
+        (.Ok { shared with
+          toState := (EvmYul.State.extCodeHash shared.toState address).1 } store,
+        [(EvmYul.State.extCodeHash shared.toState address).2]) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  change
+    (match
+      EvmYul.Yul.unaryStateOp EvmYul.State.extCodeHash
+        (.Ok shared store) [address] with
+    | Except.ok (s, lit) => Except.ok (s, lit.toList)
+    | Except.error e => Except.error e) =
+      Except.ok
+        (.Ok { shared with
+          toState := (EvmYul.State.extCodeHash shared.toState address).1 } store,
+        [(EvmYul.State.extCodeHash shared.toState address).2])
+  simp [EvmYul.Yul.unaryStateOp, EvmYul.Yul.State.toState,
+    EvmYul.Yul.State.toSharedState, EvmYul.Yul.State.setSharedState]
+
 theorem primCall_returndatacopy_ok
     (fuel : Nat) (shared : EvmYul.SharedState .Yul)
     (store : EvmYul.Yul.VarStore)
-    (memStart dataStart size : Word) :
+    (memStart dataStart size : Word)
+    (hBounds : dataStart.toNat + size.toNat ≤ shared.returnData.size) :
     EvmYul.Yul.primCall fuel.succ (.Ok shared store)
         ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul))
           [memStart, dataStart, size] =
@@ -5856,11 +6190,35 @@ theorem primCall_returndatacopy_ok
                 memStart dataStart size }
           store,
         []) := by
-  simp [EvmYul.Yul.primCall]
-  unfold EvmYul.step
-  simp [EvmYul.Yul.State.toSharedState,
-    EvmYul.Yul.State.setMachineState]
-  rfl
+    have hNotBounds :
+        ¬ shared.returnData.size < dataStart.toNat + size.toNat := by
+      omega
+    simp [EvmYul.Yul.primCall]
+    unfold EvmYul.step
+    change
+      (match
+        (if shared.returnData.size < dataStart.toNat + size.toNat then
+          Except.error EvmYul.Yul.Exception.InvalidMemoryAccess
+        else
+          Except.ok
+            (EvmYul.Yul.State.Ok
+              { shared with
+                toMachineState :=
+                  EvmYul.MachineState.returndatacopy shared.toMachineState
+                    memStart dataStart size }
+              store,
+            (none : Option Word))) with
+      | Except.ok (s, lit) => Except.ok (s, lit.toList)
+      | Except.error e => Except.error e) =
+        Except.ok
+          (EvmYul.Yul.State.Ok
+            { shared with
+              toMachineState :=
+                EvmYul.MachineState.returndatacopy shared.toMachineState
+                  memStart dataStart size }
+            store,
+          [])
+    simp [hNotBounds]
 
 theorem primCall_gasprice_ok
     (fuel : Nat) (shared : EvmYul.SharedState .Yul)
@@ -6849,23 +7207,28 @@ theorem basicOp_step_ternaryMachineState_of_stack
       rfl
 
 theorem basicOp_step_returndatacopy_of_stack
-    (state : EVMState) (memStart dataStart size : Word)
-    (stack : EvmYul.Stack Word)
-    (hStack : state.stack = memStart :: dataStart :: size :: stack) :
-    Structured.BasicOp.step .returndatacopy state =
+      (state : EVMState) (memStart dataStart size : Word)
+      (stack : EvmYul.Stack Word)
+      (hStack : state.stack = memStart :: dataStart :: size :: stack)
+      (hBounds : dataStart.toNat + size.toNat ≤ state.returnData.size) :
+      Structured.BasicOp.step .returndatacopy state =
       .ok
         ({ state with
           toMachineState :=
             EvmYul.MachineState.returndatacopy state.toMachineState
               memStart dataStart size }
           |>.replaceStackAndIncrPC stack) := by
-  cases state with
-  | mk shared pc stack0 execLength =>
-      simp at hStack
-      subst stack0
-      simp [Structured.BasicOp.step, Assembly.Target.stepInstr,
-        Assembly.PrimOp.step, Assembly.PrimStep.run, EvmYul.Stack.pop3]
-      rfl
+    cases state with
+    | mk shared pc stack0 execLength =>
+        simp at hStack hBounds
+        subst stack0
+        have hNotBounds :
+            ¬ shared.returnData.size < dataStart.toNat + size.toNat := by
+          omega
+        simp [Structured.BasicOp.step, Assembly.Target.stepInstr,
+          Assembly.PrimOp.step, Assembly.PrimStep.run, EvmYul.Stack.pop3,
+          hNotBounds]
+        rfl
 
 theorem basicOp_step_state_of_stack
     (op : Structured.BasicOp)

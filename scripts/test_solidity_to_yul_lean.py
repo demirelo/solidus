@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+from collections import Counter
 from pathlib import Path
 import subprocess
 import sys
@@ -297,6 +298,54 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIsInstance(expr, bridge.Lit)
         self.assertEqual(expr.value, 128)
 
+    def test_yul_literals_accept_native_json_bool_and_number_values(self):
+        number = bridge.parse_expr(
+            {
+                "nodeType": "YulLiteral",
+                "kind": "number",
+                "value": 42,
+                "nativeSrc": "0:0:0",
+            }
+        )
+        truth = bridge.parse_expr(
+            {
+                "nodeType": "YulLiteral",
+                "kind": "bool",
+                "value": True,
+                "nativeSrc": "0:0:0",
+            }
+        )
+        falsehood = bridge.parse_expr(
+            {
+                "nodeType": "YulLiteral",
+                "kind": "bool",
+                "value": False,
+                "nativeSrc": "0:0:0",
+            }
+        )
+
+        self.assertEqual(number, bridge.Lit(42))
+        self.assertEqual(truth, bridge.Lit(1))
+        self.assertEqual(falsehood, bridge.Lit(0))
+
+    def test_bridge_json_accepts_memoryguard_object_builtin(self):
+        expr = bridge.decode_bridge_expr(
+            {
+                "node": "call",
+                "callee": "memoryguard",
+                "calleeKind": "objectBuiltin",
+                "args": [{"node": "literal", "value": 128}],
+            }
+        )
+
+        self.assertIsInstance(expr, bridge.Call)
+        self.assertEqual(expr.callee_kind, bridge.CALL_OBJECT_BUILTIN)
+        compatibility = bridge.bridge_summary_backend_compatibility(
+            {bridge.CALL_OBJECT_BUILTIN: Counter({"memoryguard": 1})}
+        )
+        self.assertEqual(compatibility["status"], "ready")
+        self.assertEqual(compatibility["objectBuiltinNames"], ["memoryguard"])
+
     def test_primitive_call_emits_typed_yul_operation(self):
         expr = bridge.parse_expr(call("add", [identifier("x"), literal("1")]))
         rendered = expr.lean()
@@ -515,6 +564,547 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIsInstance(g_assign.value, bridge.Call)
         self.assertEqual(g_assign.value.callee, "__yul_gen_0_f")
 
+    def test_single_result_user_calls_stay_direct(self):
+        root = bridge.parse_yul_object(
+            {
+                "nodeType": "YulObject",
+                "name": "object",
+                "code": {
+                    "block": block(
+                        [
+                            {
+                                "nodeType": "YulFunctionDefinition",
+                                "name": "f",
+                                "parameters": [],
+                                "returnVariables": [{"name": "r"}],
+                                "body": block(
+                                    [
+                                        {
+                                            "nodeType": "YulAssignment",
+                                            "variableNames": [identifier("r")],
+                                            "value": literal("1"),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                ),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulVariableDeclaration",
+                                "variables": [{"name": "x"}],
+                                "value": call("f", []),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulAssignment",
+                                "variableNames": [identifier("x")],
+                                "value": call("f", []),
+                                "nativeSrc": "0:0:0",
+                            },
+                        ]
+                    )
+                },
+                "subObjects": [],
+            }
+        )
+
+        self.assertEqual([name for name, _ in root.functions], ["f"])
+        let_call = root.dispatcher[0]
+        self.assertEqual(let_call, bridge.Let(["x"], bridge.Call("f", [], bridge.CALL_USER)))
+        assign_call = root.dispatcher[1]
+        self.assertEqual(assign_call, bridge.Assign(["x"], bridge.Call("f", [], bridge.CALL_USER)))
+
+    def test_single_result_user_calls_with_simple_args_are_preserved(self):
+        root = bridge.parse_yul_object(
+            {
+                "nodeType": "YulObject",
+                "name": "object",
+                "code": {
+                    "block": block(
+                        [
+                            {
+                                "nodeType": "YulFunctionDefinition",
+                                "name": "f",
+                                "parameters": [{"name": "a"}, {"name": "b"}],
+                                "returnVariables": [{"name": "r"}],
+                                "body": block(
+                                    [
+                                        {
+                                            "nodeType": "YulAssignment",
+                                            "variableNames": [identifier("r")],
+                                            "value": identifier("a"),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                ),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulVariableDeclaration",
+                                "variables": [{"name": "a"}],
+                                "value": literal("1"),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulVariableDeclaration",
+                                "variables": [{"name": "x"}],
+                                "value": call("f", [identifier("a"), literal("2")]),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulAssignment",
+                                "variableNames": [identifier("x")],
+                                "value": call("f", [identifier("a"), literal("3")]),
+                                "nativeSrc": "0:0:0",
+                            },
+                        ]
+                    )
+                },
+                "subObjects": [],
+            }
+        )
+
+        self.assertEqual([name for name, _ in root.functions], ["f"])
+        self.assertEqual(root.dispatcher[0], bridge.Let(["a"], bridge.Lit(1)))
+        self.assertEqual(
+            root.dispatcher[1],
+            bridge.Let(
+                ["x"],
+                bridge.Call(
+                    "f",
+                    [bridge.Var("a"), bridge.Lit(2)],
+                    bridge.CALL_USER,
+                ),
+            ),
+        )
+        self.assertEqual(
+            root.dispatcher[2],
+            bridge.Assign(
+                ["x"],
+                bridge.Call(
+                    "f",
+                    [bridge.Var("a"), bridge.Lit(3)],
+                    bridge.CALL_USER,
+                ),
+            ),
+        )
+
+        summary = bridge.bridge_json_summary_artifact(
+            root,
+            "SingleResultArgs.sol",
+            "SingleResultArgs",
+            "runtime",
+        )
+        self.assertEqual(summary["backendCompatibility"]["status"], "ready")
+        self.assertEqual(summary["backendCompatibility"]["unsupportedPrimitiveNames"], [])
+        self.assertEqual(
+            summary["calls"]["user"]["names"],
+            [{"name": "f", "count": 2}],
+        )
+
+    def test_multi_result_user_calls_stay_direct_statement_forms(self):
+        root = bridge.parse_yul_object(
+            {
+                "nodeType": "YulObject",
+                "name": "object",
+                "code": {
+                    "block": block(
+                        [
+                            {
+                                "nodeType": "YulFunctionDefinition",
+                                "name": "f",
+                                "parameters": [],
+                                "returnVariables": [{"name": "a"}, {"name": "b"}],
+                                "body": block(
+                                    [
+                                        {
+                                            "nodeType": "YulAssignment",
+                                            "variableNames": [identifier("a")],
+                                            "value": literal("1"),
+                                            "nativeSrc": "0:0:0",
+                                        },
+                                        {
+                                            "nodeType": "YulAssignment",
+                                            "variableNames": [identifier("b")],
+                                            "value": literal("2"),
+                                            "nativeSrc": "0:0:0",
+                                        },
+                                    ]
+                                ),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulVariableDeclaration",
+                                "variables": [{"name": "x"}, {"name": "y"}],
+                                "value": call("f", []),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulAssignment",
+                                "variableNames": [identifier("x"), identifier("y")],
+                                "value": call("f", []),
+                                "nativeSrc": "0:0:0",
+                            },
+                        ]
+                    )
+                },
+                "subObjects": [],
+            }
+        )
+
+        self.assertEqual([name for name, _ in root.functions], ["f"])
+        self.assertEqual(
+            root.dispatcher[0],
+            bridge.Let(["x", "y"], bridge.Call("f", [], bridge.CALL_USER)),
+        )
+        self.assertEqual(
+            root.dispatcher[1],
+            bridge.Assign(["x", "y"], bridge.Call("f", [], bridge.CALL_USER)),
+        )
+
+        summary = bridge.bridge_json_summary_artifact(
+            root,
+            "MultiResult.sol",
+            "MultiResult",
+            "runtime",
+        )
+        self.assertEqual(summary["backendCompatibility"]["status"], "ready")
+        self.assertEqual(summary["backendCompatibility"]["unsupportedPrimitiveNames"], [])
+        self.assertEqual(
+            summary["calls"]["user"]["names"],
+            [{"name": "f", "count": 2}],
+        )
+
+    def test_single_result_user_calls_can_be_nested_in_expressions(self):
+        root = bridge.parse_yul_object(
+            {
+                "nodeType": "YulObject",
+                "name": "object",
+                "code": {
+                    "block": block(
+                        [
+                            {
+                                "nodeType": "YulFunctionDefinition",
+                                "name": "f",
+                                "parameters": [],
+                                "returnVariables": [{"name": "r"}],
+                                "body": block(
+                                    [
+                                        {
+                                            "nodeType": "YulAssignment",
+                                            "variableNames": [identifier("r")],
+                                            "value": literal("1"),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                ),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulVariableDeclaration",
+                                "variables": [{"name": "x"}],
+                                "value": call("add", [call("f", []), literal("2")]),
+                                "nativeSrc": "0:0:0",
+                            },
+                        ]
+                    )
+                },
+                "subObjects": [],
+            }
+        )
+
+        nested_let = root.dispatcher[0]
+        self.assertIsInstance(nested_let, bridge.Let)
+        self.assertIsInstance(nested_let.value, bridge.Call)
+        self.assertEqual(nested_let.value.callee_kind, bridge.CALL_PRIMITIVE)
+        self.assertEqual(nested_let.value.callee, "add")
+        self.assertEqual(
+            nested_let.value.args[0],
+            bridge.Call("f", [], bridge.CALL_USER),
+        )
+
+        summary = bridge.bridge_json_summary_artifact(
+            root,
+            "NestedCall.sol",
+            "NestedCall",
+            "runtime",
+        )
+        self.assertEqual(summary["backendCompatibility"]["status"], "ready")
+        self.assertEqual(summary["backendCompatibility"]["unsupportedPrimitiveNames"], [])
+        self.assertEqual(
+            summary["calls"]["primitive"]["names"],
+            [{"name": "add", "count": 1}],
+        )
+        self.assertEqual(
+            summary["calls"]["user"]["names"],
+            [{"name": "f", "count": 1}],
+        )
+
+    def test_single_result_user_calls_can_be_control_conditions(self):
+        root = bridge.parse_yul_object(
+            {
+                "nodeType": "YulObject",
+                "name": "object",
+                "code": {
+                    "block": block(
+                        [
+                            {
+                                "nodeType": "YulFunctionDefinition",
+                                "name": "f",
+                                "parameters": [],
+                                "returnVariables": [{"name": "r"}],
+                                "body": block(
+                                    [
+                                        {
+                                            "nodeType": "YulAssignment",
+                                            "variableNames": [identifier("r")],
+                                            "value": literal("1"),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                ),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulIf",
+                                "condition": call("f", []),
+                                "body": block([]),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulSwitch",
+                                "expression": call("f", []),
+                                "cases": [
+                                    {
+                                        "value": literal("1"),
+                                        "body": block([]),
+                                        "nativeSrc": "0:0:0",
+                                    }
+                                ],
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulForLoop",
+                                "pre": block([]),
+                                "condition": call("f", []),
+                                "post": block([]),
+                                "body": block([]),
+                                "nativeSrc": "0:0:0",
+                            },
+                        ]
+                    )
+                },
+                "subObjects": [],
+            }
+        )
+
+        if_stmt, switch_stmt, for_stmt = root.dispatcher
+        self.assertEqual(if_stmt, bridge.If(bridge.Call("f", [], bridge.CALL_USER), []))
+        self.assertEqual(
+            switch_stmt,
+            bridge.Switch(
+                bridge.Call("f", [], bridge.CALL_USER),
+                [(1, [])],
+                [],
+            ),
+        )
+        self.assertEqual(for_stmt, bridge.For(bridge.Call("f", [], bridge.CALL_USER), [], []))
+
+        summary = bridge.bridge_json_summary_artifact(
+            root,
+            "ControlCall.sol",
+            "ControlCall",
+            "runtime",
+        )
+        self.assertEqual(summary["backendCompatibility"]["status"], "ready")
+        self.assertEqual(summary["backendCompatibility"]["unsupportedPrimitiveNames"], [])
+        self.assertEqual(
+            summary["calls"]["user"]["names"],
+            [{"name": "f", "count": 3}],
+        )
+
+    def test_single_result_user_calls_can_be_arguments_to_user_calls(self):
+        root = bridge.parse_yul_object(
+            {
+                "nodeType": "YulObject",
+                "name": "object",
+                "code": {
+                    "block": block(
+                        [
+                            {
+                                "nodeType": "YulFunctionDefinition",
+                                "name": "g",
+                                "parameters": [],
+                                "returnVariables": [{"name": "r"}],
+                                "body": block(
+                                    [
+                                        {
+                                            "nodeType": "YulAssignment",
+                                            "variableNames": [identifier("r")],
+                                            "value": literal("1"),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                ),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulFunctionDefinition",
+                                "name": "f",
+                                "parameters": [{"name": "a"}],
+                                "returnVariables": [{"name": "r"}],
+                                "body": block(
+                                    [
+                                        {
+                                            "nodeType": "YulAssignment",
+                                            "variableNames": [identifier("r")],
+                                            "value": identifier("a"),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                ),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulVariableDeclaration",
+                                "variables": [{"name": "x"}],
+                                "value": call("f", [call("g", [])]),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulAssignment",
+                                "variableNames": [identifier("x")],
+                                "value": call("f", [call("g", [])]),
+                                "nativeSrc": "0:0:0",
+                            },
+                        ]
+                    )
+                },
+                "subObjects": [],
+            }
+        )
+
+        self.assertEqual([name for name, _ in root.functions], ["g", "f"])
+        let_call = root.dispatcher[0]
+        self.assertIsInstance(let_call, bridge.Let)
+        self.assertEqual(let_call.names, ["x"])
+        self.assertEqual(
+            let_call.value,
+            bridge.Call("f", [bridge.Call("g", [], bridge.CALL_USER)], bridge.CALL_USER),
+        )
+        assign_call = root.dispatcher[1]
+        self.assertIsInstance(assign_call, bridge.Assign)
+        self.assertEqual(assign_call.names, ["x"])
+        self.assertEqual(
+            assign_call.value,
+            bridge.Call("f", [bridge.Call("g", [], bridge.CALL_USER)], bridge.CALL_USER),
+        )
+
+        summary = bridge.bridge_json_summary_artifact(
+            root,
+            "NestedUserCallArg.sol",
+            "NestedUserCallArg",
+            "runtime",
+        )
+        self.assertEqual(summary["backendCompatibility"]["status"], "ready")
+        self.assertEqual(summary["backendCompatibility"]["unsupportedPrimitiveNames"], [])
+        self.assertEqual(
+            summary["calls"]["user"]["names"],
+            [{"name": "f", "count": 2}, {"name": "g", "count": 2}],
+        )
+
+    def test_for_init_functions_are_hoisted_across_loop_scope(self):
+        root = bridge.parse_yul_object(
+            {
+                "nodeType": "YulObject",
+                "name": "object",
+                "code": {
+                    "block": block(
+                        [
+                            {
+                                "nodeType": "YulForLoop",
+                                "pre": block(
+                                    [
+                                        {
+                                            "nodeType": "YulFunctionDefinition",
+                                            "name": "f",
+                                            "parameters": [],
+                                            "returnVariables": [{"name": "r"}],
+                                            "body": block(
+                                                [
+                                                    {
+                                                        "nodeType": "YulAssignment",
+                                                        "variableNames": [
+                                                            identifier("r")
+                                                        ],
+                                                        "value": literal("1"),
+                                                        "nativeSrc": "0:0:0",
+                                                    }
+                                                ]
+                                            ),
+                                            "nativeSrc": "0:0:0",
+                                        },
+                                        {
+                                            "nodeType": "YulVariableDeclaration",
+                                            "variables": [{"name": "i"}],
+                                            "value": call("f", []),
+                                            "nativeSrc": "0:0:0",
+                                        },
+                                    ]
+                                ),
+                                "condition": call("f", []),
+                                "post": block(
+                                    [
+                                        {
+                                            "nodeType": "YulAssignment",
+                                            "variableNames": [identifier("i")],
+                                            "value": call("f", []),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                ),
+                                "body": block(
+                                    [
+                                        {
+                                            "nodeType": "YulVariableDeclaration",
+                                            "variables": [{"name": "y"}],
+                                            "value": call("f", []),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                ),
+                                "nativeSrc": "0:0:0",
+                            }
+                        ]
+                    )
+                },
+                "subObjects": [],
+            }
+        )
+
+        self.assertEqual([name for name, _ in root.functions], ["__yul_gen_0_f"])
+        dispatcher_block = root.dispatcher[0]
+        self.assertIsInstance(dispatcher_block, bridge.Block)
+        init_let = dispatcher_block.stmts[0]
+        self.assertIsInstance(init_let, bridge.Let)
+        self.assertIsInstance(init_let.value, bridge.Call)
+        self.assertEqual(init_let.value.callee, "__yul_gen_0_f")
+
+        loop = dispatcher_block.stmts[1]
+        self.assertIsInstance(loop, bridge.For)
+        self.assertIsInstance(loop.cond, bridge.Call)
+        self.assertEqual(loop.cond.callee, "__yul_gen_0_f")
+
+        post_assign = loop.post[0]
+        self.assertIsInstance(post_assign, bridge.Assign)
+        self.assertIsInstance(post_assign.value, bridge.Call)
+        self.assertEqual(post_assign.value.callee, "__yul_gen_0_f")
+
+        body_let = loop.body[0]
+        self.assertIsInstance(body_let, bridge.Let)
+        self.assertIsInstance(body_let.value, bridge.Call)
+        self.assertEqual(body_let.value.callee, "__yul_gen_0_f")
+
     def test_nested_function_source_shadowing_is_rejected_before_hoisting(self):
         with self.assertRaisesRegex(bridge.ConversionError, "already taken"):
             bridge.parse_yul_object(
@@ -664,30 +1254,33 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertEqual(helper.body[0], bridge.Assign([helper.returns[0]], bridge.Lit(256)))
         self.assertIn("EvmYul.Operation.SHR", helper.lean())
 
-    def test_for_loop_init_function_definition_is_rejected_like_solc(self):
-        with self.assertRaises(bridge.ConversionError):
-            bridge.parse_stmt(
-                {
-                    "nodeType": "YulForLoop",
-                    "pre": block(
-                        [
-                            {
-                                "nodeType": "YulFunctionDefinition",
-                                "name": "f",
-                                "parameters": [],
-                                "returnVariables": [],
-                                "body": block([]),
-                                "nativeSrc": "0:0:0",
-                            }
-                        ]
-                    ),
-                    "condition": literal("1"),
-                    "post": block([]),
-                    "body": block([]),
-                    "nativeSrc": "0:0:0",
-                },
-                bridge.ParseContext(),
-            )
+    def test_for_loop_init_function_definition_is_hoisted(self):
+        ctx = bridge.ParseContext()
+        stmt = bridge.parse_stmt(
+            {
+                "nodeType": "YulForLoop",
+                "pre": block(
+                    [
+                        {
+                            "nodeType": "YulFunctionDefinition",
+                            "name": "f",
+                            "parameters": [],
+                            "returnVariables": [],
+                            "body": block([]),
+                            "nativeSrc": "0:0:0",
+                        }
+                    ]
+                ),
+                "condition": literal("1"),
+                "post": block([]),
+                "body": block([]),
+                "nativeSrc": "0:0:0",
+            },
+            ctx,
+        )
+
+        self.assertIsInstance(stmt, bridge.For)
+        self.assertEqual([name for name, _ in ctx.hoisted_functions], ["__yul_gen_0_f"])
 
     def test_for_loop_init_scope_does_not_escape_source_scope(self):
         root = bridge.parse_yul_object(
@@ -977,11 +1570,11 @@ class SolidityToYulLeanTests(unittest.TestCase):
 
         compatibility = summary["backendCompatibility"]
         self.assertEqual(compatibility["profile"], "current-yul-compiler")
-        self.assertEqual(compatibility["status"], "blocked")
-        self.assertEqual(compatibility["unsupportedPrimitiveNames"], ["call"])
-        self.assertIn("external call/create", " ".join(compatibility["notes"]))
+        self.assertEqual(compatibility["status"], "ready")
+        self.assertEqual(compatibility["unsupportedPrimitiveNames"], [])
+        self.assertIn("open external-boundary", " ".join(compatibility["notes"]))
 
-    def test_bridge_json_summary_marks_external_effect_family_blocked(self):
+    def test_bridge_json_summary_marks_external_effect_family_supported(self):
         external_primitives = [
             "call",
             "callcode",
@@ -1011,20 +1604,17 @@ class SolidityToYulLeanTests(unittest.TestCase):
         )
 
         compatibility = summary["backendCompatibility"]
-        self.assertEqual(compatibility["status"], "blocked")
-        self.assertEqual(
-            compatibility["unsupportedPrimitiveNames"],
-            sorted(external_primitives),
-        )
-        self.assertIn("external call/create", " ".join(compatibility["notes"]))
+        self.assertEqual(compatibility["status"], "ready")
+        self.assertEqual(compatibility["unsupportedPrimitiveNames"], [])
+        self.assertIn("open external-boundary", " ".join(compatibility["notes"]))
         self.assertIn(
             "external-effect-primitives-present: call, callcode, create, "
             "create2, delegatecall, staticcall",
             "\n".join(summary["backendHints"]),
         )
 
-    def test_bridge_json_summary_marks_external_account_code_family_blocked(self):
-        external_primitives = ["extcodesize", "extcodecopy", "extcodehash"]
+    def test_bridge_json_summary_marks_external_account_code_family_supported(self):
+        external_primitives = ["balance", "extcodesize", "extcodecopy", "extcodehash"]
         obj = bridge.YulObject(
             name="runtime",
             dispatcher=[
@@ -1044,17 +1634,24 @@ class SolidityToYulLeanTests(unittest.TestCase):
         )
 
         compatibility = summary["backendCompatibility"]
-        self.assertEqual(compatibility["status"], "blocked")
-        self.assertEqual(
-            compatibility["unsupportedPrimitiveNames"],
-            sorted(external_primitives),
+        self.assertEqual(compatibility["status"], "ready")
+        self.assertEqual(compatibility["unsupportedPrimitiveNames"], [])
+        self.assertIn("code-image preservation", " ".join(compatibility["notes"]))
+        self.assertIn(
+            "external-account-query-primitives-present: balance, "
+            "extcodecopy, extcodehash, extcodesize",
+            "\n".join(summary["backendHints"]),
         )
-        self.assertIn("external account-code", " ".join(compatibility["notes"]))
 
     def test_bridge_json_summary_marks_unsupported_dialect_builtins_blocked(self):
+        pc_call = bridge.parse_expr(call("pc", []))
+        self.assertIsInstance(pc_call, bridge.Call)
+        self.assertEqual(pc_call.callee_kind, bridge.CALL_DIALECT_BUILTIN)
+
         obj = bridge.YulObject(
             name="runtime",
             dispatcher=[
+                bridge.ExprStmt(pc_call),
                 bridge.ExprStmt(bridge.parse_expr(call("dataloadn", [literal("0")]))),
                 bridge.ExprStmt(bridge.parse_expr(call("verbatim_0i_0o", []))),
             ],
@@ -1075,13 +1672,70 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertEqual(compatibility["unsupportedPrimitiveNames"], [])
         self.assertEqual(
             compatibility["dialectBuiltinNames"],
-            ["dataloadn", "verbatim_0i_0o"],
+            ["dataloadn", "pc", "verbatim_0i_0o"],
         )
-        self.assertIn("verbatim and EOF", " ".join(compatibility["notes"]))
+        self.assertIn("pc/raw-EVM and verbatim/EOF", " ".join(compatibility["notes"]))
         self.assertIn(
             "unsupported-dialect-builtins-present",
             "\n".join(summary["backendHints"]),
         )
+
+    def test_reserved_raw_evm_opcodes_are_not_imported_as_user_calls(self):
+        self.assertIn("clz", bridge.RESERVED_BINDING_NAMES)
+
+        for name in [
+            "jump",
+            "jumpi",
+            "jumpdest",
+            "push0",
+            "push32",
+            "dup1",
+            "dup16",
+            "swap1",
+            "swap16",
+        ]:
+            with self.subTest(name=name):
+                expr = bridge.parse_expr(call(name, []))
+                self.assertIsInstance(expr, bridge.Call)
+                self.assertEqual(expr.callee_kind, bridge.CALL_DIALECT_BUILTIN)
+
+        user_like_reserved_names = [
+            name
+            for name in bridge.RESERVED_BINDING_NAMES
+            if name != "clz"
+            if bridge.classify_call(name) == bridge.CALL_USER
+        ]
+        self.assertEqual(user_like_reserved_names, [])
+
+    def test_bridge_json_summary_marks_resource_observers_blocked(self):
+        obj = bridge.YulObject(
+            name="runtime",
+            dispatcher=[
+                bridge.Let(
+                    ["g"],
+                    bridge.Call("gas", [], bridge.CALL_PRIMITIVE),
+                ),
+                bridge.Let(
+                    ["m"],
+                    bridge.Call("msize", [], bridge.CALL_PRIMITIVE),
+                ),
+            ],
+            functions=[],
+            data=[],
+            subobjects=[],
+        )
+
+        summary = bridge.bridge_json_summary_artifact(
+            obj,
+            "ResourceObservers.sol",
+            "ResourceObservers",
+            "runtime",
+        )
+
+        compatibility = summary["backendCompatibility"]
+        self.assertEqual(compatibility["status"], "blocked")
+        self.assertEqual(compatibility["unsupportedPrimitiveNames"], ["gas", "msize"])
+        self.assertEqual(compatibility["dialectBuiltinNames"], [])
 
     def test_bridge_json_summary_marks_local_effects_and_code_image_ready(self):
         obj = bridge.YulObject(
@@ -1340,8 +1994,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
         )
 
         compatibility = manifest_summary["backendCompatibility"]
-        self.assertEqual(compatibility["status"], "blocked")
-        self.assertEqual(compatibility["unsupportedPrimitiveNames"], ["call"])
+        self.assertEqual(compatibility["status"], "ready")
+        self.assertEqual(compatibility["unsupportedPrimitiveNames"], [])
         self.assertEqual(compatibility["objectBuiltinNames"], ["datacopy"])
 
     def test_bridge_json_manifest_summary_records_structured_skipped_entries(self):
@@ -3686,16 +4340,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
             dispatcher=[
                 bridge.ExprStmt(
                     bridge.Call(
-                        "call",
-                        [
-                            bridge.Lit(0),
-                            bridge.Lit(0),
-                            bridge.Lit(0),
-                            bridge.Lit(0),
-                            bridge.Lit(0),
-                            bridge.Lit(0),
-                            bridge.Lit(0),
-                        ],
+                        "gas",
+                        [],
                         bridge.CALL_PRIMITIVE,
                     )
                 )
@@ -3732,16 +4378,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
             dispatcher=[
                 bridge.ExprStmt(
                     bridge.Call(
-                        "call",
-                        [
-                            bridge.Lit(0),
-                            bridge.Lit(0),
-                            bridge.Lit(0),
-                            bridge.Lit(0),
-                            bridge.Lit(0),
-                            bridge.Lit(0),
-                            bridge.Lit(0),
-                        ],
+                        "gas",
+                        [],
                         bridge.CALL_PRIMITIVE,
                     )
                 )
@@ -7224,11 +7862,14 @@ class SolidityToYulLeanTests(unittest.TestCase):
     def test_standard_json_output_replaces_selected_contract_bytecode(self):
         compatibility = {
             "profile": "current-yul-compiler",
-            "status": "blocked",
-            "unsupportedPrimitiveNames": ["call"],
+            "status": "ready",
+            "unsupportedPrimitiveNames": [],
             "objectBuiltinNames": [],
             "dialectBuiltinNames": [],
-            "notes": ["current backend does not lower external call/create primitives"],
+            "notes": [
+                "CALL/CALLCODE/DELEGATECALL/STATICCALL and CREATE/CREATE2 are "
+                "covered by the open external-boundary proof surface"
+            ],
         }
         bridge_json = {
             "schema": bridge.BRIDGE_JSON_PROVENANCE_SCHEMA,
@@ -7469,8 +8110,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
 
         compatibility = artifact.backend_compatibility
         self.assertIsNotNone(compatibility)
-        self.assertEqual(compatibility["status"], "blocked")
-        self.assertEqual(compatibility["unsupportedPrimitiveNames"], ["call"])
+        self.assertEqual(compatibility["status"], "ready")
+        self.assertEqual(compatibility["unsupportedPrimitiveNames"], [])
         self.assertEqual(compatibility["objectBuiltinNames"], [])
 
     def test_parser_accepts_artifact_formats(self):
@@ -8726,8 +9367,9 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIn("lean-json-check", external_smoke)
         self.assertIn("lean-backend-check", external_smoke)
         self.assertIn("bridge-json-summary", external_smoke)
-        self.assertIn("external call/create primitives", external_smoke)
+        self.assertIn("open external-boundary", external_smoke)
         self.assertIn("external_call_decode_backend_check_failed=", external_smoke)
+        self.assertIn("external_call_decode_backend_compatibility=blocked", external_smoke)
         self.assertIn("external_call_decode_creation_first_none=to_yul_contract", external_smoke)
         self.assertIn("external_call_decode_runtime_first_none=lower_code_unchecked", external_smoke)
         self.assertIn(
@@ -8773,8 +9415,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIn("selfdestruct_decode_backend_check=pass", selfdestruct_smoke)
         self.assertIn("selfdestruct_decode_backend_check_passed=", selfdestruct_smoke)
         self.assertIn('("SelfDestructBox", "runtime"): ("pass", "none")', selfdestruct_smoke)
-        self.assertIn('"selfdestruct" in unsupported', selfdestruct_smoke)
-        self.assertIn('"sstore" in unsupported', selfdestruct_smoke)
+        self.assertIn("incorrectly marked selfdestruct unsupported", selfdestruct_smoke)
+        self.assertIn("incorrectly marked sstore unsupported", selfdestruct_smoke)
         for behavior in [
             "selfdestruct(recipient)",
             "selfdestruct(0)",
@@ -8891,6 +9533,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
             "returndatasize",
             "revert",
             "log2",
+            "gas",
         ]:
             self.assertIn(primitive, try_catch_smoke)
         for behavior in [
@@ -9017,6 +9660,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
         for primitive in [
             "create,create2",
             "call,delegatecall,staticcall",
+            "returndatacopy,returndatasize,gas",
             "log0,log1,log2,log3,log4",
             "caller,origin,chainid,timestamp,callvalue",
             "calldatacopy,keccak256,revert",
@@ -9060,6 +9704,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
             self.assertIn(source, runner)
         for primitive in [
             "call,delegatecall,staticcall",
+            "returndatacopy,returndatasize,gas",
             "log0,log1,log2,log3,log4",
             "calldataload,keccak256,log2,revert,sload,sstore",
             "caller,keccak256,log3,revert,sload,sstore",
@@ -9098,11 +9743,13 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIn("lean-backend-check", object_tree_smoke)
         self.assertIn("object_tree_factory_create_primitives=yes", object_tree_smoke)
         self.assertIn("object_tree_factory_backend_compatibility=blocked", object_tree_smoke)
-        self.assertIn("object_tree_child_backend_check=pass", object_tree_smoke)
+        self.assertIn("object_tree_child_creation_backend_check=pass", object_tree_smoke)
+        self.assertIn("object_tree_child_runtime_backend_check=pass", object_tree_smoke)
         self.assertIn("object_tree_factory_backend_first_none=to_yul_contract", object_tree_smoke)
         self.assertIn('("ChildBox", "creation"): ("pass", "none")', object_tree_smoke)
+        self.assertIn('("ChildBox", "runtime"): ("pass", "none")', object_tree_smoke)
         self.assertIn('("FactoryBox", "runtime"): ("fail", "to_yul_contract")', object_tree_smoke)
-        for primitive in ["create", "create2"]:
+        for primitive in ["create", "create2", "gas"]:
             self.assertIn(primitive, object_tree_smoke)
         for behavior in [
             "new ChildBox{value: msg.value}(seed)",
@@ -9345,7 +9992,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
                         ],
                         "backendCompatibility": {
                             "status": "blocked",
-                            "unsupportedPrimitiveNames": ["sstore", "log1"],
+                            "unsupportedPrimitiveNames": ["gas", "msize"],
                             "objectBuiltinNames": ["datasize"],
                             "dialectBuiltinNames": [],
                         },
@@ -9363,7 +10010,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
                 "bridge_summary_2_object_selectors=Box:runtime",
                 "bridge_summary_2_frontends=solc:irOptimizedAst",
                 "bridge_summary_2_skipped_contracts=0",
-                "bridge_summary_2_unsupported_primitives=sstore,log1",
+                "bridge_summary_2_unsupported_primitives=gas,msize",
                 "bridge_summary_2_object_builtins=datasize",
                 "bridge_summary_2_dialect_builtins=none",
             ],
@@ -9910,8 +10557,8 @@ exit {full_status}
         self.assertIn("solc_lean_status=1", completed.stdout)
         self.assertIn("bridge_json_manifest_validated=yes", completed.stdout)
         self.assertIn("bridge_json_summary_validated=yes", completed.stdout)
-        self.assertIn("bridge_json_backend_compatibility=blocked", completed.stdout)
-        self.assertIn("bridge_json_summary_unsupported_primitives=call", completed.stdout)
+        self.assertIn("bridge_json_backend_compatibility=ready", completed.stdout)
+        self.assertIn("bridge_json_summary_unsupported_primitives=none", completed.stdout)
         self.assertIn("bridge_json_summary_object_builtins=datasize", completed.stdout)
         self.assertIn("bridge_json_summary_dialect_builtins=none", completed.stdout)
         self.assertIn("bridge_json_summary_objects=1", completed.stdout)
@@ -9924,8 +10571,8 @@ exit {full_status}
         self.assertIn("status=1", completed.stdout)
         self.assertIn("bridge_json_manifest_validated=yes", completed.stdout)
         self.assertIn("bridge_json_summary_validated=yes", completed.stdout)
-        self.assertIn("bridge_json_backend_compatibility=blocked", completed.stdout)
-        self.assertIn("bridge_json_summary_unsupported_primitives=call", completed.stdout)
+        self.assertIn("bridge_json_backend_compatibility=ready", completed.stdout)
+        self.assertIn("bridge_json_summary_unsupported_primitives=none", completed.stdout)
         self.assertIn("bridge_json_summary_object_builtins=datasize", completed.stdout)
         self.assertIn("bridge_json_summary_dialect_builtins=none", completed.stdout)
         self.assertIn("bridge_json_summary_objects=1", completed.stdout)
@@ -9944,8 +10591,8 @@ exit {full_status}
         self.assertIn("forge_compare_tests_skipped=0", output_lines)
         self.assertIn("bridge_json_manifest_validated=yes", output_lines)
         self.assertIn("bridge_json_summary_validated=yes", output_lines)
-        self.assertIn("bridge_json_backend_compatibility=blocked", output_lines)
-        self.assertIn("bridge_json_summary_unsupported_primitives=call", output_lines)
+        self.assertIn("bridge_json_backend_compatibility=ready", output_lines)
+        self.assertIn("bridge_json_summary_unsupported_primitives=none", output_lines)
         self.assertIn("bridge_json_summary_object_builtins=datasize", output_lines)
         self.assertIn("bridge_json_summary_dialect_builtins=none", output_lines)
 
@@ -9985,7 +10632,7 @@ exit {full_status}
         self.assertIn("status=0", output_lines)
         self.assertIn("bridge_json_manifest_validated=yes", output_lines)
         self.assertIn("bridge_json_summary_validated=yes", output_lines)
-        self.assertIn("bridge_json_backend_compatibility=blocked", output_lines)
+        self.assertIn("bridge_json_backend_compatibility=ready", output_lines)
         self.assertIn("--- full solc tail ---", completed.stdout)
         self.assertIn("--- solc-lean tail ---", completed.stdout)
 
@@ -10030,7 +10677,7 @@ exit {full_status}
         self.assertEqual(completed.returncode, 1, completed.stderr)
 
         output_lines = set(completed.stdout.splitlines())
-        self.assertIn("bridge_json_summary_unsupported_primitives=call", output_lines)
+        self.assertIn("bridge_json_summary_unsupported_primitives=none", output_lines)
         self.assertIn("bridge_json_summary_object_builtins=datasize", output_lines)
         self.assertIn("bridge_json_summary_dialect_builtins=none", output_lines)
 

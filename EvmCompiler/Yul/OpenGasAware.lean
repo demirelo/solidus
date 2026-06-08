@@ -2,12 +2,13 @@ import EvmCompiler.Yul.OpenAssembly
 import EvmCompiler.Assembly.GasAware
 
 /-!
-Open gas-aware EVM execution for external CALL-family traces.
+Open gas-aware EVM execution for external CALL/CREATE-boundary traces.
 
 `Assembly.GasAware` proves the no-internal-CALL public spine against the closed
-`EvmYul.EVM.X` runner.  For the CALL route we need the same gas/check/final
-result shape, but CALL-family opcodes must suspend at the abstract
-`OpenExternal.CallSite` boundary instead of entering the concrete EVM world.
+`EvmYul.EVM.X` runner.  For the open-boundary route we need the same
+gas/check/final result shape, but CALL-family and CREATE-family opcodes suspend
+at the abstract `OpenExternal` boundary instead of entering a concrete external
+world.
 -/
 
 namespace EvmCompiler
@@ -32,6 +33,12 @@ def finishGasAwareCall
     (call : OpenExternal.OpenCall EVMState)
     (response : OpenExternal.CallResponse) : EVMState :=
   let resumed := call.resume response
+  { resumed with gasAvailable := resumed.gasAvailable + response.returnedGas }
+
+def finishGasAwareCreate
+    (create : OpenExternal.OpenCreate EVMState)
+    (response : OpenExternal.CreateResponse) : EVMState :=
+  let resumed := create.resume response
   { resumed with gasAvailable := resumed.gasAvailable + response.returnedGas }
 
 theorem uint256_add_toNat_of_lt_size {left right : Word}
@@ -78,6 +85,37 @@ theorem finishGasAwareCall_incrPC_tail_budget_of_no_overflow
         (finishGasAwareCall call response)).gasAvailable.toNat := by
   rw [finishGasAwareCall_incrPC_gasAvailable_toNat_of_no_overflow
     call response hNoOverflow]
+  exact hTail
+
+theorem finishGasAwareCreate_incrPC_gasAvailable_toNat_of_no_overflow
+    (create : OpenExternal.OpenCreate EVMState)
+    (response : OpenExternal.CreateResponse)
+    (hNoOverflow :
+      (create.resume response).gasAvailable.toNat +
+          response.returnedGas.toNat < EvmYul.UInt256.size) :
+    (EvmYul.EVM.State.incrPC
+        (finishGasAwareCreate create response)).gasAvailable.toNat =
+      (create.resume response).gasAvailable.toNat +
+        response.returnedGas.toNat := by
+  simp [finishGasAwareCreate, EvmYul.EVM.State.incrPC,
+    uint256_add_toNat_of_lt_size hNoOverflow]
+
+theorem finishGasAwareCreate_incrPC_tail_budget_of_no_overflow
+    {tailGasBound : Nat}
+    (create : OpenExternal.OpenCreate EVMState)
+    (response : OpenExternal.CreateResponse)
+    (hNoOverflow :
+      (create.resume response).gasAvailable.toNat +
+          response.returnedGas.toNat < EvmYul.UInt256.size)
+    (hTail :
+      tailGasBound ≤
+        (create.resume response).gasAvailable.toNat +
+          response.returnedGas.toNat) :
+    tailGasBound ≤
+      (EvmYul.EVM.State.incrPC
+        (finishGasAwareCreate create response)).gasAvailable.toNat := by
+  rw [finishGasAwareCreate_incrPC_gasAvailable_toNat_of_no_overflow
+    create response hNoOverflow]
   exact hTail
 
 theorem evmCallSite?_gasChargedState
@@ -261,6 +299,184 @@ theorem evmOpenCall?_gasChargedState_resume_gasExecRel_of_gasExecRel
   cases hGasCall'
   exact hPostRel
 
+theorem evmCreateSite?_gasChargedState
+    (state : EVMState) (op : EVMOp) (kind : OpenExternal.CreateKind) :
+    OpenExternal.CreateKind.evmCreateSite? (gasChargedState state op) kind =
+      OpenExternal.CreateKind.evmCreateSite? state kind := by
+  cases hOperands : kind.evmOperands? state.stack with
+  | none =>
+      simp [OpenExternal.CreateKind.evmCreateSite?, gasChargedState,
+        Assembly.GasAware.memoryGasState, hOperands]
+  | some pair =>
+      rcases pair with ⟨rest, operands⟩
+      simp [OpenExternal.CreateKind.evmCreateSite?, gasChargedState,
+        Assembly.GasAware.memoryGasState, hOperands,
+        OpenExternal.CallContext.ofEVMState,
+        OpenExternal.CallContext.createSite,
+        OpenExternal.CallContext.initCode,
+        OpenExternal.CallContext.createSalt]
+
+theorem evmCreateSite?_of_gasExecRel
+    {full target : EVMState}
+    (hRel : Assembly.GasAware.GasExecRel full target)
+    (kind : OpenExternal.CreateKind) :
+    OpenExternal.CreateKind.evmCreateSite? full kind =
+      OpenExternal.CreateKind.evmCreateSite? target kind := by
+  rw [hRel]
+  cases hOperands : kind.evmOperands? target.stack with
+  | none =>
+      simp [OpenExternal.CreateKind.evmCreateSite?, hOperands]
+  | some pair =>
+      rcases pair with ⟨rest, operands⟩
+      simp [OpenExternal.CreateKind.evmCreateSite?, hOperands,
+        OpenExternal.CallContext.ofEVMState,
+        OpenExternal.CallContext.createSite,
+        OpenExternal.CallContext.initCode,
+        OpenExternal.CallContext.createSalt]
+
+theorem evmCreateSite?_gasChargedState_of_gasExecRel
+    {full target : EVMState}
+    (hRel : Assembly.GasAware.GasExecRel full target)
+    (op : EVMOp) (kind : OpenExternal.CreateKind) :
+    OpenExternal.CreateKind.evmCreateSite? (gasChargedState full op) kind =
+      OpenExternal.CreateKind.evmCreateSite? target kind := by
+  rw [evmCreateSite?_gasChargedState]
+  exact evmCreateSite?_of_gasExecRel hRel kind
+
+theorem evmOpenCreate?_gasChargedState_site
+    {state : EVMState} {op : EVMOp} {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? state kind = some create) :
+    ∃ gasCreate : OpenExternal.OpenCreate EVMState,
+      OpenExternal.CreateKind.evmOpenCreate? (gasChargedState state op) kind =
+        some gasCreate ∧
+      gasCreate.site = create.site := by
+  unfold OpenExternal.CreateKind.evmOpenCreate? at hCreate ⊢
+  rw [evmCreateSite?_gasChargedState]
+  cases hSite : OpenExternal.CreateKind.evmCreateSite? state kind with
+  | none =>
+      simp [hSite] at hCreate
+  | some siteData =>
+      rcases siteData with ⟨rest, site⟩
+      simp [hSite] at hCreate ⊢
+      cases hCreate
+      rfl
+
+theorem evmOpenCreate?_gasChargedState_resume_gasExecRel
+    {state : EVMState} {op : EVMOp} {kind : OpenExternal.CreateKind}
+    {create gasCreate : OpenExternal.OpenCreate EVMState}
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? state kind = some create)
+    (hGasCreate :
+      OpenExternal.CreateKind.evmOpenCreate? (gasChargedState state op) kind =
+        some gasCreate)
+    (response : OpenExternal.CreateResponse) :
+    Assembly.GasAware.GasExecRel
+      (EvmYul.EVM.State.incrPC
+        (finishGasAwareCreate gasCreate response))
+      (EvmYul.EVM.State.incrPC (create.resume response)) := by
+  unfold OpenExternal.CreateKind.evmOpenCreate? at hCreate hGasCreate
+  rw [evmCreateSite?_gasChargedState] at hGasCreate
+  cases hSite : OpenExternal.CreateKind.evmCreateSite? state kind with
+  | none =>
+      simp [hSite] at hCreate
+  | some siteData =>
+      rcases siteData with ⟨rest, site⟩
+      simp [hSite] at hCreate hGasCreate
+      cases hCreate
+      cases hGasCreate
+      simp [finishGasAwareCreate, gasChargedState,
+        Assembly.GasAware.memoryGasState,
+        OpenExternal.CreateSite.finishShared,
+        OpenExternal.CreateSite.finishMachine,
+        EvmYul.MachineState.finishExternalCall,
+        EvmYul.writeBytes,
+        EvmYul.EVM.State.incrPC,
+        Assembly.GasAware.GasExecRel]
+
+theorem evmOpenCreate?_gasChargedState_site_of_gasExecRel
+    {full target : EVMState} {op : EVMOp}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    (hRel : Assembly.GasAware.GasExecRel full target)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? target kind = some create) :
+    ∃ gasCreate : OpenExternal.OpenCreate EVMState,
+      OpenExternal.CreateKind.evmOpenCreate? (gasChargedState full op) kind =
+        some gasCreate ∧
+      gasCreate.site = create.site := by
+  unfold OpenExternal.CreateKind.evmOpenCreate? at hCreate ⊢
+  rw [evmCreateSite?_gasChargedState_of_gasExecRel hRel op]
+  cases hSite : OpenExternal.CreateKind.evmCreateSite? target kind with
+  | none =>
+      simp [hSite] at hCreate
+  | some siteData =>
+      rcases siteData with ⟨rest, site⟩
+      simp [hSite] at hCreate ⊢
+      cases hCreate
+      rfl
+
+theorem evmOpenCreate?_gasChargedState_of_gasExecRel
+    {full target : EVMState} {op : EVMOp}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    (hRel : Assembly.GasAware.GasExecRel full target)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? target kind = some create)
+    (response : OpenExternal.CreateResponse) :
+    ∃ gasCreate : OpenExternal.OpenCreate EVMState,
+      OpenExternal.CreateKind.evmOpenCreate? (gasChargedState full op) kind =
+        some gasCreate ∧
+      gasCreate.site = create.site ∧
+      Assembly.GasAware.GasExecRel
+        (EvmYul.EVM.State.incrPC
+          (finishGasAwareCreate gasCreate response))
+        (EvmYul.EVM.State.incrPC (create.resume response)) := by
+  unfold OpenExternal.CreateKind.evmOpenCreate? at hCreate ⊢
+  rw [evmCreateSite?_gasChargedState_of_gasExecRel hRel op]
+  cases hSite : OpenExternal.CreateKind.evmCreateSite? target kind with
+  | none =>
+      simp [hSite] at hCreate
+  | some siteData =>
+      rcases siteData with ⟨rest, site⟩
+      simp [hSite] at hCreate ⊢
+      cases hCreate
+      constructor
+      · rfl
+      · rw [hRel]
+        simp [finishGasAwareCreate, gasChargedState,
+          Assembly.GasAware.memoryGasState,
+          OpenExternal.CreateSite.finishShared,
+          OpenExternal.CreateSite.finishMachine,
+          EvmYul.MachineState.finishExternalCall,
+          EvmYul.writeBytes,
+          EvmYul.EVM.State.incrPC,
+          Assembly.GasAware.GasExecRel]
+
+theorem evmOpenCreate?_gasChargedState_resume_gasExecRel_of_gasExecRel
+    {full target : EVMState} {op : EVMOp}
+    {kind : OpenExternal.CreateKind}
+    {create gasCreate : OpenExternal.OpenCreate EVMState}
+    (hRel : Assembly.GasAware.GasExecRel full target)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? target kind = some create)
+    (hGasCreate :
+      OpenExternal.CreateKind.evmOpenCreate? (gasChargedState full op) kind =
+        some gasCreate)
+    (response : OpenExternal.CreateResponse) :
+    Assembly.GasAware.GasExecRel
+      (EvmYul.EVM.State.incrPC
+        (finishGasAwareCreate gasCreate response))
+      (EvmYul.EVM.State.incrPC (create.resume response)) := by
+  obtain ⟨gasCreate', hGasCreate', _hSite, hPostRel⟩ :=
+    evmOpenCreate?_gasChargedState_of_gasExecRel
+      (full := full) (target := target) (op := op)
+      hRel hCreate response
+  rw [hGasCreate] at hGasCreate'
+  cases hGasCreate'
+  exact hPostRel
+
 def evmGasAwareCallResult
     (call : OpenExternal.OpenCall EVMState) :
     OpenExternal.OpenResult EVMException EVMState :=
@@ -272,6 +488,17 @@ def evmGasAwareCallResult
             (EvmYul.EVM.State.incrPC
               (finishGasAwareCall call response))) }
 
+def evmGasAwareCreateResult
+    (create : OpenExternal.OpenCreate EVMState) :
+    OpenExternal.OpenResult EVMException EVMState :=
+  .create
+    { site := create.site
+      resume := fun response =>
+        .done
+          (.ok
+            (EvmYul.EVM.State.incrPC
+              (finishGasAwareCreate create response))) }
+
 theorem evmGasAwareCallResult_resolves
     (call : OpenExternal.OpenCall EVMState)
     (response : OpenExternal.CallResponse) :
@@ -282,6 +509,18 @@ theorem evmGasAwareCallResult_resolves
           (finishGasAwareCall call response))) := by
   unfold evmGasAwareCallResult
   exact OpenExternal.OpenResultResolves.call
+    OpenExternal.OpenResultResolves.done
+
+theorem evmGasAwareCreateResult_resolves
+    (create : OpenExternal.OpenCreate EVMState)
+    (response : OpenExternal.CreateResponse) :
+    OpenExternal.OpenResultResolves (evmGasAwareCreateResult create)
+      [OpenExternal.OpenEvent.create create.site response]
+      (.ok
+        (EvmYul.EVM.State.incrPC
+          (finishGasAwareCreate create response))) := by
+  unfold evmGasAwareCreateResult
+  exact OpenExternal.OpenResultResolves.create
     OpenExternal.OpenResultResolves.done
 
 def staticWriteSensitive? (op : EVMOp) (stack : EvmYul.Stack Word) : Bool :=
@@ -681,29 +920,39 @@ theorem xStepException?_eq_outOfGas_of_nonGas_checks_of_some
     cases hOutOfGas
     rfl
 
+def closedStepAfterChecks
+    (fuel : Nat) (op : EVMOp) (arg : Option (Word × Nat))
+    (state : EVMState) :
+    OpenExternal.OpenResult EVMException EVMState :=
+  .done
+    (EvmYul.EVM.step fuel
+      (EvmYul.EVM.C'
+        (Assembly.GasAware.memoryGasState state op) op)
+      (some (op, arg))
+      (Assembly.GasAware.memoryGasState state op))
+
+def openBoundaryStepAfterChecks
+    (fuel : Nat) (op : EVMOp) (arg : Option (Word × Nat))
+    (state : EVMState) (kind : OpenExternal.BoundaryKind) :
+    OpenExternal.OpenResult EVMException EVMState :=
+  let charged := gasChargedState state op
+  match kind with
+  | .call kind =>
+      match OpenExternal.CallKind.evmOpenCall? charged kind with
+      | some call => evmGasAwareCallResult call
+      | none => closedStepAfterChecks fuel op arg state
+  | .create kind =>
+      match OpenExternal.CreateKind.evmOpenCreate? charged kind with
+      | some create => evmGasAwareCreateResult create
+      | none => closedStepAfterChecks fuel op arg state
+
 def openStepAfterChecks
     (fuel : Nat) (op : EVMOp) (arg : Option (Word × Nat))
     (state : EVMState) :
     OpenExternal.OpenResult EVMException EVMState :=
-  match OpenExternal.CallKind.ofEVMOperation? op with
-  | some kind =>
-      let charged := gasChargedState state op
-      match OpenExternal.CallKind.evmOpenCall? charged kind with
-      | some call => evmGasAwareCallResult call
-      | none =>
-          .done
-            (EvmYul.EVM.step fuel
-              (EvmYul.EVM.C'
-                (Assembly.GasAware.memoryGasState state op) op)
-              (some (op, arg))
-              (Assembly.GasAware.memoryGasState state op))
-  | none =>
-      .done
-        (EvmYul.EVM.step fuel
-          (EvmYul.EVM.C'
-            (Assembly.GasAware.memoryGasState state op) op)
-          (some (op, arg))
-          (Assembly.GasAware.memoryGasState state op))
+  match OpenExternal.BoundaryKind.ofEVMOperation? op with
+  | some kind => openBoundaryStepAfterChecks fuel op arg state kind
+  | none => closedStepAfterChecks fuel op arg state
 
 theorem openStepAfterChecks_call
     {fuel : Nat} {op : EVMOp} {arg : Option (Word × Nat)}
@@ -714,7 +963,23 @@ theorem openStepAfterChecks_call
       OpenExternal.CallKind.evmOpenCall? (gasChargedState state op) kind =
         some call) :
     openStepAfterChecks fuel op arg state = evmGasAwareCallResult call := by
-  simp [openStepAfterChecks, hKind, hCall]
+  simp [openStepAfterChecks, openBoundaryStepAfterChecks,
+    OpenExternal.BoundaryKind.ofEVMOperation?, hKind, hCall]
+
+theorem openStepAfterChecks_create
+    {fuel : Nat} {op : EVMOp} {arg : Option (Word × Nat)}
+    {state : EVMState} {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op = some kind)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate?
+          (gasChargedState state op) kind =
+        some create) :
+    openStepAfterChecks fuel op arg state =
+      evmGasAwareCreateResult create := by
+  simp [openStepAfterChecks, openBoundaryStepAfterChecks,
+    OpenExternal.BoundaryKind.ofEVMOperation?, hCallKind, hKind, hCreate]
 
 def continueAfterStep
     (openXNext : EVMState → OpenExternal.OpenResult EVMException EVMResult)
@@ -774,6 +1039,18 @@ theorem XStepHaltOutput?_none_of_callKind
     try cases subop <;>
       simp at hKind ⊢
 
+theorem XStepHaltOutput?_none_of_createKind
+    {op : EVMOp} {kind : OpenExternal.CreateKind} {state : EVMState}
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op = some kind) :
+    Assembly.GasAware.XStepHaltOutput? op state = none := by
+  cases kind <;> cases op <;>
+    simp [OpenExternal.CreateKind.ofEVMOperation?,
+      Assembly.GasAware.XStepHaltOutput?] at hKind ⊢
+  all_goals
+    try rename_i subop
+    try cases subop <;>
+      simp at hKind ⊢
+
 theorem openX_current_call_continue
     {fuel : Nat} {validJumps : Array Word} {state : EVMState}
     {op : EVMOp} {arg : Option (Word × Nat)}
@@ -814,6 +1091,51 @@ theorem openX_current_call_continue
         (continueAfterStep (openX fuel validJumps) op
           (EvmYul.EVM.State.incrPC
             (finishGasAwareCall call response)))
+        tailTrace (.ok result) := by
+    simpa [continueAfterStep, hNoHalt] using hRest
+  exact OpenExternal.OpenResultResolves.bind_ok hStep hRest'
+
+theorem openX_current_create_continue
+    {fuel : Nat} {validJumps : Array Word} {state : EVMState}
+    {op : EVMOp} {arg : Option (Word × Nat)}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    {response : OpenExternal.CreateResponse}
+    {tailTrace : OpenExternal.OpenTrace} {result : EVMResult}
+    (hDecode :
+      EvmYul.EVM.decode state.executionEnv.code state.pc = some (op, arg))
+    (hChecks : xStepException? validJumps state op = none)
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op = some kind)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? (gasChargedState state op) kind =
+        some create)
+    (hRest :
+      OpenExternal.OpenResultResolves
+        (openX fuel validJumps
+          (EvmYul.EVM.State.incrPC
+            (finishGasAwareCreate create response)))
+        tailTrace (.ok result)) :
+    OpenExternal.OpenResultResolves
+      (openX (fuel + 1) validJumps state)
+      (OpenExternal.OpenEvent.create create.site response :: tailTrace)
+      (.ok result) := by
+  rw [openX_succ]
+  simp [hDecode, hChecks]
+  rw [openStepAfterChecks_create (fuel := fuel) (arg := arg)
+    (state := state) hCallKind hKind hCreate]
+  have hNoHalt :
+      Assembly.GasAware.XStepHaltOutput? op
+        (EvmYul.EVM.State.incrPC
+          (finishGasAwareCreate create response)) = none :=
+    XStepHaltOutput?_none_of_createKind hKind
+  have hStep :=
+    evmGasAwareCreateResult_resolves create response
+  have hRest' :
+      OpenExternal.OpenResultResolves
+        (continueAfterStep (openX fuel validJumps) op
+          (EvmYul.EVM.State.incrPC
+            (finishGasAwareCreate create response)))
         tailTrace (.ok result) := by
     simpa [continueAfterStep, hNoHalt] using hRest
   exact OpenExternal.OpenResultResolves.bind_ok hStep hRest'
@@ -961,10 +1283,118 @@ theorem openX_current_call_continue_outcome_safelyTracks_of_tail_inv
       (outcome := outcome)
       hDecode hChecks hKind hCall hTrace)
 
-theorem openStepAfterChecks_of_not_callKind
+theorem openX_current_create_continue_outcome
+    {fuel : Nat} {validJumps : Array Word} {state : EVMState}
+    {op : EVMOp} {arg : Option (Word × Nat)}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    {response : OpenExternal.CreateResponse}
+    {tailTrace : OpenExternal.OpenTrace}
+    {outcome : Except EVMException EVMResult}
+    (hDecode :
+      EvmYul.EVM.decode state.executionEnv.code state.pc = some (op, arg))
+    (hChecks : xStepException? validJumps state op = none)
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op = some kind)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? (gasChargedState state op) kind =
+        some create)
+    (hRest :
+      OpenExternal.OpenResultResolves
+        (openX fuel validJumps
+          (EvmYul.EVM.State.incrPC
+            (finishGasAwareCreate create response)))
+        tailTrace outcome) :
+    OpenExternal.OpenResultResolves
+      (openX (fuel + 1) validJumps state)
+      (OpenExternal.OpenEvent.create create.site response :: tailTrace)
+      outcome := by
+  rw [openX_succ]
+  simp [hDecode, hChecks]
+  rw [openStepAfterChecks_create (fuel := fuel) (arg := arg)
+    (state := state) hCallKind hKind hCreate]
+  have hNoHalt :
+      Assembly.GasAware.XStepHaltOutput? op
+        (EvmYul.EVM.State.incrPC
+          (finishGasAwareCreate create response)) = none :=
+    XStepHaltOutput?_none_of_createKind hKind
+  have hStep :=
+    evmGasAwareCreateResult_resolves create response
+  have hRest' :
+      OpenExternal.OpenResultResolves
+        (continueAfterStep (openX fuel validJumps) op
+          (EvmYul.EVM.State.incrPC
+            (finishGasAwareCreate create response)))
+        tailTrace outcome := by
+    simpa [continueAfterStep, hNoHalt] using hRest
+  exact OpenExternal.OpenResultResolves.bind_ok hStep hRest'
+
+theorem openX_current_create_continue_outcome_inv
+    {fuel : Nat} {validJumps : Array Word} {state : EVMState}
+    {op : EVMOp} {arg : Option (Word × Nat)}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    {response : OpenExternal.CreateResponse}
+    {tailTrace : OpenExternal.OpenTrace}
+    {outcome : Except EVMException EVMResult}
+    (hDecode :
+      EvmYul.EVM.decode state.executionEnv.code state.pc = some (op, arg))
+    (hChecks : xStepException? validJumps state op = none)
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op = some kind)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? (gasChargedState state op) kind =
+        some create)
+    (hTrace :
+      OpenExternal.OpenResultResolves
+        (openX (fuel + 1) validJumps state)
+        (OpenExternal.OpenEvent.create create.site response :: tailTrace)
+        outcome) :
+    OpenExternal.OpenResultResolves
+      (openX fuel validJumps
+        (EvmYul.EVM.State.incrPC
+          (finishGasAwareCreate create response)))
+      tailTrace outcome := by
+  have hTrace' :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.OpenResult.bind (evmGasAwareCreateResult create)
+          (continueAfterStep (openX fuel validJumps) op))
+        (OpenExternal.OpenEvent.create create.site response :: tailTrace)
+        outcome := by
+    rw [openX_succ] at hTrace
+    simp [hDecode, hChecks] at hTrace
+    rw [openStepAfterChecks_create (fuel := fuel) (arg := arg)
+      (state := state) hCallKind hKind hCreate] at hTrace
+    exact hTrace
+  rcases OpenExternal.OpenResultResolves.bind_inv hTrace' with
+    hError | hOk
+  · rcases hError with ⟨err, hSource, hOutcome⟩
+    unfold evmGasAwareCreateResult at hSource
+    cases hSource with
+    | create hTail =>
+        cases hTail
+  · rcases hOk with
+      ⟨left, right, value, hTraceEq, hSource, hSuffix⟩
+    unfold evmGasAwareCreateResult at hSource
+    cases hSource with
+    | create hTail =>
+        cases hTail
+        simp at hTraceEq
+        rcases hTraceEq with ⟨hResponse, hRight⟩
+        cases hResponse
+        cases hRight
+        have hNoHalt :
+            Assembly.GasAware.XStepHaltOutput? op
+              (EvmYul.EVM.State.incrPC
+                (finishGasAwareCreate create response)) = none :=
+          XStepHaltOutput?_none_of_createKind hKind
+        simpa [continueAfterStep, hNoHalt] using hSuffix
+
+theorem openStepAfterChecks_of_not_call_or_createKind
     {fuel : Nat} {op : EVMOp} {arg : Option (Word × Nat)}
     {state : EVMState}
-    (hKind : OpenExternal.CallKind.ofEVMOperation? op = none) :
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hCreateKind : OpenExternal.CreateKind.ofEVMOperation? op = none) :
     openStepAfterChecks fuel op arg state =
       .done
         (EvmYul.EVM.step fuel
@@ -972,7 +1402,8 @@ theorem openStepAfterChecks_of_not_callKind
             (Assembly.GasAware.memoryGasState state op) op)
           (some (op, arg))
           (Assembly.GasAware.memoryGasState state op)) := by
-  simp [openStepAfterChecks, hKind]
+  simp [openStepAfterChecks, closedStepAfterChecks,
+    OpenExternal.BoundaryKind.ofEVMOperation?, hCallKind, hCreateKind]
 
 theorem openStepAfterChecks_of_callKind_no_call
     {fuel : Nat} {op : EVMOp} {arg : Option (Word × Nat)}
@@ -988,7 +1419,29 @@ theorem openStepAfterChecks_of_callKind_no_call
             (Assembly.GasAware.memoryGasState state op) op)
           (some (op, arg))
           (Assembly.GasAware.memoryGasState state op)) := by
-  simp [openStepAfterChecks, hKind, hCall]
+  simp [openStepAfterChecks, openBoundaryStepAfterChecks,
+    closedStepAfterChecks, OpenExternal.BoundaryKind.ofEVMOperation?,
+    hKind, hCall]
+
+theorem openStepAfterChecks_of_createKind_no_create
+    {fuel : Nat} {op : EVMOp} {arg : Option (Word × Nat)}
+    {state : EVMState} {kind : OpenExternal.CreateKind}
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op = some kind)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate?
+          (gasChargedState state op) kind =
+        none) :
+    openStepAfterChecks fuel op arg state =
+      .done
+        (EvmYul.EVM.step fuel
+          (EvmYul.EVM.C'
+            (Assembly.GasAware.memoryGasState state op) op)
+          (some (op, arg))
+          (Assembly.GasAware.memoryGasState state op)) := by
+  simp [openStepAfterChecks, openBoundaryStepAfterChecks,
+    closedStepAfterChecks, OpenExternal.BoundaryKind.ofEVMOperation?,
+    hCallKind, hKind, hCreate]
 
 theorem openStepAfterChecks_of_targetInstr_no_callCreate
     {fuel : Nat} {instr : Assembly.TargetInstr} {state : EVMState}
@@ -1003,19 +1456,38 @@ theorem openStepAfterChecks_of_targetInstr_no_callCreate
           (Assembly.GasAware.memoryGasState state instr.op)) := by
   cases instr with
   | push32 value =>
-      rfl
+      simp [openStepAfterChecks, closedStepAfterChecks,
+        OpenExternal.BoundaryKind.ofEVMOperation?,
+        OpenExternal.CallKind.ofEVMOperation?,
+        OpenExternal.CreateKind.ofEVMOperation?,
+        Assembly.TargetInstr.op, Assembly.TargetInstr.arg]
   | jump =>
-      rfl
+      simp [openStepAfterChecks, closedStepAfterChecks,
+        OpenExternal.BoundaryKind.ofEVMOperation?,
+        OpenExternal.CallKind.ofEVMOperation?,
+        OpenExternal.CreateKind.ofEVMOperation?,
+        Assembly.TargetInstr.op, Assembly.TargetInstr.arg]
   | jumpi =>
-      rfl
+      simp [openStepAfterChecks, closedStepAfterChecks,
+        OpenExternal.BoundaryKind.ofEVMOperation?,
+        OpenExternal.CallKind.ofEVMOperation?,
+        OpenExternal.CreateKind.ofEVMOperation?,
+        Assembly.TargetInstr.op, Assembly.TargetInstr.arg]
   | jumpdest =>
-      rfl
+      simp [openStepAfterChecks, closedStepAfterChecks,
+        OpenExternal.BoundaryKind.ofEVMOperation?,
+        OpenExternal.CallKind.ofEVMOperation?,
+        OpenExternal.CreateKind.ofEVMOperation?,
+        Assembly.TargetInstr.op, Assembly.TargetInstr.arg]
   | prim op =>
       cases op <;>
         simp [Assembly.GasAware.targetInstrUsesCallCreate,
           Assembly.PrimOp.isCallCreate, Assembly.TargetInstr.op,
           Assembly.TargetInstr.arg, Assembly.PrimOp.toEVM,
-          OpenExternal.CallKind.ofEVMOperation?, openStepAfterChecks]
+          OpenExternal.BoundaryKind.ofEVMOperation?,
+          OpenExternal.CallKind.ofEVMOperation?,
+          OpenExternal.CreateKind.ofEVMOperation?, openStepAfterChecks,
+          closedStepAfterChecks, openBoundaryStepAfterChecks]
         at hNoCallCreate ⊢
 
 theorem openX_current_running_continue_of_openStepAfterChecks_done
@@ -1112,7 +1584,7 @@ theorem openX_current_running_continue_outcome_of_openStepAfterChecks_done
           [] (.ok post))
       hRest'
 
-theorem openX_current_running_continue_of_not_callKind
+theorem openX_current_running_continue_of_not_call_or_createKind
     {fuel : Nat} {validJumps : Array Word} {state post : EVMState}
     {op : EVMOp} {arg : Option (Word × Nat)}
     {tailTrace : OpenExternal.OpenTrace} {result : EVMResult}
@@ -1121,6 +1593,7 @@ theorem openX_current_running_continue_of_not_callKind
     (hStepChecks :
       Assembly.GasAware.XStepChecksPass validJumps state op)
     (hKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hCreateKind : OpenExternal.CreateKind.ofEVMOperation? op = none)
     (hStep :
       EvmYul.EVM.step fuel
           (EvmYul.EVM.C'
@@ -1140,7 +1613,7 @@ theorem openX_current_running_continue_of_not_callKind
     (post := post) (op := op) (arg := arg)
     (tailTrace := tailTrace) (result := result)
     hDecode hStepChecks
-    (openStepAfterChecks_of_not_callKind hKind)
+    (openStepAfterChecks_of_not_call_or_createKind hKind hCreateKind)
     hStep hNoHalt hRest
 
 theorem openX_current_running_continue_of_callKind_no_call
@@ -1310,13 +1783,16 @@ theorem openX_fallthrough_stop_success_of_checks
   have hKind :
       OpenExternal.CallKind.ofEVMOperation? EvmYul.Operation.STOP = none := by
     rfl
+  have hCreateKind :
+      OpenExternal.CreateKind.ofEVMOperation? EvmYul.Operation.STOP = none := by
+    rfl
   have hStepHalt :
       Assembly.GasAware.XStepHaltOutput? EvmYul.Operation.STOP post =
         some output := by
     simpa [Assembly.GasAware.XHaltOutput?_eq_XStepHaltOutput?] using hHalt
-  rw [openStepAfterChecks_of_not_callKind
+  rw [openStepAfterChecks_of_not_call_or_createKind
     (fuel := fuel) (op := EvmYul.Operation.STOP) (arg := none)
-    (state := state) hKind, hStep]
+    (state := state) hKind hCreateKind, hStep]
   have hDone :
       OpenExternal.OpenResultResolves
         (continueAfterStep (openX fuel validJumps)
@@ -1365,13 +1841,16 @@ theorem openX_fallthrough_stop_success_of_exception_none
   have hKind :
       OpenExternal.CallKind.ofEVMOperation? EvmYul.Operation.STOP = none := by
     rfl
+  have hCreateKind :
+      OpenExternal.CreateKind.ofEVMOperation? EvmYul.Operation.STOP = none := by
+    rfl
   have hStepHalt :
       Assembly.GasAware.XStepHaltOutput? EvmYul.Operation.STOP post =
         some output := by
     simpa [Assembly.GasAware.XHaltOutput?_eq_XStepHaltOutput?] using hHalt
-  rw [openStepAfterChecks_of_not_callKind
+  rw [openStepAfterChecks_of_not_call_or_createKind
     (fuel := fuel) (op := EvmYul.Operation.STOP) (arg := none)
-    (state := state) hKind, hStep]
+    (state := state) hKind hCreateKind, hStep]
   have hDone :
       OpenExternal.OpenResultResolves
         (continueAfterStep (openX fuel validJumps)
@@ -1511,7 +1990,7 @@ theorem openX_current_revert_of_openStepAfterChecks_done_of_exception_none
           [] (.ok post))
       hDone
 
-theorem openX_current_success_of_not_callKind
+theorem openX_current_success_of_not_call_or_createKind
     {fuel : Nat} {validJumps : Array Word} {state post : EVMState}
     {op : EVMOp} {arg : Option (Word × Nat)}
     {output : ByteArray}
@@ -1520,6 +1999,7 @@ theorem openX_current_success_of_not_callKind
     (hStepChecks :
       Assembly.GasAware.XStepChecksPass validJumps state op)
     (hKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hCreateKind : OpenExternal.CreateKind.ofEVMOperation? op = none)
     (hStep :
       EvmYul.EVM.step fuel
           (EvmYul.EVM.C'
@@ -1537,7 +2017,7 @@ theorem openX_current_success_of_not_callKind
     (fuel := fuel) (validJumps := validJumps) (state := state)
     (post := post) (op := op) (arg := arg) (output := output)
     hDecode hStepChecks
-    (openStepAfterChecks_of_not_callKind hKind)
+    (openStepAfterChecks_of_not_call_or_createKind hKind hCreateKind)
     hStep hHalt hNotRevert
 
 theorem openX_current_success_of_callKind_no_call
@@ -1572,7 +2052,7 @@ theorem openX_current_success_of_callKind_no_call
     (openStepAfterChecks_of_callKind_no_call hKind hCall)
     hStep hHalt hNotRevert
 
-theorem openX_current_revert_of_not_callKind
+theorem openX_current_revert_of_not_call_or_createKind
     {fuel : Nat} {validJumps : Array Word} {state post : EVMState}
     {op : EVMOp} {arg : Option (Word × Nat)}
     {output : ByteArray}
@@ -1581,6 +2061,7 @@ theorem openX_current_revert_of_not_callKind
     (hStepChecks :
       Assembly.GasAware.XStepChecksPass validJumps state op)
     (hKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hCreateKind : OpenExternal.CreateKind.ofEVMOperation? op = none)
     (hStep :
       EvmYul.EVM.step fuel
           (EvmYul.EVM.C'
@@ -1598,7 +2079,7 @@ theorem openX_current_revert_of_not_callKind
     (fuel := fuel) (validJumps := validJumps) (state := state)
     (post := post) (op := op) (arg := arg) (output := output)
     hDecode hStepChecks
-    (openStepAfterChecks_of_not_callKind hKind)
+    (openStepAfterChecks_of_not_call_or_createKind hKind hCreateKind)
     hStep hHalt hRevert
 
 theorem openX_current_revert_of_callKind_no_call
@@ -2246,7 +2727,7 @@ theorem openX_current_running_all_outcomes_safelyTracks_of_openStepAfterChecks_d
   rw [hOpenStep] at hTrace
   simpa [continueAfterStep, hNoHalt] using hTrace
 
-theorem openX_current_running_all_outcomes_safelyTracks_of_not_callKind
+theorem openX_current_running_all_outcomes_safelyTracks_of_not_call_or_createKind
     {fuel : Nat} {validJumps : Array Word} {state post : EVMState}
     {op : EVMOp} {arg : Option (Word × Nat)}
     {trace : OpenExternal.OpenTrace}
@@ -2257,6 +2738,7 @@ theorem openX_current_running_all_outcomes_safelyTracks_of_not_callKind
     (hStepChecks :
       Assembly.GasAware.XStepChecksPass validJumps state op)
     (hKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hCreateKind : OpenExternal.CreateKind.ofEVMOperation? op = none)
     (hStep :
       EvmYul.EVM.step fuel
           (EvmYul.EVM.C'
@@ -2273,7 +2755,7 @@ theorem openX_current_running_all_outcomes_safelyTracks_of_not_callKind
     Assembly.GasAware.XRunOutcomeSafelyTracks outcome (.ok reference) := by
   have hOpenStep :
       openStepAfterChecks fuel op arg state = .done (.ok post) := by
-    rw [openStepAfterChecks_of_not_callKind hKind, hStep]
+    rw [openStepAfterChecks_of_not_call_or_createKind hKind hCreateKind, hStep]
   exact
     openX_current_running_all_outcomes_safelyTracks_of_openStepAfterChecks_done
       (fuel := fuel) (validJumps := validJumps) (state := state)
@@ -2393,7 +2875,7 @@ theorem openX_current_revert_all_outcomes_safelyTracks_of_openStepAfterChecks_do
     Assembly.GasAware.XRunOutcomeSafelyTracks.ok_refl
       (EvmYul.EVM.ExecutionResult.revert post.gasAvailable output)
 
-theorem openX_current_success_all_outcomes_safelyTracks_of_not_callKind
+theorem openX_current_success_all_outcomes_safelyTracks_of_not_call_or_createKind
     {fuel : Nat} {validJumps : Array Word} {state post : EVMState}
     {op : EVMOp} {arg : Option (Word × Nat)}
     {trace : OpenExternal.OpenTrace}
@@ -2404,6 +2886,7 @@ theorem openX_current_success_all_outcomes_safelyTracks_of_not_callKind
     (hStepChecks :
       Assembly.GasAware.XStepChecksPass validJumps state op)
     (hKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hCreateKind : OpenExternal.CreateKind.ofEVMOperation? op = none)
     (hStep :
       EvmYul.EVM.step fuel
           (EvmYul.EVM.C'
@@ -2419,7 +2902,7 @@ theorem openX_current_success_all_outcomes_safelyTracks_of_not_callKind
       (.ok (EvmYul.EVM.ExecutionResult.success post output)) := by
   have hOpenStep :
       openStepAfterChecks fuel op arg state = .done (.ok post) := by
-    rw [openStepAfterChecks_of_not_callKind hKind, hStep]
+    rw [openStepAfterChecks_of_not_call_or_createKind hKind hCreateKind, hStep]
   exact
     openX_current_success_all_outcomes_safelyTracks_of_openStepAfterChecks_done
       (fuel := fuel) (validJumps := validJumps) (state := state)
@@ -2467,7 +2950,7 @@ theorem openX_current_success_all_outcomes_safelyTracks_of_callKind_no_call
       hDecode (xStepException?_none_of_step_checks hStepChecks)
       hOpenStep hHalt hNotRevert hTrace
 
-theorem openX_current_revert_all_outcomes_safelyTracks_of_not_callKind
+theorem openX_current_revert_all_outcomes_safelyTracks_of_not_call_or_createKind
     {fuel : Nat} {validJumps : Array Word} {state post : EVMState}
     {op : EVMOp} {arg : Option (Word × Nat)}
     {trace : OpenExternal.OpenTrace}
@@ -2478,6 +2961,7 @@ theorem openX_current_revert_all_outcomes_safelyTracks_of_not_callKind
     (hStepChecks :
       Assembly.GasAware.XStepChecksPass validJumps state op)
     (hKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hCreateKind : OpenExternal.CreateKind.ofEVMOperation? op = none)
     (hStep :
       EvmYul.EVM.step fuel
           (EvmYul.EVM.C'
@@ -2493,7 +2977,7 @@ theorem openX_current_revert_all_outcomes_safelyTracks_of_not_callKind
       (.ok (EvmYul.EVM.ExecutionResult.revert post.gasAvailable output)) := by
   have hOpenStep :
       openStepAfterChecks fuel op arg state = .done (.ok post) := by
-    rw [openStepAfterChecks_of_not_callKind hKind, hStep]
+    rw [openStepAfterChecks_of_not_call_or_createKind hKind hCreateKind, hStep]
   exact
     openX_current_revert_all_outcomes_safelyTracks_of_openStepAfterChecks_done
       (fuel := fuel) (validJumps := validJumps) (state := state)
@@ -2765,7 +3249,18 @@ theorem of_trace_observation_eq
       | revert gas output =>
           cases hObservation
   | revert gas output =>
-      exact Or.inr (by simp [Assembly.GasAware.XRunOutcomeFails])
+      cases reference with
+      | success refState refOutput =>
+          cases hObservation
+      | revert refGas refOutput =>
+          exact
+            Or.inl
+              ⟨.reverted output,
+                by simp [Assembly.GasAware.XRunOutcomeCommitsTo],
+                by
+                  simpa [Assembly.GasAware.XRunOutcomeCommitsTo,
+                    Assembly.GasAware.XResultCommittedObservation]
+                    using hObservation⟩
 
 theorem of_trace_agrees
     {validJumps : Array Word} {fuel : Nat} {state : EVMState}
@@ -2819,35 +3314,51 @@ theorem traceObservation_or_failure
     (∃ outcome : Except EVMException EVMResult,
       OpenXOutcomeTraceResult validJumps fuel state trace outcome ∧
         Assembly.GasAware.XRunOutcomeFails outcome) := by
-  rcases hTracks with ⟨outcome, hTrace, hTracksOutcome⟩
-  rcases hTracksOutcome with hCommit | hFails
-  · rcases hCommit with ⟨observation, hCandidate, hReferenceCommit⟩
-    cases outcome with
-    | ok result =>
-        cases result with
-        | success state output =>
-            have hCandidateObservation :
-                observation =
-                  Assembly.GasAware.XResultCommittedObservation
-                    (.success state output : EVMResult) :=
-              Assembly.GasAware.XRunOutcomeCommitsTo.ok_result_observation
-                hCandidate
-            have hReferenceObservation :
-                observation =
-                  Assembly.GasAware.XResultCommittedObservation reference :=
-              Assembly.GasAware.XRunOutcomeCommitsTo.ok_result_observation
-                hReferenceCommit
-            exact
-              Or.inl
-                ⟨.success state output, hTrace,
-                  hCandidateObservation.symm.trans
-                    (hReferenceObservation.trans
-                      hReference.committedObservation)⟩
-        | revert gas output =>
-            simp [Assembly.GasAware.XRunOutcomeCommitsTo] at hCandidate
-    | error err =>
-        simp [Assembly.GasAware.XRunOutcomeCommitsTo] at hCandidate
-  · exact Or.inr ⟨outcome, hTrace, hFails⟩
+    rcases hTracks with ⟨outcome, hTrace, hTracksOutcome⟩
+    rcases hTracksOutcome with hCommit | hFails
+    · rcases hCommit with ⟨observation, hCandidate, hReferenceCommit⟩
+      cases outcome with
+      | ok result =>
+          cases result with
+          | success state output =>
+              have hCandidateObservation :
+                  observation =
+                    Assembly.GasAware.XResultCommittedObservation
+                      (.success state output : EVMResult) :=
+                Assembly.GasAware.XRunOutcomeCommitsTo.ok_result_observation
+                  hCandidate
+              have hReferenceObservation :
+                  observation =
+                    Assembly.GasAware.XResultCommittedObservation reference :=
+                Assembly.GasAware.XRunOutcomeCommitsTo.ok_result_observation
+                  hReferenceCommit
+              exact
+                Or.inl
+                  ⟨.success state output, hTrace,
+                    hCandidateObservation.symm.trans
+                      (hReferenceObservation.trans
+                        hReference.committedObservation)⟩
+          | revert gas output =>
+              have hCandidateObservation :
+                  observation =
+                    Assembly.GasAware.XResultCommittedObservation
+                      (.revert gas output : EVMResult) :=
+                Assembly.GasAware.XRunOutcomeCommitsTo.ok_result_observation
+                  hCandidate
+              have hReferenceObservation :
+                  observation =
+                    Assembly.GasAware.XResultCommittedObservation reference :=
+                Assembly.GasAware.XRunOutcomeCommitsTo.ok_result_observation
+                  hReferenceCommit
+              exact
+                Or.inl
+                  ⟨.revert gas output, hTrace,
+                    hCandidateObservation.symm.trans
+                      (hReferenceObservation.trans
+                        hReference.committedObservation)⟩
+      | error err =>
+          simp [Assembly.GasAware.XRunOutcomeCommitsTo] at hCandidate
+    · exact Or.inr ⟨outcome, hTrace, hFails⟩
 
 theorem to_result
     {validJumps : Array Word} {fuel : Nat} {state : EVMState}
@@ -3729,6 +4240,58 @@ theorem openX_current_gasless_call_continue_exists_of_step_checks_actual_post
       hKind hGasCall hRestTrace
   exact ⟨result, by simpa [hSite] using hTrace, hAgree⟩
 
+theorem openX_current_gasless_create_continue_exists_of_step_checks_actual_post
+    {fuel : Nat} {validJumps : Array Word}
+    {full target : EVMState}
+    {op : EVMOp} {arg : Option (Word × Nat)}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    {response : OpenExternal.CreateResponse}
+    {tailTrace : OpenExternal.OpenTrace}
+    {targetResult : Assembly.StepResult}
+    (hRel : Assembly.GasAware.GasExecRel full target)
+    (hDecode :
+      EvmYul.EVM.decode full.executionEnv.code full.pc = some (op, arg))
+    (hStepChecks :
+      Assembly.GasAware.XStepChecksPass validJumps full op)
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op = some kind)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? target kind = some create)
+    (hRest :
+      ∀ {gasCreate : OpenExternal.OpenCreate EVMState},
+        OpenExternal.CreateKind.evmOpenCreate?
+            (gasChargedState full op) kind = some gasCreate →
+          ∃ result,
+            OpenXTraceResult validJumps fuel
+              (EvmYul.EVM.State.incrPC
+                (finishGasAwareCreate gasCreate response))
+              tailTrace result ∧
+            OpenXResultAgrees targetResult result) :
+    ∃ result,
+      OpenXTraceResult validJumps (fuel + 1) full
+        (OpenExternal.OpenEvent.create create.site response :: tailTrace)
+        result ∧
+      OpenXResultAgrees targetResult result := by
+  obtain ⟨gasCreate, hGasCreate, hSite, _hPostRel⟩ :=
+    evmOpenCreate?_gasChargedState_of_gasExecRel
+      (full := full) (target := target) (op := op)
+      hRel hCreate response
+  obtain ⟨result, hRestTrace, hAgree⟩ := hRest hGasCreate
+  have hTrace :
+      OpenExternal.OpenResultResolves
+        (openX (fuel + 1) validJumps full)
+        (OpenExternal.OpenEvent.create gasCreate.site response ::
+          tailTrace)
+        (.ok result) :=
+    openX_current_create_continue
+      (fuel := fuel) (validJumps := validJumps) (state := full)
+      (op := op) (arg := arg) (kind := kind) (create := gasCreate)
+      (response := response) (tailTrace := tailTrace) (result := result)
+      hDecode (xStepException?_none_of_step_checks hStepChecks)
+      hCallKind hKind hGasCreate hRestTrace
+  exact ⟨result, by simpa [hSite] using hTrace, hAgree⟩
+
 theorem openX_current_gasless_call_continue_outcome_inv_of_step_checks_actual_post
     {fuel : Nat} {validJumps : Array Word}
     {full target : EVMState}
@@ -3913,6 +4476,196 @@ theorem openX_current_gasless_call_any_outcome_inv_of_exception_actual_post
                 (EvmYul.EVM.State.incrPC
                   (finishGasAwareCall gasCall response)) = none :=
             XStepHaltOutput?_none_of_callKind hKind
+          simpa [OpenXOutcomeTraceResult, continueAfterStep, hNoHalt]
+            using hSuffix
+
+theorem openX_current_gasless_create_continue_outcome_inv_of_step_checks_actual_post
+    {fuel : Nat} {validJumps : Array Word}
+    {full target : EVMState}
+    {op : EVMOp} {arg : Option (Word × Nat)}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    {response : OpenExternal.CreateResponse}
+    {tailTrace : OpenExternal.OpenTrace}
+    {outcome : Except EVMException EVMResult}
+    (hRel : Assembly.GasAware.GasExecRel full target)
+    (hDecode :
+      EvmYul.EVM.decode full.executionEnv.code full.pc = some (op, arg))
+    (hStepChecks :
+      Assembly.GasAware.XStepChecksPass validJumps full op)
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op = some kind)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? target kind = some create)
+    (hTrace :
+      OpenXOutcomeTraceResult validJumps (fuel + 1) full
+        (OpenExternal.OpenEvent.create create.site response :: tailTrace)
+        outcome) :
+    ∃ gasCreate : OpenExternal.OpenCreate EVMState,
+      OpenExternal.CreateKind.evmOpenCreate? (gasChargedState full op) kind =
+          some gasCreate ∧
+        gasCreate.site = create.site ∧
+          OpenXOutcomeTraceResult validJumps fuel
+            (EvmYul.EVM.State.incrPC
+              (finishGasAwareCreate gasCreate response))
+            tailTrace outcome := by
+  obtain ⟨gasCreate, hGasCreate, hSite, _hPostRel⟩ :=
+    evmOpenCreate?_gasChargedState_of_gasExecRel
+      (full := full) (target := target) (op := op)
+      hRel hCreate response
+  refine ⟨gasCreate, hGasCreate, hSite, ?_⟩
+  have hTraceGas :
+      OpenXOutcomeTraceResult validJumps (fuel + 1) full
+        (OpenExternal.OpenEvent.create gasCreate.site response :: tailTrace)
+        outcome := by
+    simpa [hSite] using hTrace
+  exact
+    openX_current_create_continue_outcome_inv
+      (fuel := fuel) (validJumps := validJumps) (state := full)
+      (op := op) (arg := arg) (kind := kind) (create := gasCreate)
+      (response := response) (tailTrace := tailTrace)
+      (outcome := outcome)
+      hDecode (xStepException?_none_of_step_checks hStepChecks)
+      hCallKind hKind hGasCreate hTraceGas
+
+theorem openX_current_gasless_create_any_outcome_inv_of_step_checks_actual_post
+    {fuel : Nat} {validJumps : Array Word}
+    {full target : EVMState}
+    {op : EVMOp} {arg : Option (Word × Nat)}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    {candidateTrace : OpenExternal.OpenTrace}
+    {outcome : Except EVMException EVMResult}
+    (hRel : Assembly.GasAware.GasExecRel full target)
+    (hDecode :
+      EvmYul.EVM.decode full.executionEnv.code full.pc = some (op, arg))
+    (hStepChecks :
+      Assembly.GasAware.XStepChecksPass validJumps full op)
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op = some kind)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? target kind = some create)
+    (hTrace :
+      OpenXOutcomeTraceResult validJumps (fuel + 1) full candidateTrace
+        outcome) :
+    ∃ response : OpenExternal.CreateResponse,
+    ∃ tailTrace : OpenExternal.OpenTrace,
+    ∃ gasCreate : OpenExternal.OpenCreate EVMState,
+      candidateTrace =
+          OpenExternal.OpenEvent.create create.site response :: tailTrace ∧
+        OpenExternal.CreateKind.evmOpenCreate? (gasChargedState full op) kind =
+            some gasCreate ∧
+          gasCreate.site = create.site ∧
+            OpenXOutcomeTraceResult validJumps fuel
+              (EvmYul.EVM.State.incrPC
+                (finishGasAwareCreate gasCreate response))
+              tailTrace outcome := by
+  obtain ⟨gasCreate, hGasCreate, hSite⟩ :=
+    evmOpenCreate?_gasChargedState_site_of_gasExecRel
+      (full := full) (target := target) (op := op)
+      hRel hCreate
+  have hTrace' :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.OpenResult.bind (evmGasAwareCreateResult gasCreate)
+          (continueAfterStep (openX fuel validJumps) op))
+        candidateTrace outcome := by
+    unfold OpenXOutcomeTraceResult at hTrace
+    rw [openX_succ] at hTrace
+    simp [hDecode, xStepException?_none_of_step_checks hStepChecks] at hTrace
+    rw [openStepAfterChecks_create (fuel := fuel) (arg := arg)
+      (state := full) hCallKind hKind hGasCreate] at hTrace
+    exact hTrace
+  rcases OpenExternal.OpenResultResolves.bind_inv hTrace' with
+    hError | hOk
+  · rcases hError with ⟨err, hSource, _hOutcome⟩
+    unfold evmGasAwareCreateResult at hSource
+    cases hSource with
+    | create hTail =>
+        cases hTail
+  · rcases hOk with
+      ⟨left, right, value, hTraceEq, hSource, hSuffix⟩
+    unfold evmGasAwareCreateResult at hSource
+    cases hSource with
+    | @create sourceCreate response sourceTrace sourceResult hTail =>
+        cases hTail
+        simp at hTraceEq
+        refine ⟨response, right, gasCreate, ?_, hGasCreate, hSite, ?_⟩
+        · simpa [hSite] using hTraceEq
+        · have hNoHalt :
+              Assembly.GasAware.XStepHaltOutput? op
+                (EvmYul.EVM.State.incrPC
+                  (finishGasAwareCreate gasCreate response)) = none :=
+            XStepHaltOutput?_none_of_createKind hKind
+          simpa [OpenXOutcomeTraceResult, continueAfterStep, hNoHalt]
+            using hSuffix
+
+theorem openX_current_gasless_create_any_outcome_inv_of_exception_actual_post
+    {fuel : Nat} {validJumps : Array Word}
+    {full target : EVMState}
+    {op : EVMOp} {arg : Option (Word × Nat)}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    {candidateTrace : OpenExternal.OpenTrace}
+    {outcome : Except EVMException EVMResult}
+    (hRel : Assembly.GasAware.GasExecRel full target)
+    (hDecode :
+      EvmYul.EVM.decode full.executionEnv.code full.pc = some (op, arg))
+    (hException : xStepException? validJumps full op = none)
+    (hCallKind : OpenExternal.CallKind.ofEVMOperation? op = none)
+    (hKind : OpenExternal.CreateKind.ofEVMOperation? op = some kind)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? target kind = some create)
+    (hTrace :
+      OpenXOutcomeTraceResult validJumps (fuel + 1) full candidateTrace
+        outcome) :
+    ∃ response : OpenExternal.CreateResponse,
+    ∃ tailTrace : OpenExternal.OpenTrace,
+    ∃ gasCreate : OpenExternal.OpenCreate EVMState,
+      candidateTrace =
+          OpenExternal.OpenEvent.create create.site response :: tailTrace ∧
+        OpenExternal.CreateKind.evmOpenCreate? (gasChargedState full op) kind =
+            some gasCreate ∧
+          gasCreate.site = create.site ∧
+            OpenXOutcomeTraceResult validJumps fuel
+              (EvmYul.EVM.State.incrPC
+                (finishGasAwareCreate gasCreate response))
+              tailTrace outcome := by
+  obtain ⟨gasCreate, hGasCreate, hSite⟩ :=
+    evmOpenCreate?_gasChargedState_site_of_gasExecRel
+      (full := full) (target := target) (op := op)
+      hRel hCreate
+  have hTrace' :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.OpenResult.bind (evmGasAwareCreateResult gasCreate)
+          (continueAfterStep (openX fuel validJumps) op))
+        candidateTrace outcome := by
+    unfold OpenXOutcomeTraceResult at hTrace
+    rw [openX_succ] at hTrace
+    simp [hDecode, hException] at hTrace
+    rw [openStepAfterChecks_create (fuel := fuel) (arg := arg)
+      (state := full) hCallKind hKind hGasCreate] at hTrace
+    exact hTrace
+  rcases OpenExternal.OpenResultResolves.bind_inv hTrace' with
+    hError | hOk
+  · rcases hError with ⟨err, hSource, _hOutcome⟩
+    unfold evmGasAwareCreateResult at hSource
+    cases hSource with
+    | create hTail =>
+        cases hTail
+  · rcases hOk with
+      ⟨left, right, value, hTraceEq, hSource, hSuffix⟩
+    unfold evmGasAwareCreateResult at hSource
+    cases hSource with
+    | @create sourceCreate response sourceTrace sourceResult hTail =>
+        cases hTail
+        simp at hTraceEq
+        refine ⟨response, right, gasCreate, ?_, hGasCreate, hSite, ?_⟩
+        · simpa [hSite] using hTraceEq
+        · have hNoHalt :
+              Assembly.GasAware.XStepHaltOutput? op
+                (EvmYul.EVM.State.incrPC
+                  (finishGasAwareCreate gasCreate response)) = none :=
+            XStepHaltOutput?_none_of_createKind hKind
           simpa [OpenXOutcomeTraceResult, continueAfterStep, hNoHalt]
             using hSuffix
 
@@ -6321,6 +7074,95 @@ theorem openXTraceRelAbove_current_emitted_prim_call_continue_exists_of_step_che
       hRel hDecode (hStepChecks hGasBound hRel) hKind hCall
       (fun hGasCall => hRest hGasBound hRel hGasCall)
 
+theorem openXTraceRelAbove_current_emitted_prim_create_continue_exists_of_step_checks_actual_post
+    {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
+    {tailFuel gasBound : Nat}
+    {initial : EVMState}
+    {pc : Nat} {op : Assembly.PrimOp}
+    {emitted before after : List Assembly.LocatedTarget}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    {response : OpenExternal.CreateResponse}
+    {tailTrace : OpenExternal.OpenTrace} {targetResult : Assembly.StepResult}
+    (hEncoding :
+      Assembly.Bytecode.EncodingCorrect targetProgram
+        (Assembly.Bytecode.encodeTarget targetProgram))
+    (hSafety : Assembly.Bytecode.DecodeSafety targetProgram)
+    (hInitialCode :
+      initial.executionEnv.code =
+        Assembly.Bytecode.encodeTarget targetProgram)
+    (hAt :
+      Assembly.Program.instrAtPc program initial.pc.toNat =
+        some (pc, Assembly.Instr.prim op))
+    (hEmit :
+      Assembly.emitInstr? program pc (Assembly.Instr.prim op) =
+        some emitted)
+    (hTargetBlock : targetProgram.code = before ++ emitted ++ after)
+    (hStepChecks :
+      ∀ {full : EVMState},
+        gasBound ≤ full.gasAvailable.toNat →
+          Assembly.GasAware.GasExecRel full initial →
+            Assembly.GasAware.XStepChecksPass
+              (Assembly.GasAware.validJumps targetProgram) full op.toEVM)
+    (hCallKind :
+      OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hKind :
+      OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? initial kind = some create)
+    (hRest :
+      ∀ {full : EVMState} {gasCreate : OpenExternal.OpenCreate EVMState},
+        gasBound ≤ full.gasAvailable.toNat →
+          Assembly.GasAware.GasExecRel full initial →
+            OpenExternal.CreateKind.evmOpenCreate?
+                (gasChargedState full op.toEVM) kind = some gasCreate →
+              ∃ result,
+                OpenXTraceResult
+                  (Assembly.GasAware.validJumps targetProgram)
+                  tailFuel
+                  (EvmYul.EVM.State.incrPC
+                    (finishGasAwareCreate gasCreate response))
+                  tailTrace result ∧
+                OpenXResultAgrees targetResult result) :
+    OpenXTraceRelAbove targetProgram initial
+      (OpenExternal.OpenEvent.create create.site response :: tailTrace)
+      targetResult (tailFuel + 1) gasBound := by
+  intro full hGasBound hRel
+  have hCode :
+      full.executionEnv.code =
+        Assembly.Bytecode.encodeTarget targetProgram := by
+    rw [Assembly.GasAware.GasExecRel.executionEnv_eq hRel]
+    exact hInitialCode
+  have hEmit' := hEmit
+  simp [Assembly.emitInstr?] at hEmit'
+  subst emitted
+  have hDecode :
+      EvmYul.EVM.decode full.executionEnv.code full.pc =
+        some (op.toEVM, none) := by
+    have hDecodeLocated :=
+      Assembly.GasAware.decode_of_gasExecRel_instrAt_mem_emitted_of_safety
+        (program := program) (target := targetProgram)
+        (targetState := initial) (fullState := full)
+        (pc := pc) (instr := Assembly.Instr.prim op)
+        (located := { pc := pc, instr := Assembly.TargetInstr.prim op })
+        (before := before)
+        (emitted := [{ pc := pc, instr := Assembly.TargetInstr.prim op }])
+        (after := after)
+        hEncoding hSafety hAt hTargetBlock (by simp) (by rfl)
+        hRel hCode
+    simpa [Assembly.TargetInstr.op, Assembly.TargetInstr.arg] using
+      hDecodeLocated
+  exact
+    openX_current_gasless_create_continue_exists_of_step_checks_actual_post
+      (fuel := tailFuel)
+      (validJumps := Assembly.GasAware.validJumps targetProgram)
+      (full := full) (target := initial) (op := op.toEVM)
+      (arg := none) (kind := kind) (create := create)
+      (response := response) (tailTrace := tailTrace)
+      (targetResult := targetResult)
+      hRel hDecode (hStepChecks hGasBound hRel) hCallKind hKind hCreate
+      (fun hGasCreate => hRest hGasBound hRel hGasCreate)
+
 theorem openX_current_emitted_prim_call_continue_trace_observation_or_failure_of_step_checks_actual_post
     {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
     {tailFuel : Nat}
@@ -7113,6 +7955,71 @@ theorem openXRunListRunningRelReady_current_emitted_prim_call_actual_post
             (op := op.toEVM) hRel' hCall hGasCall response))
       hGasBound hRel
 
+theorem openXRunListRunningRelReady_current_emitted_prim_create_actual_post
+    {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
+    {tailFuel gasBound tailGasBound : Nat}
+    {initial : EVMState}
+    {pc : Nat} {op : Assembly.PrimOp}
+    {emitted before after : List Assembly.LocatedTarget}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    {response : OpenExternal.CreateResponse}
+    (hEncoding :
+      Assembly.Bytecode.EncodingCorrect targetProgram
+        (Assembly.Bytecode.encodeTarget targetProgram))
+    (hSafety : Assembly.Bytecode.DecodeSafety targetProgram)
+    (hInitialCode :
+      initial.executionEnv.code =
+        Assembly.Bytecode.encodeTarget targetProgram)
+    (hAt :
+      Assembly.Program.instrAtPc program initial.pc.toNat =
+        some (pc, Assembly.Instr.prim op))
+    (hEmit :
+      Assembly.emitInstr? program pc (Assembly.Instr.prim op) =
+        some emitted)
+    (hTargetBlock : targetProgram.code = before ++ emitted ++ after)
+    (hStepChecks :
+      ∀ {full : EVMState},
+        gasBound ≤ full.gasAvailable.toNat →
+          Assembly.GasAware.GasExecRel full initial →
+            Assembly.GasAware.XStepChecksPass
+              (Assembly.GasAware.validJumps targetProgram) full op.toEVM)
+    (hCallKind :
+      OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hKind :
+      OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? initial kind = some create)
+    (hPostBudget :
+      ∀ {full : EVMState} {gasCreate : OpenExternal.OpenCreate EVMState},
+        gasBound ≤ full.gasAvailable.toNat →
+          Assembly.GasAware.GasExecRel full initial →
+            OpenExternal.CreateKind.evmOpenCreate?
+                (gasChargedState full op.toEVM) kind = some gasCreate →
+              tailGasBound ≤
+                (EvmYul.EVM.State.incrPC
+                  (finishGasAwareCreate gasCreate response)).gasAvailable.toNat) :
+    OpenXRunListRunningRelReady targetProgram initial
+      (EvmYul.EVM.State.incrPC (create.resume response))
+      [OpenExternal.OpenEvent.create create.site response]
+      (tailFuel + 1) tailFuel gasBound tailGasBound := by
+  intro full tailTrace targetResult hGasBound hRel hTail
+  exact
+    openXTraceRelAbove_current_emitted_prim_create_continue_exists_of_step_checks_actual_post
+      (program := program) (targetProgram := targetProgram)
+      (tailFuel := tailFuel) (gasBound := gasBound)
+      (initial := initial) (pc := pc) (op := op)
+      (emitted := emitted) (before := before) (after := after)
+      (kind := kind) (create := create) (response := response)
+      (tailTrace := tailTrace) (targetResult := targetResult)
+      hEncoding hSafety hInitialCode hAt hEmit hTargetBlock
+      hStepChecks hCallKind hKind hCreate
+      (fun hGasBound' hRel' hGasCreate =>
+        hTail (hPostBudget hGasBound' hRel' hGasCreate)
+          (evmOpenCreate?_gasChargedState_resume_gasExecRel_of_gasExecRel
+            (op := op.toEVM) hRel' hCreate hGasCreate response))
+      hGasBound hRel
+
 theorem openXRunListRunningRelReady_current_running
     {targetProgram : Assembly.TargetProgram}
     {tailFuel gasBound tailGasBound : Nat}
@@ -7527,9 +8434,13 @@ theorem done_all_outcomes_safelyTracks_two_of_fallthrough_stop_clear_return_buff
           OpenExternal.CallKind.ofEVMOperation? EvmYul.Operation.STOP =
             none := by
         rfl
-      rw [openStepAfterChecks_of_not_callKind
+      have hCreateKind :
+          OpenExternal.CreateKind.ofEVMOperation? EvmYul.Operation.STOP =
+            none := by
+        rfl
+      rw [openStepAfterChecks_of_not_call_or_createKind
         (fuel := 1) (op := EvmYul.Operation.STOP) (arg := none)
-        (state := full) hKind] at hTrace
+        (state := full) hKind hCreateKind] at hTrace
       rw [hStep] at hTrace
       simpa [continueAfterStep, Assembly.GasAware.XStepHaltOutput?] using
         hTrace
@@ -7864,6 +8775,52 @@ theorem openRunListResult_emitInstr_prim_call_running_inv
       cases hTail
       exact ⟨_, rfl, rfl⟩
 
+theorem openRunListResult_emitInstr_prim_create_running_inv
+    {program : Assembly.Program} {pc : Nat} {op : Assembly.PrimOp}
+    {emitted : List Assembly.LocatedTarget} {state mid : EVMState}
+    {trace : OpenExternal.OpenTrace}
+    {kind : OpenExternal.CreateKind}
+    {create : OpenExternal.OpenCreate EVMState}
+    (hEmit :
+      Assembly.emitInstr? program pc (Assembly.Instr.prim op) =
+        some emitted)
+    (hCallKind :
+      OpenExternal.CallKind.ofEVMOperation? op.toEVM = none)
+    (hKind :
+      OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind)
+    (hCreate :
+      OpenExternal.CreateKind.evmOpenCreate? state kind = some create)
+    (hRun :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Target.openRunListResult
+          (emitted.map Assembly.LocatedTarget.instr) state)
+        trace (.ok (.running mid))) :
+    ∃ response : OpenExternal.CreateResponse,
+      trace = [OpenExternal.OpenEvent.create create.site response] ∧
+        mid = EvmYul.EVM.State.incrPC (create.resume response) := by
+  have hEmit' := hEmit
+  simp [Assembly.emitInstr?] at hEmit'
+  subst emitted
+  change
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Target.openRunListResult
+        [Assembly.TargetInstr.prim op] state)
+      trace (.ok (.running mid)) at hRun
+  rw [OpenAssembly.Target.openRunListResult_cons] at hRun
+  unfold OpenAssembly.Target.openStepInstrResult at hRun
+  rw [OpenAssembly.Target.openStepInstr_of_prim_create hCallKind hKind hCreate] at hRun
+  unfold OpenAssembly.evmInstructionCreateResult at hRun
+  rw [OpenExternal.OpenResult.bind_create] at hRun
+  cases hRun with
+  | create hTail =>
+      have hHalt : (Assembly.TargetInstr.prim op).haltKind? = none := by
+        simpa [Assembly.TargetInstr.haltKind?] using
+          OpenAssembly.Target.prim_haltKind?_none_of_createKind hKind
+      simp [OpenAssembly.Target.stepResultAfter, hHalt,
+        OpenAssembly.Target.openRunListResult_nil] at hTail
+      cases hTail
+      exact ⟨_, rfl, rfl⟩
+
 theorem openRunListResult_emitInstr_no_call_inv
     {program : Assembly.Program} {pc : Nat} {instr : Assembly.Instr}
     {emitted : List Assembly.LocatedTarget} {state : EVMState}
@@ -8063,6 +9020,23 @@ def CurrentNoCallPathChecksReady
         (Assembly.GasAware.validJumps targetProgram)
         (emitted.map Assembly.LocatedTarget.instr) state full result
 
+def CurrentNoCallReturnDataCopyBoundsReady
+    (program : Assembly.Program) (targetProgram : Assembly.TargetProgram) :
+    Prop :=
+  ∀ {state full : EVMState} {result : Assembly.StepResult}
+    {pc : Nat} {instr : Assembly.Instr}
+    {emitted before after : List Assembly.LocatedTarget},
+    Assembly.Program.instrAtPc program state.pc.toNat = some (pc, instr) →
+    Assembly.emitInstr? program pc instr = some emitted →
+    targetProgram.code = before ++ emitted ++ after →
+    Assembly.Instr.usesCallCreate instr = false →
+    Assembly.Target.runListResult
+        (emitted.map Assembly.LocatedTarget.instr) state =
+      .ok result →
+    Assembly.GasAware.GasExecRel full state →
+      Assembly.GasAware.XStepTrace.XRunListPathReturnDataCopyBoundsReady
+        (emitted.map Assembly.LocatedTarget.instr) state full result
+
 def CurrentNoCallInstrCoreResidualResources
     (program : Assembly.Program) (targetProgram : Assembly.TargetProgram) :
     Prop :=
@@ -8198,7 +9172,7 @@ theorem CurrentNoCallPathChecksReady.of_blockPathChecks
     hAt hEmit hTargetBlock _hNoCall hRun hRel
   exact hChecks hAt hEmit hTargetBlock hRun hRel
 
-theorem CurrentNoCallPathChecksReady.of_core_noReturnDataCopy_current_no_call
+private theorem CurrentNoCallPathChecksReady.of_core_noReturnDataCopy_current_no_call
     {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
     (hCore :
       Assembly.GasAware.XStepTrace.XBlockReplayCoreNonGasReady program
@@ -8223,7 +9197,30 @@ theorem CurrentNoCallPathChecksReady.of_core_noReturnDataCopy_current_no_call
             hNoCall hEmit hLocatedMem)
       hRel
 
-theorem current_no_call_path_checks_of_residual_noReturnDataCopy
+theorem CurrentNoCallPathChecksReady.of_core_returnDataCopyBounds_current_no_call
+    {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
+    (hCore :
+      Assembly.GasAware.XStepTrace.XBlockReplayCoreNonGasReady program
+        targetProgram (Assembly.GasAware.validJumps targetProgram))
+    (hReturnDataCopyBounds :
+      CurrentNoCallReturnDataCopyBoundsReady program targetProgram) :
+    CurrentNoCallPathChecksReady program targetProgram := by
+  intro state full result pc instr emitted before after hAt hEmit
+    hTargetBlock hNoCall hRun hRel
+  exact
+    Assembly.GasAware.XStepTrace.XRunListPathChecksReady.of_suffix_core_returnDataCopyBounds_noCallCreate
+      hRun
+      (hCore hAt hEmit hTargetBlock hRun)
+      (hReturnDataCopyBounds hAt hEmit hTargetBlock hNoCall hRun hRel)
+      (fun targetInstr hMem => by
+        rcases List.mem_map.mp hMem with ⟨located, hLocatedMem, hEq⟩
+        subst targetInstr
+        exact
+          Assembly.GasAware.targetInstr_usesCallCreate_false_of_emitInstr_mem
+            hNoCall hEmit hLocatedMem)
+      hRel
+
+private theorem current_no_call_path_checks_of_residual_noReturnDataCopy
     {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
     {state full : EVMState} {result : Assembly.StepResult}
     {pc : Nat} {instr : Assembly.Instr}
@@ -8289,7 +9286,71 @@ theorem current_no_call_path_checks_of_residual_noReturnDataCopy
         hNoReturnDataCopy hAt hEmit hTargetBlock hRun targetInstr hMem)
       hNoCallCode
 
-theorem CurrentNoCallPathChecksReady.of_current_residual_noReturnDataCopy_current_no_call
+theorem current_no_call_path_checks_of_residual_returnDataCopyBounds
+    {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
+    {state full : EVMState} {result : Assembly.StepResult}
+    {pc : Nat} {instr : Assembly.Instr}
+    {emitted before after : List Assembly.LocatedTarget}
+    (hAssemble : Assembly.assemble? program = some targetProgram)
+    (hJumpdest : Assembly.Bytecode.JumpdestCorrect targetProgram)
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hEmit : Assembly.emitInstr? program pc instr = some emitted)
+    (hTargetBlock : targetProgram.code = before ++ emitted ++ after)
+    (hNoCall : Assembly.Instr.usesCallCreate instr = false)
+    (hRun :
+      Assembly.Target.runListResult
+          (emitted.map Assembly.LocatedTarget.instr) state =
+        .ok result)
+    (hRel : Assembly.GasAware.GasExecRel full state)
+    (hResidual :
+      Assembly.GasAware.XStepTrace.InstrCoreResidualInputsReady
+        targetProgram instr state)
+    (hReturnDataCopyBounds :
+      CurrentNoCallReturnDataCopyBoundsReady program targetProgram) :
+    Assembly.GasAware.XStepTrace.XRunListPathChecksReady
+      (Assembly.GasAware.validJumps targetProgram)
+      (emitted.map Assembly.LocatedTarget.instr) state full result := by
+  have hBlockInputs :
+      Assembly.GasAware.XStepTrace.InstrCoreBlockInputsReady targetProgram
+        instr state :=
+    Assembly.GasAware.XStepTrace.InstrCoreBlockInputsReady.of_residual_no_call_create
+      hEmit hNoCall hRun hResidual
+  have hBlockReady :
+      Assembly.GasAware.XStepTrace.InstrCoreBlockReady targetProgram instr
+        state :=
+    Assembly.GasAware.XStepTrace.InstrCoreBlockReady.of_inputs_ready
+      hBlockInputs
+  have hCoreRun :
+      Assembly.GasAware.XStepTrace.CoreRunListResult
+        (Assembly.GasAware.validJumps targetProgram)
+        (emitted.map Assembly.LocatedTarget.instr) state result :=
+    Assembly.GasAware.XStepTrace.CoreRunListResult.of_emitInstr_coreBlockReady
+      hAssemble hJumpdest
+      hEmit hBlockReady hRun
+  have hNoCallCode :
+      ∀ targetInstr ∈ emitted.map Assembly.LocatedTarget.instr,
+        Assembly.GasAware.targetInstrUsesCallCreate targetInstr = false := by
+    intro targetInstr hMem
+    rcases List.mem_map.mp hMem with ⟨located, hLocatedMem, hEq⟩
+    subst targetInstr
+    exact
+      Assembly.GasAware.targetInstr_usesCallCreate_false_of_emitInstr_mem
+        hNoCall hEmit hLocatedMem
+  have hCorePath :
+      Assembly.GasAware.XStepTrace.XRunListPathCoreChecksReady
+        (Assembly.GasAware.validJumps targetProgram)
+        (emitted.map Assembly.LocatedTarget.instr) state full result :=
+    Assembly.GasAware.XStepTrace.CoreRunListResult.to_path_core_checks
+      hCoreRun hNoCallCode hRel
+  exact
+    Assembly.GasAware.XStepTrace.XRunListPathChecksReady.of_path_core_returnDataCopyBounds_noCallCreate
+      hCorePath
+      (hReturnDataCopyBounds hAt hEmit hTargetBlock hNoCall hRun hRel)
+      hNoCallCode
+
+private theorem CurrentNoCallPathChecksReady.of_current_residual_noReturnDataCopy_current_no_call
     {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
     (hCompile : Assembly.compile? program = some targetProgram)
     (hJumpdest : Assembly.Bytecode.JumpdestCorrect targetProgram)
@@ -8308,7 +9369,25 @@ theorem CurrentNoCallPathChecksReady.of_current_residual_noReturnDataCopy_curren
       (hResidual hAt hEmit hTargetBlock hNoCall hRun)
       hNoReturnDataCopy
 
-theorem CurrentNoCallPathChecksReady.of_residual_noReturnDataCopy_current_no_call
+theorem CurrentNoCallPathChecksReady.of_current_residual_returnDataCopyBounds_current_no_call
+    {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
+    (hCompile : Assembly.compile? program = some targetProgram)
+    (hJumpdest : Assembly.Bytecode.JumpdestCorrect targetProgram)
+    (hResidual :
+      CurrentNoCallInstrCoreResidualResources program targetProgram)
+    (hReturnDataCopyBounds :
+      CurrentNoCallReturnDataCopyBoundsReady program targetProgram) :
+    CurrentNoCallPathChecksReady program targetProgram := by
+  intro state full result pc instr emitted before after hAt hEmit
+    hTargetBlock hNoCall hRun hRel
+  exact
+    current_no_call_path_checks_of_residual_returnDataCopyBounds
+      (Assembly.Preservation.compile?_some_assemble hCompile) hJumpdest
+      hAt hEmit hTargetBlock hNoCall hRun hRel
+      (hResidual hAt hEmit hTargetBlock hNoCall hRun)
+      hReturnDataCopyBounds
+
+private theorem CurrentNoCallPathChecksReady.of_residual_noReturnDataCopy_current_no_call
     {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
     (hCompile : Assembly.compile? program = some targetProgram)
     (hJumpdest : Assembly.Bytecode.JumpdestCorrect targetProgram)
@@ -8358,6 +9437,56 @@ theorem CurrentNoCallPathChecksReady.of_residual_noReturnDataCopy_current_no_cal
       hCorePath
       (fun targetInstr hMem =>
         hNoReturnDataCopy hAt hEmit hTargetBlock hRun targetInstr hMem)
+      hNoCallCode
+
+theorem CurrentNoCallPathChecksReady.of_residual_returnDataCopyBounds_current_no_call
+    {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}
+    (hCompile : Assembly.compile? program = some targetProgram)
+    (hJumpdest : Assembly.Bytecode.JumpdestCorrect targetProgram)
+    (hResidual :
+      Assembly.GasAware.XStepTrace.XBlockInstrCoreResidualResources program
+        targetProgram)
+    (hReturnDataCopyBounds :
+      CurrentNoCallReturnDataCopyBoundsReady program targetProgram) :
+    CurrentNoCallPathChecksReady program targetProgram := by
+  intro state full result pc instr emitted before after hAt hEmit
+    hTargetBlock hNoCall hRun hRel
+  have hBlockInputs :
+      Assembly.GasAware.XStepTrace.InstrCoreBlockInputsReady targetProgram
+        instr state :=
+    Assembly.GasAware.XStepTrace.InstrCoreBlockInputsReady.of_residual_no_call_create
+      hEmit hNoCall hRun (hResidual hAt hEmit hTargetBlock hRun)
+  have hBlockReady :
+      Assembly.GasAware.XStepTrace.InstrCoreBlockReady targetProgram instr
+        state :=
+    Assembly.GasAware.XStepTrace.InstrCoreBlockReady.of_inputs_ready
+      hBlockInputs
+  have hCoreRun :
+      Assembly.GasAware.XStepTrace.CoreRunListResult
+        (Assembly.GasAware.validJumps targetProgram)
+        (emitted.map Assembly.LocatedTarget.instr) state result :=
+    Assembly.GasAware.XStepTrace.CoreRunListResult.of_emitInstr_coreBlockReady
+      (Assembly.Preservation.compile?_some_assemble hCompile) hJumpdest
+      hEmit hBlockReady hRun
+  have hNoCallCode :
+      ∀ targetInstr ∈ emitted.map Assembly.LocatedTarget.instr,
+        Assembly.GasAware.targetInstrUsesCallCreate targetInstr = false := by
+    intro targetInstr hMem
+    rcases List.mem_map.mp hMem with ⟨located, hLocatedMem, hEq⟩
+    subst targetInstr
+    exact
+      Assembly.GasAware.targetInstr_usesCallCreate_false_of_emitInstr_mem
+        hNoCall hEmit hLocatedMem
+  have hCorePath :
+      Assembly.GasAware.XStepTrace.XRunListPathCoreChecksReady
+        (Assembly.GasAware.validJumps targetProgram)
+        (emitted.map Assembly.LocatedTarget.instr) state full result :=
+    Assembly.GasAware.XStepTrace.CoreRunListResult.to_path_core_checks
+      hCoreRun hNoCallCode hRel
+  exact
+    Assembly.GasAware.XStepTrace.XRunListPathChecksReady.of_path_core_returnDataCopyBounds_noCallCreate
+      hCorePath
+      (hReturnDataCopyBounds hAt hEmit hTargetBlock hNoCall hRun hRel)
       hNoCallCode
 
 theorem openXRunListRunningRelReady_current_emitted_no_call_of_current_path_checks_and_budget
@@ -10055,6 +11184,86 @@ def CurrentRunningInstrTraceReadyCase
                               tailGasBound ≤
                                 gasPost.gasAvailable.toNat)
 
+def CurrentRunningInstrCreateReadyCase
+    (targetProgram : Assembly.TargetProgram)
+    (state : EVMState) (instr : Assembly.Instr) : Prop :=
+  ∃ op : Assembly.PrimOp,
+    ∃ kind : OpenExternal.CreateKind,
+      ∃ create : OpenExternal.OpenCreate EVMState,
+        instr = .prim op ∧
+          OpenExternal.CallKind.ofEVMOperation? op.toEVM = none ∧
+            OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind ∧
+              OpenExternal.CreateKind.evmOpenCreate? state kind =
+                some create ∧
+                (∀ {gasBound : Nat} {full : EVMState},
+                  gasBound ≤ full.gasAvailable.toNat →
+                    Assembly.GasAware.GasExecRel full state →
+                      Assembly.GasAware.XStepChecksPass
+                        (Assembly.GasAware.validJumps targetProgram)
+                        full op.toEVM) ∧
+                  (∀ response : OpenExternal.CreateResponse,
+                    (create.resume response).executionEnv.code =
+                      state.executionEnv.code) ∧
+                  (∀ {response : OpenExternal.CreateResponse}
+                      {tailGasBound : Nat},
+                    ∃ gasBound : Nat,
+                      ∀ {full gasPost : EVMState},
+                        gasBound ≤ full.gasAvailable.toNat →
+                          Assembly.GasAware.GasExecRel full state →
+                            Assembly.GasAware.GasExecRel gasPost
+                              (EvmYul.EVM.State.incrPC
+                                (create.resume response)) →
+                              tailGasBound ≤
+                                gasPost.gasAvailable.toNat)
+
+def CurrentRunningInstrCreateTraceReadyCase
+    (targetProgram : Assembly.TargetProgram)
+    (state : EVMState) (instr : Assembly.Instr)
+    (trace : OpenExternal.OpenTrace) : Prop :=
+  ∃ op : Assembly.PrimOp,
+    ∃ kind : OpenExternal.CreateKind,
+      ∃ create : OpenExternal.OpenCreate EVMState,
+        instr = .prim op ∧
+          OpenExternal.CallKind.ofEVMOperation? op.toEVM = none ∧
+            OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind ∧
+              OpenExternal.CreateKind.evmOpenCreate? state kind =
+                some create ∧
+                (∀ {gasBound : Nat} {full : EVMState},
+                  gasBound ≤ full.gasAvailable.toNat →
+                    Assembly.GasAware.GasExecRel full state →
+                      Assembly.GasAware.XStepChecksPass
+                        (Assembly.GasAware.validJumps targetProgram)
+                        full op.toEVM) ∧
+                  (∀ {response : OpenExternal.CreateResponse},
+                    OpenExternal.OpenEvent.create create.site response ∈
+                        trace →
+                      (create.resume response).executionEnv.code =
+                        state.executionEnv.code) ∧
+                  (∀ {response : OpenExternal.CreateResponse}
+                      {tailGasBound : Nat},
+                    ∃ gasBound : Nat,
+                      ∀ {full gasPost : EVMState},
+                        gasBound ≤ full.gasAvailable.toNat →
+                          Assembly.GasAware.GasExecRel full state →
+                            Assembly.GasAware.GasExecRel gasPost
+                              (EvmYul.EVM.State.incrPC
+                                (create.resume response)) →
+                              tailGasBound ≤
+                                gasPost.gasAvailable.toNat)
+
+def CurrentRunningInstrBoundaryReadyCase
+    (targetProgram : Assembly.TargetProgram)
+    (state : EVMState) (instr : Assembly.Instr) : Prop :=
+  CurrentRunningInstrReadyCase targetProgram state instr ∨
+    CurrentRunningInstrCreateReadyCase targetProgram state instr
+
+def CurrentRunningInstrBoundaryTraceReadyCase
+    (targetProgram : Assembly.TargetProgram)
+    (state : EVMState) (instr : Assembly.Instr)
+    (trace : OpenExternal.OpenTrace) : Prop :=
+  CurrentRunningInstrTraceReadyCase targetProgram state instr trace ∨
+    CurrentRunningInstrCreateTraceReadyCase targetProgram state instr trace
+
 namespace CurrentRunningInstrReadyCase
 
 theorem to_trace_ready_case
@@ -10116,6 +11325,43 @@ theorem not_create_like
     cases hKindSome
 
 end CurrentRunningInstrTraceReadyCase
+
+namespace CurrentRunningInstrCreateReadyCase
+
+theorem to_trace_ready_case
+    {targetProgram : Assembly.TargetProgram}
+    {state : EVMState} {instr : Assembly.Instr}
+    {trace : OpenExternal.OpenTrace}
+    (hReady :
+      CurrentRunningInstrCreateReadyCase targetProgram state instr) :
+    CurrentRunningInstrCreateTraceReadyCase targetProgram state instr
+      trace := by
+  rcases hReady with
+    ⟨op, kind, create, hInstr, hCallKind, hKind, hCreate, hStepChecks,
+      hCodeStable, hPostBudget⟩
+  exact
+    ⟨op, kind, create, hInstr, hCallKind, hKind, hCreate, hStepChecks,
+      (fun {response} _hMem => hCodeStable response), hPostBudget⟩
+
+end CurrentRunningInstrCreateReadyCase
+
+namespace CurrentRunningInstrBoundaryReadyCase
+
+theorem to_trace_ready_case
+    {targetProgram : Assembly.TargetProgram}
+    {state : EVMState} {instr : Assembly.Instr}
+    {trace : OpenExternal.OpenTrace}
+    (hReady :
+      CurrentRunningInstrBoundaryReadyCase targetProgram state instr) :
+    CurrentRunningInstrBoundaryTraceReadyCase targetProgram state instr
+      trace := by
+  rcases hReady with hCallReady | hCreateReady
+  · exact Or.inl
+      (CurrentRunningInstrReadyCase.to_trace_ready_case hCallReady)
+  · exact Or.inr
+      (CurrentRunningInstrCreateReadyCase.to_trace_ready_case hCreateReady)
+
+end CurrentRunningInstrBoundaryReadyCase
 
 theorem openRunListResult_current_emitted_running_preserves_code_of_trace_ready_case
     {program : Assembly.Program} {targetProgram : Assembly.TargetProgram}

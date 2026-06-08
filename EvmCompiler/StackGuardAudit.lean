@@ -424,141 +424,6 @@ object program, checked visible live-layout width, checked hidden frame words,
 and the exact `visibleWords + frameWords + 17 <= 1024` capacity bound.
 -/
 
-example :=
-  Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_eq_some
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_of_checks
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_base
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_stackSafeCompile
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_sourceCheck
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_sourceCheck_checked
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_sourceFrameWordSumVisibleResourceBound
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_sourceFrameWordSumLiveLayoutExactBound
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_body_layoutsBoundedBy
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_assemblyBoundCheck
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
-
-example :=
-  @Yul.Program.liveLayoutStackSafe_actualEVMHeadroomPoints
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_sourceRunFrameWordSumLiveLayoutPoints
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_sourceRunFrameWordSumLiveLayoutWeightPoints
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_sourceRunFrameStackHeadroom
-
-example
-    {program : Yul.Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    (hCheckedCompileTarget :
-      Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
-          program =
-        some (asm, target)) :
-    Yul.Program.RecursiveBridgeSourceFrameWordSumResourceBound program :=
-  Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_sourceFrameWordSumResourceBound
-    hCheckedCompileTarget
-
-example
-    {program : Yul.Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    (hCheckedCompileTarget :
-      Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
-          program =
-        some (asm, target)) :
-    ∃ lowerObj frameWords,
-      program.toObjects? = some lowerObj ∧
-        Functions.CallDepth.Program.maxActiveFrameWords?
-            lowerObj.toFunctions =
-          some frameWords ∧
-        16 + frameWords + 17 ≤ 1024 :=
-  Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_sourceFrameWordSumExactBound
-    hCheckedCompileTarget
-
-example
-    {program : Yul.Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    (hCheckedCompileTarget :
-      Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
-          program =
-        some (asm, target)) :
-    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
-        asm 17 1024 =
-      some
-        (Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck
-          hCheckedCompileTarget) :=
-  Yul.Program.compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
-    hCheckedCompileTarget
-
-example
-    {program : Yul.Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    (hCheckedCompileTarget :
-      Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
-          program =
-        some (asm, target)) :
-    Yul.Program.RecursiveBridgeSourceFrameWordSumResourceBound program :=
-  Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_sourceFrameWordSumResourceBound
-    hCheckedCompileTarget
-
-example
-    {program : Yul.Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    (hCheckedCompileTarget :
-      Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
-          program =
-        some (asm, target)) :
-    ∃ lowerObj frameWords,
-      program.toObjects? = some lowerObj ∧
-        Functions.CallDepth.Program.maxActiveFrameWords?
-            lowerObj.toFunctions =
-          some frameWords ∧
-        16 + frameWords + 17 ≤ 1024 :=
-  Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_sourceFrameWordSumExactBound
-    hCheckedCompileTarget
-
-example
-    {program : Yul.Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    (hCheckedCompileTarget :
-      Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
-          program =
-        some (asm, target)) :
-    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
-        asm 17 1024 =
-      some
-        (Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck
-          hCheckedCompileTarget) :=
-  Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
-    hCheckedCompileTarget
-
 end SourceFrameWordSumBoundary
 
 namespace LiveLayoutPreservationBoundary
@@ -1766,94 +1631,7 @@ example :=
   @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStatic?_eq_some
 
 example :=
-  Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_compileConservative
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetFitsDecodeWindow
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_decodeSafety
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockPathChecks_of_core
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_source_observations_targetFacts
-
-example :=
-  Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_of_noReturnDataCopy
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyCompile
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
-
-example :=
   @Yul.Program.conservativeSpillStackSafe_actualEVMHeadroomPoints
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceLowered_sufficientGas_X
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_referenceRun_sufficientGas_X
-
-example :=
-  @Yul.Program.compileCheckedWithConservativeSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_runResult_sufficientGas_X
-
-example :=
-  Yul.Program.StackSafeOrConservativeSpillObservableOutcomeRel
-
-example :=
-  Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?
-
-example :=
-  @Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?_of_stackSafe
-
-example :=
-  @Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?_of_conservativeSpill
-
-example :=
-  @Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?_runResult_sufficientGas_X
-
-example :=
-  @Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?_runResult_sufficientGas_no_out_of_gas_X
 
 end YulConservativeSpillTargetBoundary
 
@@ -1889,13 +1667,13 @@ example :=
   @Yul.Program.StackGuardedObservableOutcomeRel.elim
 
 example :=
-  Yul.Program.StackGuardedNoReturnDataCopyFallbackScratchReady
+  Yul.Program.StackGuardedReturnDataCopyBoundsFallbackScratchReady
 
 example :=
-  @Yul.Program.StackGuardedNoReturnDataCopyFallbackScratchReady.of_liveLayout
+  @Yul.Program.StackGuardedReturnDataCopyBoundsFallbackScratchReady.of_liveLayout
 
 example :=
-  @Yul.Program.StackGuardedNoReturnDataCopyFallbackScratchReady.of_scratchCheck
+  @Yul.Program.StackGuardedReturnDataCopyBoundsFallbackScratchReady.of_scratchCheck
 
 example :=
   Yul.Program.StackGuardedSufficientGasConclusion
@@ -1910,73 +1688,25 @@ example :=
   Yul.Program.StackGuardedPlannedPreallocNoOutOfGasConclusion
 
 example :=
-  Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?
+  Yul.Program.compileStackGuardedReturnDataCopyBounds?
 
 example :=
-  Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?
+  Yul.Program.compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
 
 example :=
-  @Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_of_stackSafe
+  @Yul.Program.compileStackGuardedReturnDataCopyBounds?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_X
 
 example :=
-  @Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_of_adaptiveSpill
+  @Yul.Program.compileStackGuardedReturnDataCopyBounds?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_no_out_of_gas_X
 
 example :=
-  @Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_sufficientGas_X
+  @Yul.Program.compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
 
 example :=
-  @Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_sufficientGas_no_out_of_gas_X
+  @Yul.Program.compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_noCallCreate
 
 example :=
-  @Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprResultContracts_sufficientGas_X
-
-example :=
-  @Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
-
-example :=
-  @Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
-
-example :=
-  Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_of_liveLayout
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_of_adaptiveFallback
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_eq_some
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X_of_liveLayoutOrScratchBoundary
-
-example :=
-  @Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X_of_liveLayoutOrScratchBoundary
-
-example :=
-  Yul.Program.compileStackGuardedNoReturnDataCopy?
-
-example :=
-  @Yul.Program.compileStackGuardedNoReturnDataCopy?_of_liveLayout
-
-example :=
-  @Yul.Program.compileStackGuardedNoReturnDataCopy?_of_adaptiveFallback
-
-example :=
-  @Yul.Program.compileStackGuardedNoReturnDataCopy?_eq_some
-
-example :=
-  @Yul.Program.compileStackGuardedNoReturnDataCopy?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
-
-example :=
-  @Yul.Program.compileStackGuardedNoReturnDataCopy?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
+  @Yul.Program.compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_blockPathReturnDataCopyBounds
 
 example :=
   Yul.Program.compileStackGuardedSourceOwned?
@@ -2077,8 +1807,8 @@ example
     {store : EvmYul.Yul.VarStore}
     {initial : Yul.EVMState}
     {referenceResult : Yul.Reference.Result}
-    (hExprNoSuccessfulOutOfFuel :
-      Yul.Program.RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hExprUserCallResultContracts :
+      Yul.Program.RecursiveBridgeExprUserCallResultContracts cfg program)
     (hInitialCodeImageRel :
       Yul.Program.RecursiveBridgeInitialCodeImageRel cfg program target shared
         initial)
@@ -2087,53 +1817,17 @@ example
         Yul.Program.RecursiveBridgeSourceRun program shared store sourceFuel
           referenceResult)
     (hCompileTarget :
-      Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?
+      Yul.Program.compileStackGuardedReturnDataCopyBounds?
           range program =
         some (asm, target))
     (hBoundary :
-      Locals.SourceLowering.StateRel.SpillScratch.PrivateScratchBoundary.scratchCheck?
-          (Yul.Program.canonicalEntryState initial).toMachineState range [] [] [] =
-        true)
+      Yul.Program.StackGuardedReturnDataCopyBoundsFallbackScratchReady range
+        program initial)
     (hInitialPerm : initial.executionEnv.perm = true) :
-    AdaptiveSpillSoundConclusion cfg range program asm target shared store
-      initial referenceResult :=
-  Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
-    hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel
-    hSourceFuelRun hCompileTarget hBoundary hInitialPerm
-
-example
-    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
-    {cfg : Yul.Reference.StateRelConfig}
-    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
-    {program : Yul.Program}
-    {asm : Assembly.Program}
-    {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {initial : Yul.EVMState}
-    {referenceResult : Yul.Reference.Result}
-    (hExprNoSuccessfulOutOfFuel :
-      Yul.Program.RecursiveBridgeExprNoOutOfFuelContracts cfg program)
-    (hInitialCodeImageRel :
-      Yul.Program.RecursiveBridgeInitialCodeImageRel cfg program target shared
-        initial)
-    (hSourceFuelRun :
-      ∃ sourceFuel,
-        Yul.Program.RecursiveBridgeSourceRun program shared store sourceFuel
-          referenceResult)
-    (hCompileTarget :
-      Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?
-          range program =
-        some (asm, target))
-    (hBoundary :
-      Locals.SourceLowering.StateRel.SpillScratch.PrivateScratchBoundary.scratchCheck?
-          (Yul.Program.canonicalEntryState initial).toMachineState range [] [] [] =
-        true)
-    (hInitialPerm : initial.executionEnv.perm = true) :
-    AdaptiveSpillSoundConclusion cfg range program asm target shared store
-      initial referenceResult :=
-  Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
-    hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel
+    Yul.Program.StackGuardedSufficientGasConclusion cfg range program asm
+      target shared store initial referenceResult :=
+  Yul.Program.compileStackGuardedReturnDataCopyBounds?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_X
+    hSpec hExprUserCallResultContracts hInitialCodeImageRel
     hSourceFuelRun hCompileTarget hBoundary hInitialPerm
 
 abbrev AdaptiveSpillNoOutOfGasConclusion
@@ -2185,8 +1879,8 @@ example
     {store : EvmYul.Yul.VarStore}
     {initial : Yul.EVMState}
     {referenceResult : Yul.Reference.Result}
-    (hExprNoSuccessfulOutOfFuel :
-      Yul.Program.RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hExprUserCallResultContracts :
+      Yul.Program.RecursiveBridgeExprUserCallResultContracts cfg program)
     (hInitialCodeImageRel :
       Yul.Program.RecursiveBridgeInitialCodeImageRel cfg program target shared
         initial)
@@ -2195,53 +1889,17 @@ example
         Yul.Program.RecursiveBridgeSourceRun program shared store sourceFuel
           referenceResult)
     (hCompileTarget :
-      Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?
+      Yul.Program.compileStackGuardedReturnDataCopyBounds?
           range program =
         some (asm, target))
     (hBoundary :
-      Locals.SourceLowering.StateRel.SpillScratch.PrivateScratchBoundary.scratchCheck?
-          (Yul.Program.canonicalEntryState initial).toMachineState range [] [] [] =
-        true)
+      Yul.Program.StackGuardedReturnDataCopyBoundsFallbackScratchReady range
+        program initial)
     (hInitialPerm : initial.executionEnv.perm = true) :
-    AdaptiveSpillNoOutOfGasConclusion cfg range program asm target shared store
-      initial referenceResult :=
-  Yul.Program.compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
-    hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel
-    hSourceFuelRun hCompileTarget hBoundary hInitialPerm
-
-example
-    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
-    {cfg : Yul.Reference.StateRelConfig}
-    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
-    {program : Yul.Program}
-    {asm : Assembly.Program}
-    {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {initial : Yul.EVMState}
-    {referenceResult : Yul.Reference.Result}
-    (hExprNoSuccessfulOutOfFuel :
-      Yul.Program.RecursiveBridgeExprNoOutOfFuelContracts cfg program)
-    (hInitialCodeImageRel :
-      Yul.Program.RecursiveBridgeInitialCodeImageRel cfg program target shared
-        initial)
-    (hSourceFuelRun :
-      ∃ sourceFuel,
-        Yul.Program.RecursiveBridgeSourceRun program shared store sourceFuel
-          referenceResult)
-    (hCompileTarget :
-      Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?
-          range program =
-        some (asm, target))
-    (hBoundary :
-      Locals.SourceLowering.StateRel.SpillScratch.PrivateScratchBoundary.scratchCheck?
-          (Yul.Program.canonicalEntryState initial).toMachineState range [] [] [] =
-        true)
-    (hInitialPerm : initial.executionEnv.perm = true) :
-    AdaptiveSpillNoOutOfGasConclusion cfg range program asm target shared store
-      initial referenceResult :=
-  Yul.Program.compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
-    hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel
+    Yul.Program.StackGuardedNoOutOfGasConclusion cfg range program asm target
+      shared store initial referenceResult :=
+  Yul.Program.compileStackGuardedReturnDataCopyBounds?_runResult_existsSourceRun_exprUserCallResultContracts_sufficientGas_no_out_of_gas_X
+    hSpec hExprUserCallResultContracts hInitialCodeImageRel
     hSourceFuelRun hCompileTarget hBoundary hInitialPerm
 
 example
@@ -2266,7 +1924,7 @@ example
         Yul.Program.RecursiveBridgeSourceRun program shared store sourceFuel
           referenceResult)
     (hCompileTarget :
-      Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?
+      Yul.Program.compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?
           maxWords program =
         some (range, asm, target))
     (hInitialMemory :
@@ -2275,42 +1933,7 @@ example
     (hInitialPerm : initial.executionEnv.perm = true) :
     Yul.Program.StackGuardedPlannedPreallocSufficientGasConclusion cfg range
       program asm target shared store initial referenceResult :=
-  Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
-    hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel
-    hSourceFuelRun hCompileTarget hInitialMemory hInitialPerm
-
-example
-    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
-    {cfg : Yul.Reference.StateRelConfig}
-    {maxWords : Nat}
-    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
-    {program : Yul.Program}
-    {asm : Assembly.Program}
-    {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {initial : Yul.EVMState}
-    {referenceResult : Yul.Reference.Result}
-    (hExprNoSuccessfulOutOfFuel :
-      Yul.Program.RecursiveBridgeExprNoOutOfFuelContracts cfg program)
-    (hInitialCodeImageRel :
-      Yul.Program.RecursiveBridgeInitialCodeImageRel cfg program target shared
-        initial)
-    (hSourceFuelRun :
-      ∃ sourceFuel,
-        Yul.Program.RecursiveBridgeSourceRun program shared store sourceFuel
-          referenceResult)
-    (hCompileTarget :
-      Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?
-          maxWords program =
-        some (range, asm, target))
-    (hInitialMemory :
-      Locals.SourceLowering.StateRel.SpillScratch.ScratchInitialMemoryEmpty
-        (Yul.Program.canonicalEntryState initial).toMachineState)
-    (hInitialPerm : initial.executionEnv.perm = true) :
-    Yul.Program.StackGuardedPlannedPreallocNoOutOfGasConclusion cfg range
-      program asm target shared store initial referenceResult :=
-  Yul.Program.compileStackGuardedNoReturnDataCopyPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_no_out_of_gas_X
+  Yul.Program.compileStackGuardedReturnDataCopyBoundsPlannedPrealloc?_runResult_existsSourceRun_exprNoOutOfFuelContracts_sufficientGas_X
     hSpec hExprNoSuccessfulOutOfFuel hInitialCodeImageRel
     hSourceFuelRun hCompileTarget hInitialMemory hInitialPerm
 
@@ -2345,79 +1968,10 @@ example :=
   @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStatic?_eq_some
 
 example :=
-  Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_compileAdaptive
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetFitsDecodeWindow
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_decodeSafety
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockPathChecks_of_core
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_source_observations_targetFacts
-
-example :=
-  Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_of_noReturnDataCopy
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyCompile
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
-
-example :=
   @Yul.Program.adaptiveSpillStackSafe_actualEVMHeadroomPoints
 
 example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceLowered_sufficientGas_X
-
-example :=
   @Yul.Program.sourceLowered_run_of_dispatcher_source_result_block_bridge
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_referenceRun_sufficientGas_X
-
-example :=
-  @Yul.Program.compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_runResult_sufficientGas_X
 
 end YulAdaptiveSpillTargetBoundary
 

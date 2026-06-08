@@ -20,9 +20,6 @@ namespace Safe
 def codeImagePrimitive : EvmYul.Operation .Yul → Prop
   | .Env .CODESIZE => True
   | .Env .CODECOPY => True
-  | .Env .EXTCODESIZE => True
-  | .Env .EXTCODECOPY => True
-  | .Env .EXTCODEHASH => True
   | _ => False
 
 def localCodeImagePrimitive : EvmYul.Operation .Yul → Prop
@@ -31,9 +28,6 @@ def localCodeImagePrimitive : EvmYul.Operation .Yul → Prop
   | _ => False
 
 def externalCodeImagePrimitive : EvmYul.Operation .Yul → Prop
-  | .Env .EXTCODESIZE => True
-  | .Env .EXTCODECOPY => True
-  | .Env .EXTCODEHASH => True
   | _ => False
 
 def externalCallCreatePrimitive : EvmYul.Operation .Yul → Prop
@@ -45,6 +39,9 @@ def externalCallCreatePrimitive : EvmYul.Operation .Yul → Prop
   | .System .STATICCALL => True
   | _ => False
 
+def externalBoundaryPrimitive (op : EvmYul.Operation .Yul) : Prop :=
+  ∃ kind, OpenExternal.BoundaryKind.ofYulOperation? op = some kind
+
 def createBoundaryPrimitive : EvmYul.Operation .Yul → Prop
   | .System .CREATE => True
   | .System .CREATE2 => True
@@ -52,9 +49,6 @@ def createBoundaryPrimitive : EvmYul.Operation .Yul → Prop
 
 def yulImportedSemanticsIncompletePrimitive :
     EvmYul.Operation .Yul → Prop
-  | .Env .EXTCODESIZE => True
-  | .Env .EXTCODECOPY => True
-  | .Env .EXTCODEHASH => True
   | .System .CREATE => True
   | .System .CREATE2 => True
   | _ => False
@@ -68,14 +62,13 @@ def externalCallBoundaryPrimitive : EvmYul.Operation .Yul → Prop
 
 /--
 Primitives whose imported Yul semantics can be related directly to the
-compiler-facing EVM-state semantics without an additional external account-code
-image relation.
+compiler-facing EVM-state semantics.
 
-External account-code inspection is deliberately excluded here until the world
-relation states how account bytecode images line up. Local `CODESIZE` and
-`CODECOPY` are admitted: imported Yul reads `ExecutionEnv.codeBytes`, and the
-compiler relation carries the equality between that source byte image and the
-EVM executable byte array.
+Local `CODESIZE` and `CODECOPY` are admitted: imported Yul reads
+`ExecutionEnv.codeBytes`, and the compiler relation carries the equality
+between that source byte image and the EVM executable byte array. External
+account-code inspection is also admitted through the account-map code-image
+relation in `StateRelConfig`.
 
 The remaining external call/create family is excluded from the current
 regular-success bridge. Static-mode-sensitive local effects such as storage
@@ -83,9 +76,6 @@ writes and logs are admitted because their static-mode precheck and shared-state
 update are handled by the primitive semantics bridge.
 -/
 def primitive : EvmYul.Operation .Yul → Prop
-  | .Env .EXTCODESIZE => False
-  | .Env .EXTCODECOPY => False
-  | .Env .EXTCODEHASH => False
   | .System .CREATE => False
   | .System .CALL => False
   | .System .CALLCODE => False
@@ -120,6 +110,19 @@ theorem externalCallCreatePrimitive_iff_create_or_call
     externalCallBoundaryPrimitive] <;> try rename_i subop <;> cases subop <;>
     simp [externalCallCreatePrimitive, createBoundaryPrimitive,
       externalCallBoundaryPrimitive]
+
+theorem externalBoundaryPrimitive_iff_externalCallCreatePrimitive
+    (op : EvmYul.Operation .Yul) :
+    externalBoundaryPrimitive op ↔ externalCallCreatePrimitive op := by
+  cases op <;> simp [externalBoundaryPrimitive, externalCallCreatePrimitive,
+    OpenExternal.BoundaryKind.ofYulOperation?,
+    OpenExternal.CallKind.ofYulOperation?,
+    OpenExternal.CreateKind.ofYulOperation?] <;>
+    try rename_i subop <;> cases subop <;>
+      simp [externalBoundaryPrimitive, externalCallCreatePrimitive,
+        OpenExternal.BoundaryKind.ofYulOperation?,
+        OpenExternal.CallKind.ofYulOperation?,
+        OpenExternal.CreateKind.ofYulOperation?]
 
 theorem primitive_iff_not_importedIncomplete_not_externalBoundary
     (op : EvmYul.Operation .Yul) :
@@ -371,11 +374,11 @@ namespace FeatureCoverage
 /--
 Feature coverage required by the current recursive Yul bridge.
 
-This is not the full source-language acceptedness predicate. It names the
-semantic families that the current bridge has already proved locally. Code-image
-and external call/create primitives fail this predicate today; future bridge
-work should replace those failures with explicit semantic contracts while
-keeping `Safe.Full` as the source-language surface.
+This is not the full source-language acceptedness predicate. It names the base
+semantic families proved locally by the original recursive Yul bridge. Broader
+public corridors use the feature predicates below, in particular the
+external-code-image/CALL-family surface that admits CALL/CREATE boundaries and
+EXT*/BALANCE state queries under their explicit semantic contracts.
 -/
 def primitive : EvmYul.Operation .Yul → Prop :=
   Safe.primitive
@@ -1054,6 +1057,9 @@ def objectBuiltinUserCall (functionName : Name) : Prop :=
 def importedIncompleteExpr : AstExpr → Prop :=
   Family.expr importedIncompletePrimitive Family.anyUserCall
 
+def externalCodeImageExpr : AstExpr → Prop :=
+  Family.expr externalCodeImagePrimitive Family.anyUserCall
+
 def externalBoundaryExpr : AstExpr → Prop :=
   Family.expr externalBoundaryPrimitive Family.anyUserCall
 
@@ -1071,6 +1077,9 @@ def objectBuiltinExpr : AstExpr → Prop :=
 
 def importedIncompleteExprs : List AstExpr → Prop :=
   Family.exprs importedIncompletePrimitive Family.anyUserCall
+
+def externalCodeImageExprs : List AstExpr → Prop :=
+  Family.exprs externalCodeImagePrimitive Family.anyUserCall
 
 def externalBoundaryExprs : List AstExpr → Prop :=
   Family.exprs externalBoundaryPrimitive Family.anyUserCall
@@ -1090,6 +1099,9 @@ def objectBuiltinExprs : List AstExpr → Prop :=
 def importedIncompleteStmt : AstStmt → Prop :=
   Family.stmt importedIncompletePrimitive Family.anyUserCall
 
+def externalCodeImageStmt : AstStmt → Prop :=
+  Family.stmt externalCodeImagePrimitive Family.anyUserCall
+
 def externalBoundaryStmt : AstStmt → Prop :=
   Family.stmt externalBoundaryPrimitive Family.anyUserCall
 
@@ -1107,6 +1119,9 @@ def objectBuiltinStmt : AstStmt → Prop :=
 
 def importedIncompleteStmts : List AstStmt → Prop :=
   Family.stmts importedIncompletePrimitive Family.anyUserCall
+
+def externalCodeImageStmts : List AstStmt → Prop :=
+  Family.stmts externalCodeImagePrimitive Family.anyUserCall
 
 def externalBoundaryStmts : List AstStmt → Prop :=
   Family.stmts externalBoundaryPrimitive Family.anyUserCall
@@ -1126,6 +1141,9 @@ def objectBuiltinStmts : List AstStmt → Prop :=
 def importedIncompleteCases : List (Word × List AstStmt) → Prop :=
   Family.casesSafe importedIncompletePrimitive Family.anyUserCall
 
+def externalCodeImageCases : List (Word × List AstStmt) → Prop :=
+  Family.casesSafe externalCodeImagePrimitive Family.anyUserCall
+
 def externalBoundaryCases : List (Word × List AstStmt) → Prop :=
   Family.casesSafe externalBoundaryPrimitive Family.anyUserCall
 
@@ -1144,6 +1162,10 @@ def objectBuiltinCases : List (Word × List AstStmt) → Prop :=
 def importedIncompleteFunctionDefinition :
     AstFunctionDefinition → Prop :=
   Family.functionDefinition importedIncompletePrimitive Family.anyUserCall
+
+def externalCodeImageFunctionDefinition :
+    AstFunctionDefinition → Prop :=
+  Family.functionDefinition externalCodeImagePrimitive Family.anyUserCall
 
 def externalBoundaryFunctionDefinition :
     AstFunctionDefinition → Prop :=
@@ -1170,6 +1192,10 @@ def importedIncompleteFunctionEntries :
     List (Name × AstFunctionDefinition) → Prop :=
   Family.functionEntries importedIncompletePrimitive Family.anyUserCall
 
+def externalCodeImageFunctionEntries :
+    List (Name × AstFunctionDefinition) → Prop :=
+  Family.functionEntries externalCodeImagePrimitive Family.anyUserCall
+
 def externalBoundaryFunctionEntries :
     List (Name × AstFunctionDefinition) → Prop :=
   Family.functionEntries externalBoundaryPrimitive Family.anyUserCall
@@ -1193,6 +1219,10 @@ def objectBuiltinFunctionEntries :
 noncomputable def importedIncompleteContract :
     AstContract → Prop :=
   Family.contract importedIncompletePrimitive Family.anyUserCall
+
+noncomputable def externalCodeImageContract :
+    AstContract → Prop :=
+  Family.contract externalCodeImagePrimitive Family.anyUserCall
 
 noncomputable def externalBoundaryContract :
     AstContract → Prop :=
@@ -1250,9 +1280,6 @@ def localCodeImagePrimitive? : EvmYul.Operation .Yul → Bool
   | _ => true
 
 def externalCodeImagePrimitive? : EvmYul.Operation .Yul → Bool
-  | .Env .EXTCODESIZE => false
-  | .Env .EXTCODECOPY => false
-  | .Env .EXTCODEHASH => false
   | _ => true
 
 def createBoundaryPrimitive? : EvmYul.Operation .Yul → Bool
@@ -2701,7 +2728,22 @@ theorem objectBuiltin_toFunctionsListFuel?_let_user_call_eq
             some
               (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
                 state')
-      | [_name] => none
+      | [name] =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else
+            let lowerNames := identNames [name]
+            (do
+              let (preArgs, lowerArgs, state') ←
+                if Expr.List.directCallArgsSafe? args then do
+                  let lowerArgs ← Expr.List.toLocals1? args
+                  some ([], lowerArgs, state)
+                else
+                  Expr.List.lowerBound1? state args
+              some
+                (Stmt.initNames lowerNames ++ preArgs ++
+                  [Functions.Stmt.call lowerNames functionName lowerArgs],
+                  state'))
       | name :: next :: rest =>
           if ObjectBuiltin.unsupported? functionName then
             none
@@ -2746,7 +2788,22 @@ theorem objectBuiltin_toFunctionsListFuel?_assign_user_call_eq
                 Expr.List.lowerBound1? state args
             some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
               state')
-      | [_name] => none
+      | [name] =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else
+            let lowerNames := identNames [name]
+            (do
+              let (preArgs, lowerArgs, state') ←
+                if Expr.List.directCallArgsSafe? args then do
+                  let lowerArgs ← Expr.List.toLocals1? args
+                  some ([], lowerArgs, state)
+                else
+                  Expr.List.lowerBound1? state args
+              some
+                (preArgs ++
+                  [Functions.Stmt.call lowerNames functionName lowerArgs],
+                  state'))
       | name :: next :: rest =>
           if ObjectBuiltin.unsupported? functionName then
             none
@@ -2917,14 +2974,40 @@ mutual
                         | cons name rest =>
                             cases rest with
                             | nil =>
-                                cases hValue :
-                                    Expr.lower1? state
-                                      (.Call (.inr functionName) args) with
-                                | none =>
-                                    simp [Stmt.toFunctionsListFuel?, hValue]
-                                      at hLower
-                                | some valueResult =>
-                                    exact objectBuiltinExpr_of_lower1?_some hValue
+                                rw [objectBuiltin_toFunctionsListFuel?_let_user_call_eq]
+                                  at hLower
+                                cases hUnsupported :
+                                    ObjectBuiltin.unsupported? functionName with
+                                | true =>
+                                    simp [hUnsupported] at hLower
+                                | false =>
+                                    cases hDirect :
+                                        Expr.List.directCallArgsSafe? args with
+                                    | false =>
+                                        cases hArgs :
+                                            Expr.List.lowerBound1? state args with
+                                        | none =>
+                                            simp [hUnsupported, hDirect, hArgs]
+                                              at hLower
+                                        | some argResult =>
+                                            exact
+                                              ⟨by
+                                                  simpa [objectBuiltinUserCall]
+                                                    using hUnsupported,
+                                                objectBuiltinExprs_of_lowerBound1?_some
+                                                  hArgs⟩
+                                    | true =>
+                                        cases hArgs : Expr.List.toLocals1? args with
+                                        | none =>
+                                            simp [hUnsupported, hDirect, hArgs]
+                                              at hLower
+                                        | some lowerArgs =>
+                                            exact
+                                              ⟨by
+                                                  simpa [objectBuiltinUserCall]
+                                                    using hUnsupported,
+                                                objectBuiltinExprs_of_toLocals1?_some
+                                                  hArgs⟩
                             | cons next rest =>
                                 rw [objectBuiltin_toFunctionsListFuel?_let_user_call_eq]
                                   at hLower
@@ -3045,13 +3128,40 @@ mutual
                     | cons name rest =>
                         cases rest with
                         | nil =>
-                            cases hValue :
-                                Expr.lower1? state
-                                  (.Call (.inr functionName) args) with
-                            | none =>
-                                simp [Stmt.toFunctionsListFuel?, hValue] at hLower
-                            | some valueResult =>
-                                exact objectBuiltinExpr_of_lower1?_some hValue
+                            rw [objectBuiltin_toFunctionsListFuel?_assign_user_call_eq]
+                              at hLower
+                            cases hUnsupported :
+                                ObjectBuiltin.unsupported? functionName with
+                            | true =>
+                                simp [hUnsupported] at hLower
+                            | false =>
+                                cases hDirect :
+                                    Expr.List.directCallArgsSafe? args with
+                                | false =>
+                                    cases hArgs :
+                                        Expr.List.lowerBound1? state args with
+                                    | none =>
+                                        simp [hUnsupported, hDirect, hArgs]
+                                          at hLower
+                                    | some argResult =>
+                                        exact
+                                          ⟨by
+                                              simpa [objectBuiltinUserCall]
+                                                using hUnsupported,
+                                            objectBuiltinExprs_of_lowerBound1?_some
+                                              hArgs⟩
+                                | true =>
+                                    cases hArgs : Expr.List.toLocals1? args with
+                                    | none =>
+                                        simp [hUnsupported, hDirect, hArgs]
+                                          at hLower
+                                    | some lowerArgs =>
+                                        exact
+                                          ⟨by
+                                              simpa [objectBuiltinUserCall]
+                                                using hUnsupported,
+                                            objectBuiltinExprs_of_toLocals1?_some
+                                              hArgs⟩
                         | cons next rest =>
                             rw [objectBuiltin_toFunctionsListFuel?_assign_user_call_eq]
                               at hLower
@@ -3450,13 +3560,14 @@ theorem objectBuiltinProgram_of_compileChecked?_some
 end FeatureCoverage
 
 /-
-CALL-capable source-safety surface.
+Legacy ordinary-CALL source-safety surface.
 
-This is the first widening beyond the old `Safe.program` predicate.  It admits
-ordinary `CALL`, while still rejecting account-code inspection, contract
-creation, and the other external-call family members until their world
-semantics are proved.  Object/data builtin user calls remain compiler-derived
-coverage rather than hidden inside full source acceptedness.
+This was the first widening beyond the old `Safe.program` predicate.  It admits
+ordinary `CALL` while still rejecting the rest of the boundary family.  It is
+retained for compatibility with older proof corridors; the current public
+external surface is `CallFamilySafe` below, with EXT*/BALANCE handled by
+state/query and code-image preservation rather than by suspending at the
+CALL/CREATE boundary.
 -/
 namespace CallSafe
 
@@ -3764,9 +3875,19 @@ end CallSafe
 
 namespace CallFamilySafe
 
+/--
+Current external-code-image source-safety surface.
+
+This coverage admits the CALL-family boundary operations
+`CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL`, the CREATE-family boundary
+operations `CREATE`/`CREATE2`, and the non-suspending external account-code/state
+queries admitted by `Safe.primitive` such as `BALANCE`, `EXTCODESIZE`,
+`EXTCODECOPY`, and `EXTCODEHASH`. Object/data builtin user calls remain
+compiler-derived coverage and are resolved by the Solidity/Yul object-image
+path before core Yul lowering.
+-/
 def primitive (op : EvmYul.Operation .Yul) : Prop :=
-  FeatureCoverage.importedIncompletePrimitive op ∧
-    FeatureCoverage.createBoundaryPrimitive op
+  FeatureCoverage.externalCodeImagePrimitive op
 
 def userCall (functionName : Name) : Prop :=
   FeatureCoverage.objectBuiltinUserCall functionName
@@ -3800,58 +3921,50 @@ noncomputable def program : Program → Prop :=
 
 theorem primitive_iff_safe_or_call_family
     (op : EvmYul.Operation .Yul) :
-    primitive op ↔ Safe.primitive op ∨ Safe.externalCallBoundaryPrimitive op := by
-  cases op <;> simp [primitive, FeatureCoverage.importedIncompletePrimitive,
-    FeatureCoverage.createBoundaryPrimitive, Safe.createBoundaryPrimitive,
-    Safe.primitive,
+    primitive op ↔ Safe.primitive op ∨ Safe.externalCallCreatePrimitive op := by
+  cases op <;> simp [primitive, FeatureCoverage.externalCodeImagePrimitive,
+    Safe.externalCodeImagePrimitive, Safe.primitive,
     Safe.yulImportedSemanticsIncompletePrimitive,
-    Safe.externalCallBoundaryPrimitive] <;>
+    Safe.externalCallBoundaryPrimitive, Safe.externalCallCreatePrimitive] <;>
     try rename_i subop <;> cases subop <;>
-    simp [primitive, FeatureCoverage.importedIncompletePrimitive,
-      FeatureCoverage.createBoundaryPrimitive, Safe.createBoundaryPrimitive,
-      Safe.primitive,
+    simp [primitive, FeatureCoverage.externalCodeImagePrimitive,
+      Safe.externalCodeImagePrimitive, Safe.primitive,
       Safe.yulImportedSemanticsIncompletePrimitive,
-      Safe.externalCallBoundaryPrimitive]
+      Safe.externalCallBoundaryPrimitive, Safe.externalCallCreatePrimitive]
 
 theorem primitive_of_safe {op : EvmYul.Operation .Yul}
     (hSafe : Safe.primitive op) :
     primitive op :=
   (primitive_iff_safe_or_call_family op).mpr (Or.inl hSafe)
 
-theorem primitive_of_call_family {op : EvmYul.Operation .Yul}
-    (hCall : Safe.externalCallBoundaryPrimitive op) :
+theorem primitive_of_call_create_family {op : EvmYul.Operation .Yul}
+    (hCall : Safe.externalCallCreatePrimitive op) :
     primitive op :=
   (primitive_iff_safe_or_call_family op).mpr (Or.inr hCall)
 
 theorem accepts_call :
     primitive (.System .CALL) :=
-  primitive_of_call_family (by simp [Safe.externalCallBoundaryPrimitive])
+  primitive_of_call_create_family (by simp [Safe.externalCallCreatePrimitive])
 
 theorem accepts_callcode :
     primitive (.System .CALLCODE) :=
-  primitive_of_call_family (by simp [Safe.externalCallBoundaryPrimitive])
+  primitive_of_call_create_family (by simp [Safe.externalCallCreatePrimitive])
 
 theorem accepts_delegatecall :
     primitive (.System .DELEGATECALL) :=
-  primitive_of_call_family (by simp [Safe.externalCallBoundaryPrimitive])
+  primitive_of_call_create_family (by simp [Safe.externalCallCreatePrimitive])
 
 theorem accepts_staticcall :
     primitive (.System .STATICCALL) :=
-  primitive_of_call_family (by simp [Safe.externalCallBoundaryPrimitive])
+  primitive_of_call_create_family (by simp [Safe.externalCallCreatePrimitive])
 
-theorem rejects_create :
-    primitive (.System .CREATE) = False := by
-  simp [primitive, FeatureCoverage.importedIncompletePrimitive,
-    FeatureCoverage.createBoundaryPrimitive,
-    Safe.yulImportedSemanticsIncompletePrimitive,
-    Safe.createBoundaryPrimitive]
+theorem accepts_create :
+    primitive (.System .CREATE) :=
+  primitive_of_call_create_family (by simp [Safe.externalCallCreatePrimitive])
 
-theorem rejects_create2 :
-    primitive (.System .CREATE2) = False := by
-  simp [primitive, FeatureCoverage.importedIncompletePrimitive,
-    FeatureCoverage.createBoundaryPrimitive,
-    Safe.yulImportedSemanticsIncompletePrimitive,
-    Safe.createBoundaryPrimitive]
+theorem accepts_create2 :
+    primitive (.System .CREATE2) :=
+  primitive_of_call_create_family (by simp [Safe.externalCallCreatePrimitive])
 
 theorem primitive_of_callSafe {op : EvmYul.Operation .Yul}
     (hSafe : CallSafe.primitive op) :
@@ -3961,10 +4074,8 @@ theorem program_of_callSafe (yulProgram : Program)
 
 mutual
   theorem expr_of_coverage (sourceExpr : AstExpr)
-      (hImported :
-        FeatureCoverage.importedIncompleteExpr sourceExpr)
-      (hCreate :
-        FeatureCoverage.createBoundaryExpr sourceExpr)
+      (hExternalCode :
+        FeatureCoverage.externalCodeImageExpr sourceExpr)
       (hObject :
         FeatureCoverage.objectBuiltinExpr sourceExpr) :
       expr sourceExpr := by
@@ -3977,18 +4088,16 @@ mutual
         cases callee with
         | inl prim =>
             exact
-              ⟨⟨hImported.1, hCreate.1⟩,
-                exprs_of_coverage args hImported.2 hCreate.2 hObject.2⟩
+              ⟨hExternalCode.1,
+                exprs_of_coverage args hExternalCode.2 hObject.2⟩
         | inr functionName =>
             exact
               ⟨hObject.1,
-                exprs_of_coverage args hImported.2 hCreate.2 hObject.2⟩
+                exprs_of_coverage args hExternalCode.2 hObject.2⟩
 
   theorem exprs_of_coverage (sourceExprs : List AstExpr)
-      (hImported :
-        FeatureCoverage.importedIncompleteExprs sourceExprs)
-      (hCreate :
-        FeatureCoverage.createBoundaryExprs sourceExprs)
+      (hExternalCode :
+        FeatureCoverage.externalCodeImageExprs sourceExprs)
       (hObject :
         FeatureCoverage.objectBuiltinExprs sourceExprs) :
       exprs sourceExprs := by
@@ -3997,48 +4106,42 @@ mutual
         trivial
     | cons head rest =>
         exact
-          ⟨expr_of_coverage head hImported.1 hCreate.1 hObject.1,
-            exprs_of_coverage rest hImported.2 hCreate.2 hObject.2⟩
+          ⟨expr_of_coverage head hExternalCode.1 hObject.1,
+            exprs_of_coverage rest hExternalCode.2 hObject.2⟩
 
   theorem stmt_of_coverage (sourceStmt : AstStmt)
-      (hImported :
-        FeatureCoverage.importedIncompleteStmt sourceStmt)
-      (hCreate :
-        FeatureCoverage.createBoundaryStmt sourceStmt)
+      (hExternalCode :
+        FeatureCoverage.externalCodeImageStmt sourceStmt)
       (hObject :
         FeatureCoverage.objectBuiltinStmt sourceStmt) :
       stmt sourceStmt := by
     cases sourceStmt with
     | Block body =>
-        exact stmts_of_coverage body hImported hCreate hObject
+        exact stmts_of_coverage body hExternalCode hObject
     | Let names value =>
         cases value with
         | none =>
             trivial
         | some value =>
-            exact expr_of_coverage value hImported hCreate hObject
+            exact expr_of_coverage value hExternalCode hObject
     | Assign names value =>
-        exact expr_of_coverage value hImported hCreate hObject
+        exact expr_of_coverage value hExternalCode hObject
     | ExprStmtCall value =>
-        exact expr_of_coverage value hImported hCreate hObject
+        exact expr_of_coverage value hExternalCode hObject
     | Switch scrutinee cases defaultBody =>
         exact
-          ⟨expr_of_coverage scrutinee hImported.1 hCreate.1 hObject.1,
-            cases_of_coverage cases hImported.2.1 hCreate.2.1
-              hObject.2.1,
-            stmts_of_coverage defaultBody hImported.2.2 hCreate.2.2
-              hObject.2.2⟩
+          ⟨expr_of_coverage scrutinee hExternalCode.1 hObject.1,
+            cases_of_coverage cases hExternalCode.2.1 hObject.2.1,
+            stmts_of_coverage defaultBody hExternalCode.2.2 hObject.2.2⟩
     | For cond post body =>
         exact
-          ⟨expr_of_coverage cond hImported.1 hCreate.1 hObject.1,
-            stmts_of_coverage post hImported.2.1 hCreate.2.1
-              hObject.2.1,
-            stmts_of_coverage body hImported.2.2 hCreate.2.2
-              hObject.2.2⟩
+          ⟨expr_of_coverage cond hExternalCode.1 hObject.1,
+            stmts_of_coverage post hExternalCode.2.1 hObject.2.1,
+            stmts_of_coverage body hExternalCode.2.2 hObject.2.2⟩
     | If cond body =>
         exact
-          ⟨expr_of_coverage cond hImported.1 hCreate.1 hObject.1,
-            stmts_of_coverage body hImported.2 hCreate.2 hObject.2⟩
+          ⟨expr_of_coverage cond hExternalCode.1 hObject.1,
+            stmts_of_coverage body hExternalCode.2 hObject.2⟩
     | Continue =>
         trivial
     | Break =>
@@ -4047,10 +4150,8 @@ mutual
         trivial
 
   theorem stmts_of_coverage (sourceStmts : List AstStmt)
-      (hImported :
-        FeatureCoverage.importedIncompleteStmts sourceStmts)
-      (hCreate :
-        FeatureCoverage.createBoundaryStmts sourceStmts)
+      (hExternalCode :
+        FeatureCoverage.externalCodeImageStmts sourceStmts)
       (hObject :
         FeatureCoverage.objectBuiltinStmts sourceStmts) :
       stmts sourceStmts := by
@@ -4059,14 +4160,12 @@ mutual
         trivial
     | cons head rest =>
         exact
-          ⟨stmt_of_coverage head hImported.1 hCreate.1 hObject.1,
-            stmts_of_coverage rest hImported.2 hCreate.2 hObject.2⟩
+          ⟨stmt_of_coverage head hExternalCode.1 hObject.1,
+            stmts_of_coverage rest hExternalCode.2 hObject.2⟩
 
   theorem cases_of_coverage (sourceCases : List (Word × List AstStmt))
-      (hImported :
-        FeatureCoverage.importedIncompleteCases sourceCases)
-      (hCreate :
-        FeatureCoverage.createBoundaryCases sourceCases)
+      (hExternalCode :
+        FeatureCoverage.externalCodeImageCases sourceCases)
       (hObject :
         FeatureCoverage.objectBuiltinCases sourceCases) :
       casesSafe sourceCases := by
@@ -4076,29 +4175,25 @@ mutual
     | cons head rest =>
         rcases head with ⟨value, body⟩
         exact
-          ⟨stmts_of_coverage body hImported.1 hCreate.1 hObject.1,
-            cases_of_coverage rest hImported.2 hCreate.2 hObject.2⟩
+          ⟨stmts_of_coverage body hExternalCode.1 hObject.1,
+            cases_of_coverage rest hExternalCode.2 hObject.2⟩
 end
 
 theorem functionDefinition_of_coverage
     (fn : AstFunctionDefinition)
-    (hImported :
-      FeatureCoverage.importedIncompleteFunctionDefinition fn)
-    (hCreate :
-      FeatureCoverage.createBoundaryFunctionDefinition fn)
+    (hExternalCode :
+      FeatureCoverage.externalCodeImageFunctionDefinition fn)
     (hObject :
       FeatureCoverage.objectBuiltinFunctionDefinition fn) :
     functionDefinition fn := by
   cases fn with
   | Def params returns body =>
-      exact stmts_of_coverage body hImported hCreate hObject
+      exact stmts_of_coverage body hExternalCode hObject
 
 theorem functionEntries_of_coverage
     (entries : List (Name × AstFunctionDefinition))
-    (hImported :
-      FeatureCoverage.importedIncompleteFunctionEntries entries)
-    (hCreate :
-      FeatureCoverage.createBoundaryFunctionEntries entries)
+    (hExternalCode :
+      FeatureCoverage.externalCodeImageFunctionEntries entries)
     (hObject :
       FeatureCoverage.objectBuiltinFunctionEntries entries) :
     functionEntries entries := by
@@ -4108,33 +4203,27 @@ theorem functionEntries_of_coverage
   | cons entry rest ih =>
       rcases entry with ⟨name, fn⟩
       exact
-        ⟨functionDefinition_of_coverage fn hImported.1 hCreate.1
-            hObject.1,
-          ih hImported.2 hCreate.2 hObject.2⟩
+        ⟨functionDefinition_of_coverage fn hExternalCode.1 hObject.1,
+          ih hExternalCode.2 hObject.2⟩
 
 theorem contract_of_coverage (contract' : AstContract)
-    (hImported :
-      FeatureCoverage.importedIncompleteContract contract')
-    (hCreate :
-      FeatureCoverage.createBoundaryContract contract')
+    (hExternalCode :
+      FeatureCoverage.externalCodeImageContract contract')
     (hObject :
       FeatureCoverage.objectBuiltinContract contract') :
     contract contract' := by
   exact
-    ⟨stmt_of_coverage contract'.dispatcher hImported.1 hCreate.1
-        hObject.1,
+    ⟨stmt_of_coverage contract'.dispatcher hExternalCode.1 hObject.1,
       functionEntries_of_coverage (Contract.functionEntries contract')
-        hImported.2 hCreate.2 hObject.2⟩
+        hExternalCode.2 hObject.2⟩
 
 theorem program_of_coverage (yulProgram : Program)
-    (hImported :
-      FeatureCoverage.importedIncompleteProgram yulProgram)
-    (hCreate :
-      FeatureCoverage.createBoundaryProgram yulProgram)
+    (hExternalCode :
+      FeatureCoverage.externalCodeImageProgram yulProgram)
     (hObject :
       FeatureCoverage.objectBuiltinProgram yulProgram) :
     program yulProgram := by
-  exact contract_of_coverage yulProgram.contract hImported hCreate hObject
+  exact contract_of_coverage yulProgram.contract hExternalCode hObject
 
 end CallFamilySafe
 
@@ -4188,17 +4277,17 @@ theorem accepts_codecopy :
     primitive (.Env .CODECOPY) :=
   trivial
 
-theorem rejects_extcodesize :
-    primitive (.Env .EXTCODESIZE) = False :=
-  rfl
+theorem accepts_extcodesize :
+    primitive (.Env .EXTCODESIZE) :=
+  trivial
 
-theorem rejects_extcodecopy :
-    primitive (.Env .EXTCODECOPY) = False :=
-  rfl
+theorem accepts_extcodecopy :
+    primitive (.Env .EXTCODECOPY) :=
+  trivial
 
-theorem rejects_extcodehash :
-    primitive (.Env .EXTCODEHASH) = False :=
-  rfl
+theorem accepts_extcodehash :
+    primitive (.Env .EXTCODEHASH) :=
+  trivial
 
 theorem accepts_sstore :
     primitive (.StackMemFlow .SSTORE) :=
@@ -6058,6 +6147,13 @@ def AccountBalance {τ : EvmYul.OperationType}
   (accounts.find? address).elim (EvmYul.UInt256.ofNat 0)
     (fun account => account.balance)
 
+def AccountCodeImage {τ : EvmYul.OperationType}
+    (accounts : EvmYul.AccountMap τ)
+    (address : EvmYul.AccountAddress) : ByteArray :=
+  match accounts.find? address with
+  | none => ByteArray.empty
+  | some account => EvmYul.State.accountCodeImage account
+
 def StorageImageRel {τ₁ τ₂ : EvmYul.OperationType}
     (source : EvmYul.AccountMap τ₁) (target : EvmYul.AccountMap τ₂) :
     Prop :=
@@ -6069,6 +6165,11 @@ def TransientStorageImageRel {τ₁ τ₂ : EvmYul.OperationType}
   ∀ address,
     AccountTransientStorage? source address =
       AccountTransientStorage? target address
+
+def ExternalCodeImageRel
+    (source : EvmYul.AccountMap .Yul) (target : EvmYul.AccountMap .EVM) :
+    Prop :=
+  ∀ address, AccountCodeImage source address = AccountCodeImage target address
 
 abbrev CodeImageRel :=
   AstContract → ByteArray → Prop
@@ -6407,14 +6508,19 @@ pure control/stack compiler proof:
 * `accountMapRel` relates Yul contracts/accounts to the compiled EVM account
   image, and its storage-image fields make persistent and transient storage
   equality derivable from that relation;
+* `externalCodeImageRel` relates source account `codeBytes` images to target
+  executable bytecode for external account-code inspection;
 * `selfbalanceRel` is the same-query/same-answer contract needed by the
   `SELFBALANCE` primitive;
-* `selfdestructStorageImageRel` is the focused persistent-storage image
-  compatibility needed by `SELFDESTRUCT`; it assumes only the previous storage
-  image and the destructing account's balance agreement, not full account/world
-  equality;
+* `selfdestructAccountMapRel` is the full account-map compatibility needed by
+  committed `SELFDESTRUCT` observations; it assumes the previous account-map
+  relation and the destructing account's balance agreement;
+* `selfdestructStorageImageRel` is the legacy focused persistent-storage image
+  compatibility used by older storage-only checkpoints;
 * `balanceRel` is the same-query/same-answer contract needed by
   account-addressed `BALANCE` reads;
+* `extCodeHashRel` is the same-query/same-answer contract needed by
+  account-addressed `EXTCODEHASH` reads, including dead-account behavior;
 * `sloadRel` is the account-map/current-contract-storage contract needed by
   `SLOAD` reads;
 * `tloadRel` is the account-map/current-contract-transient-storage contract
@@ -6438,10 +6544,22 @@ structure StateRelConfig where
   transientStorageImageRel :
     ∀ {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM},
       accountMapRel yul evm → TransientStorageImageRel yul evm
+  externalCodeImageRel :
+    ∀ {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM},
+      accountMapRel yul evm → ExternalCodeImageRel yul evm
   selfbalanceRel :
     ∀ {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM},
       yul.executionEnv.codeOwner = evm.executionEnv.codeOwner →
         EvmYul.State.selfbalance yul = EvmYul.State.selfbalance evm
+  selfdestructAccountMapRel :
+    ∀ {source target : EvmYul.AccountAddress}
+        {createdYul createdEvm : Bool}
+        {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM},
+      accountMapRel yul evm →
+      AccountBalance yul source = AccountBalance evm source →
+        accountMapRel
+          (EvmYul.selfdestructAccountMap yul source target createdYul)
+          (EvmYul.selfdestructAccountMap evm source target createdEvm)
   selfdestructStorageImageRel :
     ∀ {source target : EvmYul.AccountAddress}
         {createdYul createdEvm : Bool}
@@ -6456,6 +6574,12 @@ structure StateRelConfig where
         {address : Word},
       (EvmYul.State.balance yul address).2 =
         (EvmYul.State.balance evm address).2
+  extCodeHashRel :
+    ∀ {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+        {address : Word},
+      accountMapRel yul.accountMap evm.accountMap →
+        (EvmYul.State.extCodeHash yul address).2 =
+          (EvmYul.State.extCodeHash evm address).2
   sloadRel :
     ∀ {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
         {slot : Word},
@@ -6537,6 +6661,7 @@ structure ChainStateRel (cfg : StateRelConfig)
   executionEnv : ExecutionEnvRel cfg yul.executionEnv evm.executionEnv
   blocks : yul.blocks = evm.blocks
   genesisBlockHeader : yul.genesisBlockHeader = evm.genesisBlockHeader
+  createdAccounts : yul.createdAccounts = evm.createdAccounts
 
 namespace ChainStateRel
 
@@ -6552,11 +6677,44 @@ theorem transientStorageImageRel {cfg : StateRelConfig}
     TransientStorageImageRel yul.accountMap evm.accountMap :=
   cfg.transientStorageImageRel hRel.accountMap
 
+theorem externalCodeImageRel {cfg : StateRelConfig}
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    (hRel : ChainStateRel cfg yul evm) :
+    ExternalCodeImageRel yul.accountMap evm.accountMap :=
+  cfg.externalCodeImageRel hRel.accountMap
+
 theorem selfbalanceRel {cfg : StateRelConfig}
     {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
     (hRel : ChainStateRel cfg yul evm) :
     EvmYul.State.selfbalance yul = EvmYul.State.selfbalance evm :=
   cfg.selfbalanceRel hRel.executionEnv.codeOwner
+
+theorem extCodeSizeRel {cfg : StateRelConfig}
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    {address : Word}
+    (hRel : ChainStateRel cfg yul evm) :
+    (EvmYul.State.extCodeSize yul address).2 =
+      (EvmYul.State.extCodeSize evm address).2 := by
+  have hImage :=
+    ChainStateRel.externalCodeImageRel hRel (EvmYul.AccountAddress.ofUInt256 address)
+  cases hYul :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) <;>
+    cases hEvm :
+      evm.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) <;>
+    simp [EvmYul.State.extCodeSize, EvmYul.State.lookupAccount,
+      Option.option, AccountCodeImage, hYul, hEvm] at hImage ⊢
+  all_goals
+    simpa using
+      congrArg (fun code : ByteArray => EvmYul.UInt256.ofNat code.size)
+        hImage
+
+theorem extCodeHashRel {cfg : StateRelConfig}
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    {address : Word}
+    (hRel : ChainStateRel cfg yul evm) :
+    (EvmYul.State.extCodeHash yul address).2 =
+      (EvmYul.State.extCodeHash evm address).2 :=
+  cfg.extCodeHashRel hRel.accountMap
 
 end ChainStateRel
 
@@ -6753,6 +6911,14 @@ theorem sstore_genesisBlockHeader {τ : EvmYul.OperationType}
     simp [EvmYul.State.sstore, EvmYul.State.lookupAccount, Option.option,
       hLookup, EvmYul.State.setAccount, EvmYul.State.addAccessedStorageKey]
 
+theorem sstore_createdAccounts {τ : EvmYul.OperationType}
+    (state : EvmYul.State τ) (slot value : Word) :
+    (EvmYul.State.sstore state slot value).createdAccounts =
+      state.createdAccounts := by
+  cases hLookup : state.accountMap.find? state.executionEnv.codeOwner <;>
+    simp [EvmYul.State.sstore, EvmYul.State.lookupAccount, Option.option,
+      hLookup, EvmYul.State.setAccount, EvmYul.State.addAccessedStorageKey]
+
 theorem tstore_σ₀ {τ : EvmYul.OperationType}
     (state : EvmYul.State τ) (slot value : Word) :
     (EvmYul.State.tstore state slot value).σ₀ = state.σ₀ := by
@@ -6806,6 +6972,21 @@ theorem tstore_genesisBlockHeader {τ : EvmYul.OperationType}
     simp [EvmYul.State.tstore, EvmYul.State.lookupAccount, Option.option,
       hLookup, EvmYul.State.updateAccount]
 
+theorem tstore_createdAccounts {τ : EvmYul.OperationType}
+    (state : EvmYul.State τ) (slot value : Word) :
+    (EvmYul.State.tstore state slot value).createdAccounts =
+      state.createdAccounts := by
+  cases hLookup : state.accountMap.find? state.executionEnv.codeOwner <;>
+    simp [EvmYul.State.tstore, EvmYul.State.lookupAccount, Option.option,
+      hLookup, EvmYul.State.updateAccount]
+
+theorem extCodeHash_state {τ : EvmYul.OperationType}
+    (state : EvmYul.State τ) (address : Word) :
+    (EvmYul.State.extCodeHash state address).1 =
+      state.addAccessedAccount (EvmYul.AccountAddress.ofUInt256 address) := by
+  simp [EvmYul.State.extCodeHash]
+  split <;> rfl
+
 end StateFacts
 
 structure SharedStateRel (cfg : StateRelConfig)
@@ -6832,6 +7013,14 @@ theorem transientStorageImageRel {cfg : StateRelConfig}
       targetShared.toState.accountMap :=
   ChainStateRel.transientStorageImageRel hShared.chain
 
+theorem externalCodeImageRel {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    (hShared : SharedStateRel cfg sourceShared targetShared) :
+    ExternalCodeImageRel sourceShared.toState.accountMap
+      targetShared.toState.accountMap :=
+  ChainStateRel.externalCodeImageRel hShared.chain
+
 theorem selfbalanceRel {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul}
     {targetShared : EvmYul.SharedState .EVM}
@@ -6839,6 +7028,24 @@ theorem selfbalanceRel {cfg : StateRelConfig}
     EvmYul.State.selfbalance sourceShared.toState =
       EvmYul.State.selfbalance targetShared.toState :=
   ChainStateRel.selfbalanceRel hShared.chain
+
+theorem extCodeSizeRel {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    {address : Word}
+    (hShared : SharedStateRel cfg sourceShared targetShared) :
+    (EvmYul.State.extCodeSize sourceShared.toState address).2 =
+      (EvmYul.State.extCodeSize targetShared.toState address).2 :=
+  ChainStateRel.extCodeSizeRel hShared.chain
+
+theorem extCodeHashRel {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    {address : Word}
+    (hShared : SharedStateRel cfg sourceShared targetShared) :
+    (EvmYul.State.extCodeHash sourceShared.toState address).2 =
+      (EvmYul.State.extCodeHash targetShared.toState address).2 :=
+  ChainStateRel.extCodeHashRel hShared.chain
 
 theorem openExternalCallContextRel
     {cfg : StateRelConfig}
@@ -6863,6 +7070,17 @@ def OpenExternalResponseRel
   -- Reentrant callbacks are represented only by the opaque response
   -- transformer; an admissible response is one that keeps the source and target
   -- chain states related.
+  ChainStateRel cfg
+    (response.internalMutation.apply sourceShared.toState)
+    (response.internalMutation.apply targetShared.toState)
+
+def OpenExternalCreateResponseRel
+    (cfg : StateRelConfig)
+    (sourceShared : EvmYul.SharedState .Yul)
+    (targetShared : EvmYul.SharedState .EVM)
+    (response : OpenExternal.CreateResponse) : Prop :=
+  -- Contract creation uses the same opaque world-mutation boundary as CALL,
+  -- with a creation-specific address/returndata response.
   ChainStateRel cfg
     (response.internalMutation.apply sourceShared.toState)
     (response.internalMutation.apply targetShared.toState)
@@ -6912,6 +7130,13 @@ abbrev ExternalResponseRelAt
     OpenExternal.CallResponse → Prop :=
   OpenExternalResponseRel cfg sourceShared targetShared
 
+abbrev ExternalCreateResponseRelAt
+    (cfg : StateRelConfig)
+    (sourceShared : EvmYul.SharedState .Yul)
+    (targetShared : EvmYul.SharedState .EVM) :
+    OpenExternal.CreateResponse → Prop :=
+  OpenExternalCreateResponseRel cfg sourceShared targetShared
+
 /-- Open-call agreement at one actual suspended shared-state pair. -/
 abbrev OpenCallRelAt
     {SourceState : Type _} {TargetState : Type _}
@@ -6924,6 +7149,19 @@ abbrev OpenCallRelAt
   OpenExternal.OpenCallRel
     (ExternalResponseRelAt cfg sourceShared targetShared)
     stateRel sourceCall targetCall
+
+/-- Open-create agreement at one actual suspended shared-state pair. -/
+abbrev OpenCreateRelAt
+    {SourceState : Type _} {TargetState : Type _}
+    (cfg : StateRelConfig)
+    (sourceShared : EvmYul.SharedState .Yul)
+    (targetShared : EvmYul.SharedState .EVM)
+    (stateRel : SourceState → TargetState → Prop)
+    (sourceCreate : OpenExternal.OpenCreate SourceState)
+    (targetCreate : OpenExternal.OpenCreate TargetState) : Prop :=
+  OpenExternal.OpenCreateRel
+    (ExternalCreateResponseRelAt cfg sourceShared targetShared)
+    stateRel sourceCreate targetCreate
 
 theorem finishExternalCall {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul}
@@ -6942,6 +7180,43 @@ theorem finishExternalCall {cfg : StateRelConfig}
       simpa [OpenExternal.CallSite.finishShared] using hResponse,
       MachineStateRel.finishExternalCall hMachine⟩
 
+theorem finishExternalCreate {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    {site : OpenExternal.CreateSite}
+    {response : OpenExternal.CreateResponse}
+    (hShared : SharedStateRel cfg sourceShared targetShared)
+    (hResponse :
+      OpenExternalCreateResponseRel cfg sourceShared targetShared response) :
+    SharedStateRel cfg
+      (site.finishShared sourceShared response)
+      (site.finishShared targetShared response) := by
+  rcases hShared with ⟨_hChain, hMachine⟩
+  exact
+    ⟨by
+      simpa [OpenExternal.CreateSite.finishShared] using hResponse,
+      by
+        rcases hMachine with ⟨hGas, hActive, hMemory, _hReturn, _hHReturn⟩
+        constructor
+        · simpa [OpenExternal.CreateSite.finishShared,
+            OpenExternal.CreateSite.finishMachine,
+            EvmYul.MachineState.finishExternalCall, EvmYul.writeBytes]
+            using hGas
+        · simp [OpenExternal.CreateSite.finishShared,
+            OpenExternal.CreateSite.finishMachine,
+            EvmYul.MachineState.finishExternalCall, EvmYul.writeBytes,
+            hActive]
+        · simpa [OpenExternal.CreateSite.finishShared,
+            OpenExternal.CreateSite.finishMachine,
+            EvmYul.MachineState.finishExternalCall, EvmYul.writeBytes,
+            hMemory]
+        · simp [OpenExternal.CreateSite.finishShared,
+            OpenExternal.CreateSite.finishMachine,
+            EvmYul.MachineState.finishExternalCall]
+        · simp [OpenExternal.CreateSite.finishShared,
+            OpenExternal.CreateSite.finishMachine,
+            EvmYul.MachineState.finishExternalCall]⟩
+
 theorem codeBytes {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul}
     {targetShared : EvmYul.SharedState .EVM}
@@ -6949,6 +7224,138 @@ theorem codeBytes {cfg : StateRelConfig}
     sourceShared.executionEnv.codeBytes =
       targetShared.executionEnv.code :=
   hShared.chain.executionEnv.codeBytes
+
+theorem extCodeSize {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul} {target : EVMState}
+    {address : Word}
+    (hShared : SharedStateRel cfg sourceShared target.toSharedState) :
+    SharedStateRel cfg
+      { sourceShared with
+        toState := (EvmYul.State.extCodeSize sourceShared.toState address).1 }
+      ({ target with
+        toState := (EvmYul.State.extCodeSize target.toState address).1 }
+        : EVMState).toSharedState := by
+  rcases hShared with ⟨hChain, hMachine⟩
+  constructor
+  · rcases hChain with
+      ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
+        hBlocks, hGenesis, hCreated⟩
+    constructor
+    · simpa [EvmYul.State.extCodeSize, EvmYul.State.addAccessedAccount] using
+        hAccountMap
+    · simpa [EvmYul.State.extCodeSize, EvmYul.State.addAccessedAccount] using
+        hSigma
+    · simpa [EvmYul.State.extCodeSize, EvmYul.State.addAccessedAccount] using
+        hTotal
+    · simpa [EvmYul.State.extCodeSize, EvmYul.State.addAccessedAccount] using
+        hReceipts
+    · simpa [EvmYul.State.extCodeSize, EvmYul.State.addAccessedAccount,
+        EvmYul.Substate.addAccessedAccount, hSubstate]
+    · simpa [EvmYul.State.extCodeSize, EvmYul.State.addAccessedAccount] using
+        hEnv
+    · simpa [EvmYul.State.extCodeSize, EvmYul.State.addAccessedAccount] using
+        hBlocks
+    · simpa [EvmYul.State.extCodeSize, EvmYul.State.addAccessedAccount] using
+        hGenesis
+    · simpa [EvmYul.State.extCodeSize, EvmYul.State.addAccessedAccount] using
+        hCreated
+  · simpa [EvmYul.State.extCodeSize, EvmYul.State.addAccessedAccount] using
+      hMachine
+
+theorem extCodeHash {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul} {target : EVMState}
+    {address : Word}
+    (hShared : SharedStateRel cfg sourceShared target.toSharedState) :
+    SharedStateRel cfg
+      { sourceShared with
+        toState := (EvmYul.State.extCodeHash sourceShared.toState address).1 }
+      ({ target with
+        toState := (EvmYul.State.extCodeHash target.toState address).1 }
+        : EVMState).toSharedState := by
+  rw [StateFacts.extCodeHash_state sourceShared.toState address,
+    StateFacts.extCodeHash_state target.toState address]
+  rcases hShared with ⟨hChain, hMachine⟩
+  constructor
+  · rcases hChain with
+      ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
+        hBlocks, hGenesis, hCreated⟩
+    constructor
+    · simpa [EvmYul.State.extCodeHash, EvmYul.State.addAccessedAccount] using
+        hAccountMap
+    · simpa [EvmYul.State.extCodeHash, EvmYul.State.addAccessedAccount] using
+        hSigma
+    · simpa [EvmYul.State.extCodeHash, EvmYul.State.addAccessedAccount] using
+        hTotal
+    · simpa [EvmYul.State.extCodeHash, EvmYul.State.addAccessedAccount] using
+        hReceipts
+    · simpa [EvmYul.State.extCodeHash, EvmYul.State.addAccessedAccount,
+        EvmYul.Substate.addAccessedAccount, hSubstate]
+    · simpa [EvmYul.State.extCodeHash, EvmYul.State.addAccessedAccount] using
+        hEnv
+    · simpa [EvmYul.State.extCodeHash, EvmYul.State.addAccessedAccount] using
+        hBlocks
+    · simpa [EvmYul.State.extCodeHash, EvmYul.State.addAccessedAccount] using
+        hGenesis
+    · simpa [EvmYul.State.extCodeHash, EvmYul.State.addAccessedAccount] using
+        hCreated
+  · simpa [EvmYul.State.extCodeHash, EvmYul.State.addAccessedAccount] using
+      hMachine
+
+theorem extCodeCopy {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    {address memStart codeStart size : Word}
+    (hShared : SharedStateRel cfg sourceShared targetShared) :
+    SharedStateRel cfg
+      (EvmYul.SharedState.extCodeCopy' sourceShared address memStart codeStart
+        size)
+      (EvmYul.SharedState.extCodeCopy' targetShared address memStart codeStart
+        size) := by
+  rcases hShared with ⟨hChain, hMachine⟩
+  rcases hChain with
+    ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
+      hBlocks, hGenesis, hCreated⟩
+  have hCode :
+      AccountCodeImage sourceShared.toState.accountMap
+          (EvmYul.AccountAddress.ofUInt256 address) =
+        AccountCodeImage targetShared.toState.accountMap
+          (EvmYul.AccountAddress.ofUInt256 address) :=
+    cfg.externalCodeImageRel hAccountMap
+      (EvmYul.AccountAddress.ofUInt256 address)
+  rcases hMachine with ⟨hGas, hActive, hMemory, hReturn, hHReturn⟩
+  constructor
+  · constructor
+    · simpa [EvmYul.SharedState.extCodeCopy'] using hAccountMap
+    · simpa [EvmYul.SharedState.extCodeCopy'] using hSigma
+    · simpa [EvmYul.SharedState.extCodeCopy'] using hTotal
+    · simpa [EvmYul.SharedState.extCodeCopy'] using hReceipts
+    · simpa [EvmYul.SharedState.extCodeCopy',
+        EvmYul.Substate.addAccessedAccount, hSubstate]
+    · simpa [EvmYul.SharedState.extCodeCopy'] using hEnv
+    · simpa [EvmYul.SharedState.extCodeCopy'] using hBlocks
+    · simpa [EvmYul.SharedState.extCodeCopy'] using hGenesis
+    · simpa [EvmYul.SharedState.extCodeCopy'] using hCreated
+  · constructor
+    · simpa [EvmYul.SharedState.extCodeCopy'] using hGas
+    · simp [EvmYul.SharedState.extCodeCopy', hActive]
+    · cases hSourceLookup :
+          sourceShared.accountMap.find?
+            (EvmYul.AccountAddress.ofUInt256 address) <;>
+        cases hTargetLookup :
+          targetShared.accountMap.find?
+            (EvmYul.AccountAddress.ofUInt256 address) <;>
+        simp [EvmYul.SharedState.extCodeCopy', AccountCodeImage,
+          EvmYul.State.lookupAccount, Option.option, hMemory,
+          hSourceLookup, hTargetLookup] at hCode ⊢
+      all_goals
+        simpa using
+          congrArg
+            (fun code : ByteArray =>
+              code.write codeStart.toNat targetShared.memory memStart.toNat
+                size.toNat)
+            hCode
+    · simpa [EvmYul.SharedState.extCodeCopy'] using hReturn
+    · simpa [EvmYul.SharedState.extCodeCopy'] using hHReturn
 
 theorem balance {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul} {target : EVMState}
@@ -6964,7 +7371,7 @@ theorem balance {cfg : StateRelConfig}
   constructor
   · rcases hChain with
       ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
-        hBlocks, hGenesis⟩
+        hBlocks, hGenesis, hCreated⟩
     constructor
     · simpa [EvmYul.State.balance, EvmYul.State.addAccessedAccount] using
         hAccountMap
@@ -6982,6 +7389,8 @@ theorem balance {cfg : StateRelConfig}
         hBlocks
     · simpa [EvmYul.State.balance, EvmYul.State.addAccessedAccount] using
         hGenesis
+    · simpa [EvmYul.State.balance, EvmYul.State.addAccessedAccount] using
+        hCreated
   · simpa [EvmYul.State.balance, EvmYul.State.addAccessedAccount] using
       hMachine
 
@@ -6999,7 +7408,7 @@ theorem sload {cfg : StateRelConfig}
   constructor
   · rcases hChain with
       ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
-        hBlocks, hGenesis⟩
+        hBlocks, hGenesis, hCreated⟩
     constructor
     · simpa [EvmYul.State.sload, EvmYul.State.addAccessedStorageKey] using
         hAccountMap
@@ -7017,6 +7426,8 @@ theorem sload {cfg : StateRelConfig}
         hBlocks
     · simpa [EvmYul.State.sload, EvmYul.State.addAccessedStorageKey] using
         hGenesis
+    · simpa [EvmYul.State.sload, EvmYul.State.addAccessedStorageKey] using
+        hCreated
   · simpa [EvmYul.State.sload, EvmYul.State.addAccessedStorageKey] using
       hMachine
 
@@ -7034,7 +7445,7 @@ theorem sstore {cfg : StateRelConfig}
   constructor
   · rcases hChain with
       ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
-        hBlocks, hGenesis⟩
+        hBlocks, hGenesis, hCreated⟩
     constructor
     · exact
         cfg.sstoreAccountMapRel hAccountMap hSigma hEnv.codeOwner
@@ -7057,6 +7468,9 @@ theorem sstore {cfg : StateRelConfig}
     · rw [StateFacts.sstore_genesisBlockHeader,
         StateFacts.sstore_genesisBlockHeader]
       exact hGenesis
+    · rw [StateFacts.sstore_createdAccounts,
+        StateFacts.sstore_createdAccounts]
+      exact hCreated
   · exact hMachine
 
 theorem tload {cfg : StateRelConfig}
@@ -7085,7 +7499,7 @@ theorem tstore {cfg : StateRelConfig}
   constructor
   · rcases hChain with
       ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
-        hBlocks, hGenesis⟩
+        hBlocks, hGenesis, hCreated⟩
     constructor
     · exact cfg.tstoreAccountMapRel hAccountMap hEnv.codeOwner
     · rw [StateFacts.tstore_σ₀, StateFacts.tstore_σ₀]
@@ -7105,6 +7519,9 @@ theorem tstore {cfg : StateRelConfig}
     · rw [StateFacts.tstore_genesisBlockHeader,
         StateFacts.tstore_genesisBlockHeader]
       exact hGenesis
+    · rw [StateFacts.tstore_createdAccounts,
+        StateFacts.tstore_createdAccounts]
+      exact hCreated
   · exact hMachine
 
 theorem logOp {cfg : StateRelConfig}
@@ -7119,7 +7536,7 @@ theorem logOp {cfg : StateRelConfig}
   constructor
   · rcases hChain with
       ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
-        hBlocks, hGenesis⟩
+        hBlocks, hGenesis, hCreated⟩
     rcases hMachine with
       ⟨hGas, hActive, hMemory, hReturn, hHReturn⟩
     constructor
@@ -7131,6 +7548,7 @@ theorem logOp {cfg : StateRelConfig}
     · simpa [EvmYul.SharedState.logOp] using hEnv
     · simpa [EvmYul.SharedState.logOp] using hBlocks
     · simpa [EvmYul.SharedState.logOp] using hGenesis
+    · simpa [EvmYul.SharedState.logOp] using hCreated
   · rcases hMachine with
       ⟨hGas, hActive, hMemory, hReturn, hHReturn⟩
     constructor
@@ -8192,6 +8610,21 @@ theorem openExternalPrimitiveCallSite_eq_of_args
     simp [OpenExternal.CallKind.yulCallSite?,
       OpenExternal.CallContextRel.callSite_eq hContext]
 
+theorem openExternalPrimitiveCreateSite_eq_of_args
+    {cfg : StateRelConfig} {layout : List Name}
+    {source : State} {compiler : Objects.Source.State}
+    (hRel : SourceStateRel cfg layout source compiler)
+    (kind : OpenExternal.CreateKind)
+    (operands : OpenExternal.CreateOperands) :
+    kind.yulCreateSite? source (kind.args operands) =
+      OpenExternal.CreateKind.primitiveCreateSite? compiler.shared kind
+        (kind.args operands).reverse := by
+  have hContext := hRel.openExternalCallContextRel
+  rw [OpenExternal.CreateKind.primitiveCreateSite?_args_reverse]
+  cases kind <;>
+    simp [OpenExternal.CreateKind.yulCreateSite?,
+      OpenExternal.CallContextRel.createSite_eq hContext]
+
 def compilerPrimitiveOpenCall?
     (compiler : Objects.Source.State)
     (kind : OpenExternal.CallKind) (values : List Word) :
@@ -8205,6 +8638,21 @@ def compilerPrimitiveOpenCall?
           resume := fun response =>
             (compiler.withShared (call.resume response).1,
               (call.resume response).2) }
+  | none => none
+
+def compilerPrimitiveOpenCreate?
+    (compiler : Objects.Source.State)
+    (kind : OpenExternal.CreateKind) (values : List Word) :
+    Option
+      (OpenExternal.OpenCreate (Objects.Source.State × List Word)) :=
+  match OpenExternal.CreateKind.primitiveSharedOpenCreate?
+      compiler.shared kind values with
+  | some create =>
+      some
+        { site := create.site
+          resume := fun response =>
+            (compiler.withShared (create.resume response).1,
+              (create.resume response).2) }
   | none => none
 
 def OpenPrimitiveResultRel
@@ -8273,6 +8721,51 @@ theorem compilerPrimitiveOpenCallRel_evmOpenCall_of_args
       · simpa [compilerCall, CompilerPrimitiveEVMResultRel] using
           hPreserved.2
 
+theorem compilerPrimitiveOpenCreateRel_evmOpenCreate_of_args
+    {compiler : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    (hShared : state.toSharedState = compiler.shared)
+    (kind : OpenExternal.CreateKind)
+    (operands : OpenExternal.CreateOperands)
+    (baseStack : OpenExternal.Stack) :
+    ∃ compilerCreate :
+        OpenExternal.OpenCreate (Objects.Source.State × List Word),
+    ∃ evmCreate : OpenExternal.OpenCreate EvmYul.EVM.State,
+      compilerPrimitiveOpenCreate? compiler kind
+          (kind.args operands).reverse =
+        some compilerCreate ∧
+      OpenExternal.CreateKind.evmOpenCreate?
+          ({ state with stack := kind.args operands ++ baseStack }
+            : EvmYul.EVM.State) kind =
+        some evmCreate ∧
+      OpenExternal.OpenCreateRel
+        (fun _ => True)
+        (CompilerPrimitiveEVMResultRel baseStack) compilerCreate evmCreate := by
+  rcases
+      OpenExternal.CreateKind.primitiveOpenCreateRel_evmOpenCreate
+        state compiler.shared hShared kind operands baseStack with
+    ⟨primitiveCreate, evmCreate, hPrimitiveCreate, hEVMCreate,
+      hPrimitiveEVM⟩
+  let compilerCreate :
+      OpenExternal.OpenCreate (Objects.Source.State × List Word) :=
+    { site := primitiveCreate.site
+      resume := fun response =>
+        (compiler.withShared (primitiveCreate.resume response).1,
+          (primitiveCreate.resume response).2) }
+  refine ⟨compilerCreate, evmCreate, ?_, hEVMCreate, ?_⟩
+  · simp [compilerPrimitiveOpenCreate?, hPrimitiveCreate, compilerCreate]
+  · constructor
+    · simpa [compilerCreate] using hPrimitiveEVM.sameSite
+    · intro response _hResponse
+      have hPreserved :=
+        OpenExternal.OpenCreateRel.preserves_response hPrimitiveEVM response
+          trivial
+      constructor
+      · simpa [compilerCreate, CompilerPrimitiveEVMResultRel] using
+          hPreserved.1
+      · simpa [compilerCreate, CompilerPrimitiveEVMResultRel] using
+          hPreserved.2
+
 theorem finishOpenExternalCall
     {cfg : StateRelConfig} {layout : List Name}
     {sourceShared : EvmYul.SharedState .Yul}
@@ -8292,6 +8785,26 @@ theorem finishOpenExternalCall
   | ok hShared hVars =>
       exact SourceStateRel.ok
         (SharedStateRel.finishExternalCall hShared hResponse) hVars
+
+theorem finishOpenExternalCreate
+    {cfg : StateRelConfig} {layout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {site : OpenExternal.CreateSite}
+    {response : OpenExternal.CreateResponse}
+    (hRel :
+      SourceStateRel cfg layout (.Ok sourceShared store) compiler)
+    (hResponse :
+      SharedStateRel.OpenExternalCreateResponseRel cfg sourceShared
+        compiler.shared response) :
+    SourceStateRel cfg layout
+      (.Ok (site.finishShared sourceShared response) store)
+      (compiler.withShared (site.finishShared compiler.shared response)) := by
+  cases hRel with
+  | ok hShared hVars =>
+      exact SourceStateRel.ok
+        (SharedStateRel.finishExternalCreate hShared hResponse) hVars
 
 theorem openExternalPrimitiveOpenCallRel_of_args
     {cfg : StateRelConfig} {layout : List Name}
@@ -8349,6 +8862,74 @@ theorem openExternalPrimitiveOpenCallRel_of_args
               (response := response) hRel hResponse)
       · rfl
 
+theorem openExternalPrimitiveOpenCreateRel_of_args
+    {cfg : StateRelConfig} {layout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    (hRel :
+      SourceStateRel cfg layout (.Ok sourceShared store) compiler)
+    (kind : OpenExternal.CreateKind)
+    (operands : OpenExternal.CreateOperands) :
+    ∃ sourceCreate :
+        OpenExternal.OpenCreate (State × List Word),
+    ∃ compilerCreate :
+        OpenExternal.OpenCreate (Objects.Source.State × List Word),
+      OpenExternal.CreateKind.yulOpenCreate?
+          (.Ok sourceShared store) kind (kind.args operands) =
+        some sourceCreate ∧
+      compilerPrimitiveOpenCreate? compiler kind
+          (kind.args operands).reverse =
+        some compilerCreate ∧
+      SharedStateRel.OpenCreateRelAt cfg sourceShared compiler.shared
+        (OpenPrimitiveResultRel cfg layout) sourceCreate compilerCreate := by
+  let site :=
+    (OpenExternal.CallContext.ofEVMSharedState compiler.shared).createSite
+      kind (kind.canonicalOperands operands)
+  let sourceCreate :
+      OpenExternal.OpenCreate (State × List Word) :=
+    { site := site
+      resume := fun response =>
+        (site.finishYulState (.Ok sourceShared store) response,
+          [response.address]) }
+  let compilerCreate :
+      OpenExternal.OpenCreate
+        (Objects.Source.State × List Word) :=
+    { site := site
+      resume := fun response =>
+        (compiler.withShared (site.finishShared compiler.shared response),
+          [response.address]) }
+  refine ⟨sourceCreate, compilerCreate, ?_, ?_, ?_⟩
+  · have hSite :=
+      hRel.openExternalPrimitiveCreateSite_eq_of_args kind operands
+    rw [OpenExternal.CreateKind.primitiveCreateSite?_args_reverse] at hSite
+    simp [OpenExternal.CreateKind.yulOpenCreate?, sourceCreate, site, hSite]
+  · have hPrimitive :
+        OpenExternal.CreateKind.primitiveSharedOpenCreate?
+            compiler.shared kind (kind.args operands).reverse =
+          some
+            ({ site := site
+               resume := fun response =>
+                 (site.finishShared compiler.shared response,
+                   [response.address]) } :
+              OpenExternal.OpenCreate
+                (EvmYul.SharedState .EVM × List Word)) := by
+      cases kind <;> rfl
+    simp [compilerPrimitiveOpenCreate?, compilerCreate, hPrimitive]
+  · constructor
+    · rfl
+    · intro response hResponse
+      constructor
+      · simpa [sourceCreate, compilerCreate,
+          OpenExternal.CreateSite.finishYulState,
+          OpenPrimitiveResultRel, site]
+          using
+            (finishOpenExternalCreate
+              (cfg := cfg) (layout := layout)
+              (compiler := compiler) (site := site)
+              (response := response) hRel hResponse)
+      · rfl
+
 theorem openExternalPrimitiveEVMOpenCallRel_of_args
     {cfg : StateRelConfig} {layout : List Name}
     {sourceShared : EvmYul.SharedState .Yul}
@@ -8396,6 +8977,56 @@ theorem openExternalPrimitiveEVMOpenCallRel_of_args
             OpenExternal.OpenCallRel.preserves_response hSourceCompiler
               response hResponse,
             OpenExternal.OpenCallRel.preserves_response hCompilerEVM
+              response trivial⟩⟩
+
+theorem openExternalPrimitiveEVMOpenCreateRel_of_args
+    {cfg : StateRelConfig} {layout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {evmState : EvmYul.EVM.State}
+    (hRel :
+      SourceStateRel cfg layout (.Ok sourceShared store) compiler)
+    (hEVMShared : evmState.toSharedState = compiler.shared)
+    (kind : OpenExternal.CreateKind)
+    (operands : OpenExternal.CreateOperands)
+    (baseStack : OpenExternal.Stack) :
+    ∃ sourceCreate :
+        OpenExternal.OpenCreate (State × List Word),
+    ∃ evmCreate : OpenExternal.OpenCreate EvmYul.EVM.State,
+      OpenExternal.CreateKind.yulOpenCreate?
+          (.Ok sourceShared store) kind (kind.args operands) =
+        some sourceCreate ∧
+      OpenExternal.CreateKind.evmOpenCreate?
+          ({ evmState with stack := kind.args operands ++ baseStack }
+            : EvmYul.EVM.State) kind =
+        some evmCreate ∧
+      SharedStateRel.OpenCreateRelAt cfg sourceShared compiler.shared
+        (OpenPrimitiveEVMResultRel cfg layout baseStack)
+        sourceCreate evmCreate := by
+  rcases
+      openExternalPrimitiveOpenCreateRel_of_args
+        hRel kind operands with
+    ⟨sourceCreate, compilerCreate, hSourceCreate, hCompilerCreate,
+      hSourceCompiler⟩
+  rcases
+      compilerPrimitiveOpenCreateRel_evmOpenCreate_of_args
+        (compiler := compiler)
+        (state := evmState) hEVMShared kind operands baseStack with
+    ⟨compilerCreate', evmCreate, hCompilerCreate', hEVMCreate,
+      hCompilerEVM⟩
+  rw [hCompilerCreate] at hCompilerCreate'
+  cases hCompilerCreate'
+  exact
+    ⟨sourceCreate, evmCreate, hSourceCreate, hEVMCreate, by
+      constructor
+      · exact hSourceCompiler.sameSite.trans hCompilerEVM.sameSite
+      · intro response hResponse
+        exact
+          ⟨compilerCreate.resume response,
+            OpenExternal.OpenCreateRel.preserves_response hSourceCompiler
+              response hResponse,
+            OpenExternal.OpenCreateRel.preserves_response hCompilerEVM
               response trivial⟩⟩
 
 end SourceStateRel
@@ -9342,7 +9973,7 @@ theorem primitiveStackSoundAt_of_binary_zero
   intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim
     values' hRel hCall
   cases hRel with
-  | @ok sourceShared store compilerState hShared hVars =>
+  | @ok sourceShared store _compilerState hShared hVars =>
       rcases hYul hCall with
         ⟨left, right, hValues, hAfter, hResults⟩
       subst sourceValues
@@ -9984,14 +10615,17 @@ theorem yul_primCall_succ_returndatacopy_eq
         (EvmYul.Operation.RETURNDATACOPY : EvmYul.Operation .Yul) args =
       match args with
       | [memStart, dataStart, size] =>
-          .ok
-            (.Ok
-              { shared with
-                toMachineState :=
-                  EvmYul.MachineState.returndatacopy
-                    shared.toMachineState memStart dataStart size }
-              store,
-            [])
+          if shared.returnData.size < dataStart.toNat + size.toNat then
+            .error EvmYul.Yul.Exception.InvalidMemoryAccess
+          else
+            .ok
+              (.Ok
+                { shared with
+                  toMachineState :=
+                    EvmYul.MachineState.returndatacopy
+                      shared.toMachineState memStart dataStart size }
+                store,
+              [])
       | _ => .error EvmYul.Yul.Exception.InvalidArguments := by
   cases args with
   | nil =>
@@ -10010,16 +10644,62 @@ theorem yul_primCall_succ_returndatacopy_eq
               simp [EvmYul.Yul.primCall]
               unfold EvmYul.step
               rfl
-          | cons size restRest =>
-              cases restRest with
-              | nil =>
-                  exact
-                    PrimSemantics.primCall_returndatacopy_ok fuel shared store
-                      memStart dataStart size
-              | cons extra restRestRest =>
-                  simp [EvmYul.Yul.primCall]
-                  unfold EvmYul.step
-                  rfl
+            | cons size restRest =>
+                cases restRest with
+                | nil =>
+                    by_cases hBounds :
+                        dataStart.toNat + size.toNat ≤ shared.returnData.size
+                    · have hNotBounds :
+                          ¬ shared.returnData.size <
+                            dataStart.toNat + size.toNat := by
+                        omega
+                      rw [PrimSemantics.primCall_returndatacopy_ok
+                        fuel shared store memStart dataStart size hBounds]
+                      simp [hNotBounds]
+                    · have hLt :
+                          shared.returnData.size <
+                            dataStart.toNat + size.toNat := by
+                        omega
+                      simp [EvmYul.Yul.primCall]
+                      unfold EvmYul.step
+                      change
+                        (match
+                          (if shared.returnData.size <
+                              dataStart.toNat + size.toNat then
+                            Except.error
+                              EvmYul.Yul.Exception.InvalidMemoryAccess
+                          else
+                            Except.ok
+                              (EvmYul.Yul.State.Ok
+                                { shared with
+                                  toMachineState :=
+                                    EvmYul.MachineState.returndatacopy
+                                      shared.toMachineState memStart
+                                      dataStart size }
+                                store,
+                              (none : Option Word))) with
+                        | Except.ok (s, lit) =>
+                            Except.ok (s, lit.toList)
+                        | Except.error e => Except.error e) =
+                          (if shared.returnData.size <
+                              dataStart.toNat + size.toNat then
+                            Except.error
+                              EvmYul.Yul.Exception.InvalidMemoryAccess
+                          else
+                            Except.ok
+                              (EvmYul.Yul.State.Ok
+                                { shared with
+                                  toMachineState :=
+                                    EvmYul.MachineState.returndatacopy
+                                      shared.toMachineState memStart
+                                      dataStart size }
+                                store,
+                              []))
+                      simp [hLt]
+                | cons extra restRestRest =>
+                    simp [EvmYul.Yul.primCall]
+                    unfold EvmYul.step
+                    rfl
 
 theorem yul_primCall_succ_mload_eq
     (fuel : Nat) (shared : EvmYul.SharedState .Yul)
@@ -10559,34 +11239,36 @@ theorem yulPrimitiveTernaryZeroSound_returndatacopy
           toMachineState :=
             EvmYul.MachineState.returndatacopy shared.toMachineState
               memStart dataStart size }) := by
-  intro sourceShared store sourceValues sourceAfterPrim values' hCall
-  cases sourceFuel with
-  | zero =>
-      simp [EvmYul.Yul.primCall] at hCall
-  | succ fuel =>
-      cases sourceValues with
-      | nil =>
+      intro sourceShared store sourceValues sourceAfterPrim values' hCall
+      cases sourceFuel with
+      | zero =>
+          simp [EvmYul.Yul.primCall] at hCall
+      | succ fuel =>
           rw [yul_primCall_succ_returndatacopy_eq] at hCall
-          simp at hCall
-      | cons memStart rest =>
-          cases rest with
+          cases sourceValues with
           | nil =>
-              rw [yul_primCall_succ_returndatacopy_eq] at hCall
               simp at hCall
-          | cons dataStart restTail =>
-              cases restTail with
+          | cons memStart rest =>
+              cases rest with
               | nil =>
-                  rw [yul_primCall_succ_returndatacopy_eq] at hCall
                   simp at hCall
-              | cons size restRest =>
-                  cases restRest with
+              | cons dataStart restTail =>
+                  cases restTail with
                   | nil =>
-                      rw [yul_primCall_succ_returndatacopy_eq] at hCall
-                      cases hCall
-                      exact ⟨memStart, dataStart, size, rfl, rfl, rfl⟩
-                  | cons extra restRestRest =>
-                      rw [yul_primCall_succ_returndatacopy_eq] at hCall
                       simp at hCall
+                  | cons size restRest =>
+                      cases restRest with
+                      | nil =>
+                          by_cases hBounds :
+                              sourceShared.returnData.size <
+                                dataStart.toNat + size.toNat
+                          · simp [hBounds] at hCall
+                          · simp [hBounds] at hCall
+                            exact
+                              ⟨memStart, dataStart, size, rfl,
+                                hCall.1.symm, hCall.2⟩
+                      | cons extra restRestRest =>
+                          simp at hCall
 
 theorem yulPrimitiveUnarySharedOneSound_mload
     {sourceFuel : Nat} :
@@ -11185,15 +11867,18 @@ theorem sourcePrimitiveTernaryZeroSound_structured_codecopy :
   sourcePrimitiveTernaryZeroSound_structured_of_ternaryCopy
     EvmYul.SharedState.codeCopy (by rfl)
 
-theorem sourcePrimitiveTernaryZeroSound_structured_returndatacopy :
-    SourcePrimitiveTernaryZeroSound
-      Locals.Source.PrimitiveSemantics.structured .returndatacopy
-      (fun shared memStart dataStart size =>
-        { shared with
+theorem sourcePrimitive_returndatacopy_eval_of_bounds
+    (shared : EvmYul.SharedState .EVM)
+    (memStart dataStart size : Word)
+    (hBounds : dataStart.toNat + size.toNat ≤ shared.returnData.size) :
+    Locals.Source.PrimitiveSemantics.structured.eval .returndatacopy shared
+        [size, dataStart, memStart] =
+      .ok
+        ({ shared with
           toMachineState :=
             EvmYul.MachineState.returndatacopy shared.toMachineState
-              memStart dataStart size }) := by
-  intro shared memStart dataStart size
+              memStart dataStart size },
+        []) := by
   let state' : EVMState :=
     { toSharedState :=
         { shared with
@@ -11213,14 +11898,18 @@ theorem sourcePrimitiveTernaryZeroSound_structured_returndatacopy :
             EvmYul.MachineState.returndatacopy shared.toMachineState
               memStart dataStart size })
       (values := [size, dataStart, memStart])
-      (values' := [])
-      (state' := state')
-      (by rfl) (by rfl)
-      (by
-        simp [state', Assembly.PrimStep.run, EvmYul.Stack.pop3,
-          EvmYul.EVM.State.replaceStackAndIncrPC,
-          EvmYul.EVM.State.incrPC])
-      (by simp [state']) (by simp [state'])
+        (values' := [])
+        (state' := state')
+        (by rfl) (by rfl)
+        (by
+          have hNotBounds :
+              ¬ shared.returnData.size < dataStart.toNat + size.toNat := by
+            omega
+          simp [state', Assembly.PrimStep.run, EvmYul.Stack.pop3,
+            hNotBounds,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC])
+        (by simp [state']) (by simp [state'])
 
 theorem sourcePrimitiveUnarySharedOneSound_structured_mload :
     SourcePrimitiveUnarySharedOneSound
@@ -12020,58 +12709,71 @@ theorem primitiveStackSoundAt_structured_codecopy
   primitiveStackSoundAt_structured_codecopy_of_codeBytes
     (fun hShared => SharedStateRel.codeBytes hShared)
 
-theorem primitiveStackSoundAt_returndatacopy
-    {cfg : StateRelConfig} {layout : List Name}
-    {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
-    (hYul :
-      YulPrimitiveTernaryZeroSound sourceFuel
-        ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul))
-        (fun shared memStart dataStart size =>
-          { shared with
-            toMachineState :=
-              EvmYul.MachineState.returndatacopy shared.toMachineState
-                memStart dataStart size }))
-    (hEval :
-      SourcePrimitiveTernaryZeroSound prim .returndatacopy
-        (fun shared memStart dataStart size =>
-          { shared with
-            toMachineState :=
-              EvmYul.MachineState.returndatacopy shared.toMachineState
-                memStart dataStart size })) :
-    PrimitiveStackSoundAt cfg layout prim sourceFuel
-      ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul))
-      .returndatacopy := by
-  exact
-    primitiveStackSoundAt_of_ternary_zero
-      (cfg := cfg) (layout := layout) (prim := prim)
-      (sourceFuel := sourceFuel)
-      (yulPrim := ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul)))
-      (op := .returndatacopy)
-      (fun shared memStart dataStart size =>
-        { shared with
-          toMachineState :=
-            EvmYul.MachineState.returndatacopy shared.toMachineState
-              memStart dataStart size })
-      (fun shared memStart dataStart size =>
-        { shared with
-          toMachineState :=
-            EvmYul.MachineState.returndatacopy shared.toMachineState
-              memStart dataStart size })
-      hYul hEval
-      (by
-        intro sourceShared targetShared memStart dataStart size hShared
-        rcases hShared with ⟨hChain, hMachine⟩
-        exact ⟨hChain, MachineStateRel.returndatacopy hMachine⟩)
-
 theorem primitiveStackSoundAt_structured_returndatacopy
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
     PrimitiveStackSoundAt cfg layout
       Locals.Source.PrimitiveSemantics.structured sourceFuel
       ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul))
-      .returndatacopy :=
-  primitiveStackSoundAt_returndatacopy
-    yulPrimitiveTernaryZeroSound_returndatacopy
-    sourcePrimitiveTernaryZeroSound_structured_returndatacopy
+      .returndatacopy := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hCall
+  cases hRel with
+  | @ok sourceShared store compilerState hShared hVars =>
+      cases sourceFuel with
+      | zero =>
+          simp [EvmYul.Yul.primCall] at hCall
+      | succ fuel =>
+          rw [yul_primCall_succ_returndatacopy_eq] at hCall
+          cases sourceValues with
+          | nil =>
+              simp at hCall
+          | cons memStart rest =>
+              cases rest with
+              | nil =>
+                  simp at hCall
+              | cons dataStart restTail =>
+                  cases restTail with
+                  | nil =>
+                      simp at hCall
+                  | cons size restRest =>
+                      cases restRest with
+                      | nil =>
+                          by_cases hLt :
+                              sourceShared.returnData.size <
+                                dataStart.toNat + size.toNat
+                          · simp [hLt] at hCall
+                          · simp [hLt] at hCall
+                            rcases hCall with ⟨hSourceAfter, hValues⟩
+                            subst sourceAfterPrim
+                            subst values'
+                            have hSourceBounds :
+                                dataStart.toNat + size.toNat ≤
+                                  sourceShared.returnData.size := by
+                              omega
+                            have hTargetBounds :
+                                dataStart.toNat + size.toNat ≤
+                                  compilerAfterArgs.shared.returnData.size := by
+                              rw [← hShared.machine.returnData]
+                              exact hSourceBounds
+                            refine
+                              ⟨{ compilerAfterArgs.shared with
+                                  toMachineState :=
+                                    EvmYul.MachineState.returndatacopy
+                                      compilerAfterArgs.shared.toMachineState
+                                      memStart dataStart size },
+                                ?_, ?_⟩
+                            · exact
+                                sourcePrimitive_returndatacopy_eval_of_bounds
+                                  compilerAfterArgs.shared memStart dataStart size
+                                  hTargetBounds
+                            · exact
+                                SourceStateRel.ok
+                                  ⟨hShared.chain,
+                                    MachineStateRel.returndatacopy
+                                      hShared.machine⟩
+                                  hVars
+                      | cons extra restRestRest =>
+                          simp at hCall
 
 theorem primitiveStackSoundAt_structured_mload
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
@@ -12655,6 +13357,196 @@ theorem primitiveStackSoundAtArity_structured_balance
                         (SharedStateRel.balance
                           (cfg := cfg) (sourceShared := sourceShared)
                           (target := targetState) (address := value)
+                          hShared)
+                    exact SourceStateRel.ok hSharedAfter hVars
+              | cons extra tail =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_extcodesize
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .EXTCODESIZE : EvmYul.Operation .Yul)) .extcodesize := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons address rest =>
+              cases rest with
+              | nil =>
+                  rw [PrimSemantics.primCall_extcodesize_ok fuel
+                    sourceShared store address] at hCall
+                  cases hCall
+                  let sharedAfter : EvmYul.SharedState .EVM :=
+                    { compilerAfterArgs.shared with
+                      toState :=
+                        (EvmYul.State.extCodeSize
+                          compilerAfterArgs.shared.toState address).1 }
+                  have hResultEq :
+                      (EvmYul.State.extCodeSize sourceShared.toState
+                          address).2 =
+                        (EvmYul.State.extCodeSize
+                          compilerAfterArgs.shared.toState address).2 :=
+                    SharedStateRel.extCodeSizeRel hShared
+                  refine ⟨sharedAfter, ?_, ?_⟩
+                  · simp [Locals.Source.PrimitiveSemantics.structured,
+                      Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                      Expressions.Structured.BasicOp.inputs,
+                      Structured.BasicOp.toPrimOp,
+                      Assembly.PrimOp.continuingStep?,
+                      Assembly.PrimStep.run, EvmYul.EVM.unaryStateOp,
+                      EvmYul.Stack.pop, EvmYul.Stack.push,
+                      EvmYul.EVM.State.replaceStackAndIncrPC,
+                      EvmYul.EVM.State.incrPC, sharedAfter, hResultEq,
+                      Id.run]
+                  · let targetState : EVMState :=
+                      { toSharedState := compilerAfterArgs.shared,
+                        pc := EvmYul.UInt256.ofNat 0,
+                        stack := [address],
+                        execLength := 0 }
+                    have hSharedAfter :
+                        SharedStateRel cfg
+                          { sourceShared with
+                            toState :=
+                              (EvmYul.State.extCodeSize sourceShared.toState
+                                address).1 }
+                          sharedAfter := by
+                      simpa [targetState, sharedAfter] using
+                        (SharedStateRel.extCodeSize
+                          (cfg := cfg) (sourceShared := sourceShared)
+                          (target := targetState) (address := address)
+                          hShared)
+                    exact SourceStateRel.ok hSharedAfter hVars
+              | cons extra tail =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_extcodecopy
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .EXTCODECOPY : EvmYul.Operation .Yul)) .extcodecopy := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons address rest =>
+              cases rest with
+              | nil =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+              | cons memStart restTail =>
+                  cases restTail with
+                  | nil =>
+                      simp [Expressions.Structured.BasicOp.inputs] at hArity
+                  | cons codeStart restRest =>
+                      cases restRest with
+                      | nil =>
+                          simp [Expressions.Structured.BasicOp.inputs]
+                            at hArity
+                      | cons size restRestRest =>
+                          cases restRestRest with
+                          | nil =>
+                              rw [PrimSemantics.primCall_extcodecopy_ok
+                                fuel sourceShared store address memStart
+                                codeStart size] at hCall
+                              cases hCall
+                              let sharedAfter : EvmYul.SharedState .EVM :=
+                                EvmYul.SharedState.extCodeCopy'
+                                  compilerAfterArgs.shared address memStart
+                                  codeStart size
+                              refine ⟨sharedAfter, ?_, ?_⟩
+                              · simp [
+                                  Locals.Source.PrimitiveSemantics.structured,
+                                  Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                                  Expressions.Structured.BasicOp.inputs,
+                                  Structured.BasicOp.toPrimOp,
+                                  Assembly.PrimOp.continuingStep?,
+                                  Assembly.PrimStep.run,
+                                  EvmYul.EVM.quaternaryCopyOp,
+                                  EvmYul.Stack.pop4,
+                                  EvmYul.EVM.State.replaceStackAndIncrPC,
+                                  EvmYul.EVM.State.incrPC, sharedAfter,
+                                  Id.run]
+                              · exact
+                                  SourceStateRel.ok
+                                    (SharedStateRel.extCodeCopy hShared) hVars
+                          | cons extra restRestRestRest =>
+                              simp [Expressions.Structured.BasicOp.inputs]
+                                at hArity
+
+theorem primitiveStackSoundAtArity_structured_extcodehash
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .EXTCODEHASH : EvmYul.Operation .Yul)) .extcodehash := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons address rest =>
+              cases rest with
+              | nil =>
+                  rw [PrimSemantics.primCall_extcodehash_ok fuel
+                    sourceShared store address] at hCall
+                  cases hCall
+                  let sharedAfter : EvmYul.SharedState .EVM :=
+                    { compilerAfterArgs.shared with
+                      toState :=
+                        (EvmYul.State.extCodeHash
+                          compilerAfterArgs.shared.toState address).1 }
+                  have hResultEq :
+                      (EvmYul.State.extCodeHash sourceShared.toState
+                          address).2 =
+                        (EvmYul.State.extCodeHash
+                          compilerAfterArgs.shared.toState address).2 :=
+                    SharedStateRel.extCodeHashRel hShared
+                  refine ⟨sharedAfter, ?_, ?_⟩
+                  · simp [Locals.Source.PrimitiveSemantics.structured,
+                      Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                      Expressions.Structured.BasicOp.inputs,
+                      Structured.BasicOp.toPrimOp,
+                      Assembly.PrimOp.continuingStep?,
+                      Assembly.PrimStep.run, EvmYul.EVM.unaryStateOp,
+                      EvmYul.Stack.pop, EvmYul.Stack.push,
+                      EvmYul.EVM.State.replaceStackAndIncrPC,
+                      EvmYul.EVM.State.incrPC, sharedAfter, hResultEq,
+                      Id.run]
+                  · let targetState : EVMState :=
+                      { toSharedState := compilerAfterArgs.shared,
+                        pc := EvmYul.UInt256.ofNat 0,
+                        stack := [address],
+                        execLength := 0 }
+                    have hSharedAfter :
+                        SharedStateRel cfg
+                          { sourceShared with
+                            toState :=
+                              (EvmYul.State.extCodeHash sourceShared.toState
+                                address).1 }
+                          sharedAfter := by
+                      simpa [targetState, sharedAfter] using
+                        (SharedStateRel.extCodeHash
+                          (cfg := cfg) (sourceShared := sourceShared)
+                          (target := targetState) (address := address)
                           hShared)
                     exact SourceStateRel.ok hSharedAfter hVars
               | cons extra tail =>
@@ -13569,10 +14461,16 @@ theorem primitiveStackSoundAtArity_structured_of_safe_toBasicOp
         exact primitiveStackSoundAtArity_of_stackSoundAt
           primitiveStackSoundAt_structured_codecopy
       · cases hBasic
+        exact primitiveStackSoundAtArity_structured_extcodesize
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_extcodecopy
+      · cases hBasic
         exact primitiveStackSoundAtArity_structured_returndatasize
       · cases hBasic
         exact primitiveStackSoundAtArity_of_stackSoundAt
           primitiveStackSoundAt_structured_returndatacopy
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_extcodehash
   | Block subop =>
       cases subop <;> simp [Prim.toBasicOp?] at hBasic
       · cases hBasic
@@ -27733,7 +28631,22 @@ theorem toFunctionsListFuel?_let_user_call_eq
             some
               (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
                 state')
-      | [_name] => none
+      | [name] =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else
+            let lowerNames := identNames [name]
+            (do
+              let (preArgs, lowerArgs, state') ←
+                if Expr.List.directCallArgsSafe? args then do
+                  let lowerArgs ← Expr.List.toLocals1? args
+                  some ([], lowerArgs, state)
+                else
+                  Expr.List.lowerBound1? state args
+              some
+                (Stmt.initNames lowerNames ++ preArgs ++
+                  [Functions.Stmt.call lowerNames functionName lowerArgs],
+                  state'))
       | name :: next :: rest =>
           if ObjectBuiltin.unsupported? functionName then
             none
@@ -27980,7 +28893,22 @@ theorem toFunctionsListFuel?_assign_user_call_eq
                 Expr.List.lowerBound1? state args
             some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
               state')
-      | [_name] => none
+      | [name] =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else
+            let lowerNames := identNames [name]
+            (do
+              let (preArgs, lowerArgs, state') ←
+                if Expr.List.directCallArgsSafe? args then do
+                  let lowerArgs ← Expr.List.toLocals1? args
+                  some ([], lowerArgs, state)
+                else
+                  Expr.List.lowerBound1? state args
+              some
+                (preArgs ++
+                  [Functions.Stmt.call lowerNames functionName lowerArgs],
+                  state'))
       | name :: next :: rest =>
           if ObjectBuiltin.unsupported? functionName then
             none
@@ -39548,7 +40476,8 @@ theorem yul_primCall_codecopy_ok
 theorem yul_primCall_returndatacopy_ok
     (fuel : Nat) (shared : EvmYul.SharedState .Yul)
     (store : EvmYul.Yul.VarStore)
-    (memStart dataStart size : Word) :
+    (memStart dataStart size : Word)
+    (hBounds : dataStart.toNat + size.toNat ≤ shared.returnData.size) :
     EvmYul.Yul.primCall fuel.succ (.Ok shared store)
         ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul))
           [memStart, dataStart, size] =
@@ -39560,8 +40489,8 @@ theorem yul_primCall_returndatacopy_ok
                 memStart dataStart size }
           store,
         []) :=
-  PrimSemantics.primCall_returndatacopy_ok fuel shared store
-    memStart dataStart size
+    PrimSemantics.primCall_returndatacopy_ok fuel shared store
+      memStart dataStart size hBounds
 
 theorem yul_primCall_gasprice_ok
     (fuel : Nat) (shared : EvmYul.SharedState .Yul)
@@ -44976,11 +45905,11 @@ theorem regularPrefixWithLayoutSlots_calldatacopy_of_bound_args_ternary
       ∀ {dataStartIdx : Nat},
         fullLayoutAfter[dataStartIdx]? = some dataStartTmp →
           1 + dataStartIdx + 1 ≤ 16)
-    (hSizeBound :
-      ∀ {sizeIdx : Nat},
-        fullLayoutAfter[sizeIdx]? = some sizeTmp →
-          sizeIdx + 1 ≤ 16)
-    (hStackSeq :
+      (hSizeBound :
+        ∀ {sizeIdx : Nat},
+          fullLayoutAfter[sizeIdx]? = some sizeTmp →
+            sizeIdx + 1 ≤ 16)
+      (hStackSeq :
       Expr.List.toStackSeq?
           [.var memStartTmp, .var dataStartTmp, .var sizeTmp] 3 =
         some stackSeq)
@@ -45142,6 +46071,36 @@ theorem regularPrefixWithLayoutSlots_returndatacopy_of_bound_args_ternary
       ∀ {sizeIdx : Nat},
         fullLayoutAfter[sizeIdx]? = some sizeTmp →
           sizeIdx + 1 ≤ 16)
+    (hPrimCallRDC :
+      ∀ (fuel : Nat) (shared : EvmYul.SharedState .Yul)
+        (store : EvmYul.Yul.VarStore) (compilerEVM : EVMState)
+        (memStartValue dataStartValue sizeValue : Word),
+        CompilerStateRelWithLayoutSlots cfg sourceLayout fullLayoutAfter
+          (.Ok shared store) compilerEVM →
+        EvmYul.Yul.primCall fuel.succ (.Ok shared store)
+          ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul))
+          [memStartValue, dataStartValue, sizeValue] =
+          .ok
+            (.Ok
+              { shared with
+                toMachineState :=
+                  EvmYul.MachineState.returndatacopy shared.toMachineState
+                    memStartValue dataStartValue sizeValue }
+              store,
+            []))
+    (hStepRDC :
+      ∀ (state : EVMState)
+        (memStartValue dataStartValue sizeValue : Word)
+        (stack : EvmYul.Stack Word),
+        state.stack =
+          memStartValue :: dataStartValue :: sizeValue :: stack →
+        Structured.BasicOp.step .returndatacopy state =
+          .ok
+            (({ state with
+              toMachineState :=
+                EvmYul.MachineState.returndatacopy state.toMachineState
+                  memStartValue dataStartValue sizeValue }
+              : EVMState).replaceStackAndIncrPC stack))
     (hStackSeq :
       Expr.List.toStackSeq?
           [.var memStartTmp, .var dataStartTmp, .var sizeTmp] 3 =
@@ -45175,22 +46134,18 @@ theorem regularPrefixWithLayoutSlots_returndatacopy_of_bound_args_ternary
           toMachineState :=
             EvmYul.MachineState.returndatacopy shared.toMachineState
               memStart dataStart size })
-      (fun state memStart dataStart size =>
-        { state with
-          toMachineState :=
-            EvmYul.MachineState.returndatacopy state.toMachineState
-              memStart dataStart size })
-      hNoDupFull hMemStartBound hDataStartBound hSizeBound
-      (fun fuel shared store _compilerEVM memStart dataStart size _hRel =>
-        yul_primCall_returndatacopy_ok fuel shared store
-          memStart dataStart size)
+        (fun state memStart dataStart size =>
+          { state with
+            toMachineState :=
+              EvmYul.MachineState.returndatacopy state.toMachineState
+                memStart dataStart size })
+        hNoDupFull hMemStartBound hDataStartBound hSizeBound
+        hPrimCallRDC
       (by
         intro shared state memStart dataStart size hShared
         exact SharedStateRel.returndatacopy hShared)
-      hStackSeq
-      (fun state memStart dataStart size stack hStack =>
-        PrimSemantics.basicOp_step_returndatacopy_of_stack
-          state memStart dataStart size stack hStack)
+        hStackSeq
+        hStepRDC
       (by
         intro ctxAfter base
         rfl)

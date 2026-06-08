@@ -427,15 +427,20 @@ hex by normalizing solc's Yul JSON AST in Python, writing the normalized bridge
 JSON to a temporary sidecar file, and asking a small Lean runner to read and
 decode that JSON before evaluating `Program.bytecodeImageUnchecked?`.  The same
 path can start from a cached bridge file with `--input-format bridge-json`, so
-the Solidity/solc half and the Lean backend half are separable.  That path recursively compiles
-child objects, computes object/data offsets from this backend's emitted byte
-lengths, resolves object builtins, and appends child object/data payloads in
-the recorded solc order.  It is intended for local end-to-end checks and
-Forge-style fixtures, not as the final theorem boundary.
+the Solidity/solc half and the Lean backend half are separable.  That path is
+the Solidity-facing object-image lane: it recursively compiles child objects,
+computes object/data offsets from this backend's emitted byte lengths, resolves
+object builtins, and appends child object/data payloads in the recorded solc
+order.  The older generated `programUncheckedBytecode` definitions are
+code-only lower-layer debugging helpers; the bytecode/artifact commands use the
+object-image definitions.
 The current smoke fixtures include storage reads/writes, checked arithmetic,
 event logs across the LOG0-through-LOG4 surface, payable value flow,
-environmental reads including header/base-fee/prevrandao/gas-price fields and
-contract self-balance, immutables, imports/remappings,
+low-level external calls (`call`, `staticcall`, `delegatecall`), contract
+creation (`create`, `create2`), account-code queries (`extcodesize`,
+`extcodecopy`, `extcodehash`), environmental reads including
+header/base-fee/prevrandao/gas-price fields and contract self-balance,
+immutables, imports/remappings,
 custom errors, string literals, dynamic calldata bytes/strings and `uint256[]`
 arrays round-tripping through ABI helpers, and mapping storage hashing through
 solc-emitted `keccak256` helper code, plus Solidity loops with break/continue
@@ -666,10 +671,10 @@ There is also a structural object-tree smoke for Solidity `new Child(...)` and
 bridge JSON, validates and replays the manifest through Lean's JSON decoder,
 runs the Lean backend-check preflight, and asserts that the `FactoryBox` runtime
 bridge preserves the child subobject, data payload, `create`, and `create2`
-surface.  The current backend check passes the child creation/runtime objects
-and records that the factory creation/runtime objects stop at `to_yul_contract`;
-the smoke does not ask the bytecode backend to execute `CREATE`/`CREATE2`,
-because those primitives are still outside the executable backend subset:
+surface.  The summary compatibility classifier now treats CREATE/CREATE2 as
+supported external-boundary primitives.  The proof model relates matching open
+creation requests/responses; it does not pretend to be a closed concrete
+deployment-world simulator.
 
 ```sh
 SOLC=/Users/dan/.local/bin/solc LAKE=/Users/dan/.elan/bin/lake \
@@ -695,10 +700,13 @@ SOLC=/Users/dan/.local/bin/solc LAKE=/Users/dan/.elan/bin/lake \
 Another front-half decode smoke covers low-level external-call lowering.  It
 packages `ExternalCallBox`, validates/replays the manifest through Lean, runs
 the Lean backend-check preflight, and asserts that the runtime bridge summary
-preserves `call`, `staticcall`, `delegatecall`, `gas`, `returndatasize`, and
-`returndatacopy`.  The current backend check records creation stopping at
-`to_yul_contract` and runtime stopping at `lower_code_unchecked`, while the
-summary reports the external-effect backend blocker explicitly:
+preserves `call`, `staticcall`, `delegatecall`, `returndatasize`, and
+`returndatacopy`, while reporting `gas()` as the current resource-observer
+blocker when solc emits it.  The summary compatibility classifier now treats
+the CALL-family primitives as supported open-boundary operations, separate from
+that `gas()` theorem-boundary exclusion.  Backend-check output may still report
+a later first failing stage for a concrete executable artifact, but the
+CALL-family primitive surface itself is no longer classified as unsupported:
 
 ```sh
 SOLC=/Users/dan/.local/bin/solc LAKE=/Users/dan/.elan/bin/lake \
@@ -751,8 +759,9 @@ successful returns, `Error(string)`, `Panic(uint256)`, and raw bytes catches,
 then checks that Lean can decode the four-object manifest, runs the Lean
 backend-check preflight, and checks that the bridge summary preserves the
 expected `call`, return-data-copy, `revert`, and log primitive surface.  The
-smoke reports the current backend-check status and first failing stage for both
-the caller runtime and target runtime:
+summary compatibility classifier treats the `call` as supported by the
+open-boundary proof surface; the smoke still reports backend-check status and
+first failing stage for both the caller runtime and target runtime:
 
 ```sh
 SOLC=/Users/dan/.local/bin/solc LAKE=/Users/dan/.elan/bin/lake \
@@ -1216,8 +1225,19 @@ SOLC=/Users/dan/.local/bin/solc LAKE=/Users/dan/.elan/bin/lake \
 
 Current bridge limits are intentionally explicit:
 
-- Yul function definitions are split into the `YulContract.functions` map only
-  at object-code top level, matching the current Lean AST.
+- Single-result user calls are accepted anywhere a one-word expression is
+  expected.  Direct `let x := f(...)`, `x := f(...)`, and statement-level
+  `f(...)` calls lower to direct `Functions.Stmt.call` statements after any
+  nonempty argument list is bound through the proved generated-argument prelude.
+  Nested uses such as `add(f(), 1)`, `if f()`, `switch f()`, and loop
+  conditions lower through generated temporaries.
+- Multi-result user calls are accepted in their Yul statement forms, including
+  `let x, y := f(...)` and `x, y := f(...)`, and lower to direct
+  `Functions.Stmt.call` statements with the full destination list.
+- Yul function definitions are split into the `YulContract.functions` map at
+  object-code top level and are also hoisted from nested blocks, including
+  `for` initializer blocks, with local calls rewritten to generated function
+  names before core lowering.
 - `datasize(currentObject)` is resolved inside the executable object-image path
   so solc constructor-argument helpers can compute appended ABI argument size
   from `codesize() - datasize(currentObject)`.
@@ -1243,14 +1263,30 @@ Current bridge limits are intentionally explicit:
   and use the same right-padding rule.
 - Yul object builtins such as `datasize`, `dataoffset`, `loadimmutable`, and
   `setimmutable` are preserved in bridge JSON and resolved by the computed
-  object-image path before conversion to core Yul.  `linkersymbol("name")` can
-  be resolved with explicit `--linker-symbol name=value` entries.  Checked
-  object lowering runs solc-style Yul validation after these resolutions and
-  before compiler lowering.  Generated Lean modules expose noncomputable
-  checked object-image witnesses that go through that boundary.  `datacopy`
-  lowers to `codecopy`, which is covered by the explicit local code-image
-  relation used by the checked imported-Yul preflight.
-- Solidity child-contract creation is preserved structurally in bridge JSON
-  object trees and manifest replay.  Executable bytecode generation still
-  rejects Yul `create`/`create2`, so `new Child(...)` is currently covered by
-  decode/package tests rather than full Lean-bytecode-vs-solc Forge comparison.
+  object-image path before conversion to core Yul.  `memoryguard` is normalized
+  to its guarded value by the solc AST parser, and bridge JSON inputs that carry
+  it explicitly as an object builtin are accepted and resolved the same way by
+  the Lean frontend.
+  `linkersymbol("name")` can be resolved with explicit
+  `--linker-symbol name=value` entries.  Checked object lowering runs
+  solc-style Yul validation after these resolutions and before compiler
+  lowering.  Generated Lean modules expose noncomputable checked object-image
+  witnesses that go through that boundary.  `datacopy` lowers to `codecopy`,
+  which is covered by the explicit local code-image relation used by the
+  checked imported-Yul preflight.
+- CALL-family primitives (`call`, `callcode`, `delegatecall`, `staticcall`) and
+  CREATE-family primitives (`create`, `create2`) are recognized by the Solidity
+  frontend and classified as supported open external-boundary operations.  The
+  theorem surface compares the emitted requests and resumes under matching
+  abstract responses; it does not model a concrete external world.
+- Account-code/state queries (`balance`, `extcodesize`, `extcodecopy`,
+  `extcodehash`) are recognized by the frontend and covered through
+  state/query plus code-image preservation, not by adding new suspending
+  external-boundary events.
+- Direct resource/position observer primitives `gas()`, `msize()`, and `pc()`
+  remain explicit backend exclusions in the current theorem boundary.
+- Raw EVM opcode-style calls such as `jump`, `jumpi`, `jumpdest`, `push*`,
+  `dup*`, and `swap*`, plus verbatim/EOF dialect builtins, are preserved in
+  bridge JSON for diagnostics but rejected before checked executable core-Yul
+  lowering.  Solc AST `clz(x)` calls are expanded to a generated helper before
+  that boundary.

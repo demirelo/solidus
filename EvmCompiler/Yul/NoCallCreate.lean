@@ -719,7 +719,43 @@ theorem letUserCall_toFunctionsListFuel?_noCallCreate
     | cons name rest =>
         cases rest with
         | nil =>
-            simp at hLower
+            by_cases hDirect : Expr.List.directCallArgsSafe? args = true
+            · cases hArgs : Expr.List.toLocals1? args with
+              | none =>
+                  simp [hNameSafe, hDirect, hArgs] at hLower
+              | some lowerArgs =>
+                  simp [hNameSafe, hDirect, hArgs] at hLower
+                  rcases hLower with ⟨hLower, _hState⟩
+                  rw [← hLower]
+                  have hArgsNo :
+                      ∀ expr ∈ lowerArgs, expr.usesCallCreate = false :=
+                    exprList_toLocals1?_all_noCallCreate hArgsSafe hArgs
+                  have hArgListNo :
+                      Functions.ExprList.usesCallCreate lowerArgs = false :=
+                    localsExprList_all_noCallCreate hArgsNo
+                  exact functionsStmtList_append
+                    (initNames_noCallCreate (identNames [name]))
+                    (by
+                      simp [Functions.StmtList.usesCallCreate,
+                        Functions.Stmt.usesCallCreate, hArgListNo])
+            · cases hArgs : Expr.List.lowerBound1? state args with
+              | none =>
+                  simp [hNameSafe, hDirect, hArgs] at hLower
+              | some argResult =>
+                  rcases argResult with ⟨preArgs, lowerArgs, stateArgs⟩
+                  simp [hNameSafe, hDirect, hArgs] at hLower
+                  rcases hLower with ⟨hLower, _hState⟩
+                  rw [← hLower]
+                  have hArgsNo :=
+                    exprList_lowerBound1?_noCallCreate hArgsSafe hArgs
+                  have hArgListNo :
+                      Functions.ExprList.usesCallCreate lowerArgs = false :=
+                    localsExprList_all_noCallCreate hArgsNo.2
+                  exact functionsStmtList_append
+                    (initNames_noCallCreate (identNames [name]))
+                    (functionsStmtList_append hArgsNo.1 (by
+                      simp [Functions.StmtList.usesCallCreate,
+                        Functions.Stmt.usesCallCreate, hArgListNo]))
         | cons next rest =>
             by_cases hDirect : Expr.List.directCallArgsSafe? args = true
             · cases hArgs : Expr.List.toLocals1? args with
@@ -878,7 +914,38 @@ theorem assignUserCall_toFunctionsListFuel?_noCallCreate
     | cons name rest =>
         cases rest with
         | nil =>
-            simp at hLower
+            by_cases hDirect : Expr.List.directCallArgsSafe? args = true
+            · cases hArgs : Expr.List.toLocals1? args with
+              | none =>
+                  simp [hNameSafe, hDirect, hArgs] at hLower
+              | some lowerArgs =>
+                  simp [hNameSafe, hDirect, hArgs] at hLower
+                  rcases hLower with ⟨hLower, _hState⟩
+                  rw [← hLower]
+                  have hArgsNo :
+                      ∀ expr ∈ lowerArgs, expr.usesCallCreate = false :=
+                    exprList_toLocals1?_all_noCallCreate hArgsSafe hArgs
+                  have hArgListNo :
+                      Functions.ExprList.usesCallCreate lowerArgs = false :=
+                    localsExprList_all_noCallCreate hArgsNo
+                  simp [Functions.StmtList.usesCallCreate,
+                    Functions.Stmt.usesCallCreate, hArgListNo]
+            · cases hArgs : Expr.List.lowerBound1? state args with
+              | none =>
+                  simp [hNameSafe, hDirect, hArgs] at hLower
+              | some argResult =>
+                  rcases argResult with ⟨preArgs, lowerArgs, stateArgs⟩
+                  simp [hNameSafe, hDirect, hArgs] at hLower
+                  rcases hLower with ⟨hLower, _hState⟩
+                  rw [← hLower]
+                  have hArgsNo :=
+                    exprList_lowerBound1?_noCallCreate hArgsSafe hArgs
+                  have hArgListNo :
+                      Functions.ExprList.usesCallCreate lowerArgs = false :=
+                    localsExprList_all_noCallCreate hArgsNo.2
+                  exact functionsStmtList_append hArgsNo.1 (by
+                    simp [Functions.StmtList.usesCallCreate,
+                      Functions.Stmt.usesCallCreate, hArgListNo])
         | cons next rest =>
             by_cases hDirect : Expr.List.directCallArgsSafe? args = true
             · cases hArgs : Expr.List.toLocals1? args with

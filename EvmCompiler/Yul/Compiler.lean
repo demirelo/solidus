@@ -116,6 +116,10 @@ def unsupported? : Name → Bool
   | "datasize" => true
   | "dataoffset" => true
   | "datacopy" => true
+  | "setimmutable" => true
+  | "loadimmutable" => true
+  | "linkersymbol" => true
+  | "memoryguard" => true
   | _ => false
 
 end ObjectBuiltin
@@ -1599,8 +1603,21 @@ mutual
           some
             (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
               state')
-    | _fuel + 1, _state, .Let [_name] (some (.Call (.inr _functionName) _args)) =>
-        none
+    | _fuel + 1, state, .Let [name] (some (.Call (.inr functionName) args)) =>
+        if ObjectBuiltin.unsupported? functionName then
+          none
+        else do
+          let lowerNames := identNames [name]
+          let (preArgs, lowerArgs, state') ←
+            if Expr.List.directCallArgsSafe? args then do
+              let lowerArgs ← Expr.List.toLocals1? args
+              some ([], lowerArgs, state)
+            else
+              Expr.List.lowerBound1? state args
+          some
+            (initNames lowerNames ++ preArgs ++
+              [Functions.Stmt.call lowerNames functionName lowerArgs],
+              state')
     | _fuel + 1, state, .Let [name] (some value) => do
         let (preValue, lowerValue, state') ← Expr.lower1? state value
         some (preValue ++ [Functions.Stmt.let_ (identName name) lowerValue],
@@ -1636,8 +1653,19 @@ mutual
               Expr.List.lowerBound1? state args
           some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
             state')
-    | _fuel + 1, _state, .Assign [_name] (.Call (.inr _functionName) _args) =>
-        none
+    | _fuel + 1, state, .Assign [name] (.Call (.inr functionName) args) =>
+        if ObjectBuiltin.unsupported? functionName then
+          none
+        else do
+          let lowerNames := identNames [name]
+          let (preArgs, lowerArgs, state') ←
+            if Expr.List.directCallArgsSafe? args then do
+              let lowerArgs ← Expr.List.toLocals1? args
+              some ([], lowerArgs, state)
+            else
+              Expr.List.lowerBound1? state args
+          some (preArgs ++ [Functions.Stmt.call lowerNames functionName lowerArgs],
+            state')
     | _fuel + 1, state, .Assign [name] value => do
         let (preValue, lowerValue, state') ← Expr.lower1? state value
         some (preValue ++ [Functions.Stmt.assign (identName name) lowerValue],

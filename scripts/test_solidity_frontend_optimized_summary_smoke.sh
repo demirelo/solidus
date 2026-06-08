@@ -131,6 +131,12 @@ unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
 missing_blockers = sorted(required_blockers - unsupported)
 if missing_blockers:
     raise SystemExit(f"{name}: optimized summary missing blockers: {missing_blockers!r}")
+unexpected_blockers = sorted(unsupported - required_blockers)
+if unexpected_blockers:
+    raise SystemExit(
+        f"{name}: optimized summary reported supported primitives as unsupported: "
+        f"{unexpected_blockers!r}"
+    )
 if required_blockers and compatibility.get("status") != "blocked":
     raise SystemExit(f"{name}: expected optimized backend compatibility to be blocked")
 
@@ -146,8 +152,8 @@ run_optimized_summary_case \
   ExternalCallBox.sol \
   ExternalCallBox \
   2 \
-  call,delegatecall,staticcall,returndatacopy,returndatasize \
-  call,delegatecall,staticcall
+  call,delegatecall,staticcall,returndatacopy,returndatasize,gas \
+  gas
 
 run_optimized_summary_case \
   event_matrix \

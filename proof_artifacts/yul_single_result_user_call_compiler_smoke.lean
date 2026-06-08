@@ -1,0 +1,557 @@
+import EvmCompiler.Yul.Compiler
+import EvmCompiler.Solidity.BridgeJson
+
+/-!
+Smoke checks for single-result call lowering.
+
+These checks pin the imported-Yul compiler surface where a user function with
+one result can be used directly as an expression, including nested under a
+primitive expression and in control-condition positions. They also pin
+multi-result declaration/assignment calls, which are Yul statement forms rather
+than expressions. The final guards pin single-result external/account
+primitives that share the same expression frontier, plus the object-builtin
+frontend path that resolves object/data pseudo-builtins before core lowering.
+-/
+
+namespace EvmCompiler
+namespace Yul
+
+noncomputable section
+
+def smokeSome {α : Type} : Option α → Bool
+  | some _ => true
+  | none => false
+
+def smokeOne : Word :=
+  EvmYul.UInt256.ofNat 1
+
+def smokeFrontendUserCallExpr : Solidity.Frontend.Expr :=
+  .call .user "f" [.var "a", .lit smokeOne]
+
+def smokeFrontendSingleCallProgram : Solidity.Frontend.Program :=
+  { source := "Smoke.sol"
+    contract := "Smoke"
+    object :=
+      { name := "runtime"
+        dispatcher := [.letDecl ["x"] (some (.call .user "f" []))]
+        functions :=
+          [("f",
+            { params := []
+              returns := ["r"]
+              body := [.assign ["r"] (.lit smokeOne)] })]
+        data := []
+        objects := []
+        items := [] } }
+
+def smokeFrontendControlCallProgram : Solidity.Frontend.Program :=
+  { source := "ControlSmoke.sol"
+    contract := "ControlSmoke"
+    object :=
+      { name := "runtime"
+        dispatcher :=
+          [ .ifThen (.call .user "f" []) []
+          , .switch (.call .user "f" []) [(smokeOne, [])] []
+          , .forLoop (.call .user "f" []) [] [] ]
+        functions :=
+          [("f",
+            { params := []
+              returns := ["r"]
+              body := [.assign ["r"] (.lit smokeOne)] })]
+        data := []
+        objects := []
+        items := [] } }
+
+def smokeBridgeJsonSingleCall : String :=
+  "{\"schema\":\"evm-compiler.solc-yul-bridge.v3\",\"source\":\"Smoke.sol\",\"contract\":\"Smoke\",\"selectedObject\":{\"node\":\"object\",\"name\":\"runtime\",\"dispatcher\":[{\"node\":\"let\",\"names\":[\"x\"],\"value\":{\"node\":\"call\",\"calleeKind\":\"user\",\"callee\":\"f\",\"args\":[]}}],\"functions\":[{\"name\":\"f\",\"params\":[],\"returns\":[\"r\"],\"body\":[{\"node\":\"assign\",\"names\":[\"r\"],\"value\":{\"node\":\"literal\",\"value\":1}}]}],\"data\":[],\"subobjects\":[],\"items\":[]}}"
+
+def smokeUserCall : AstExpr :=
+  .Call (.inr "f") []
+
+def smokeUserCallWithDirectArgs : AstExpr :=
+  .Call (.inr "f") [.Var "a", .Lit smokeOne]
+
+def smokeNestedUserCall : AstExpr :=
+  .Call (.inl ((.StopArith .ADD : EvmYul.Operation .Yul)))
+    [smokeUserCall, .Lit smokeOne]
+
+def smokeNestedUserCallArg : AstExpr :=
+  .Call (.inr "f") [.Call (.inr "g") []]
+
+def smokeTwoUserCallsInPrimitive : AstExpr :=
+  .Call (.inl ((.StopArith .ADD : EvmYul.Operation .Yul)))
+    [.Call (.inr "f") [], .Call (.inr "g") []]
+
+def smokeDirectLetUserCall : AstStmt :=
+  .Let ["x"] (some smokeUserCall)
+
+def smokeDirectAssignUserCall : AstStmt :=
+  .Assign ["x"] smokeUserCall
+
+def smokeDirectLetUserCallWithArgs : AstStmt :=
+  .Let ["x"] (some smokeUserCallWithDirectArgs)
+
+def smokeDirectAssignUserCallWithArgs : AstStmt :=
+  .Assign ["x"] smokeUserCallWithDirectArgs
+
+def smokeLetNestedUserCallArg : AstStmt :=
+  .Let ["x"] (some smokeNestedUserCallArg)
+
+def smokeAssignNestedUserCallArg : AstStmt :=
+  .Assign ["x"] smokeNestedUserCallArg
+
+def smokeMultiLetUserCall : AstStmt :=
+  .Let ["x", "y"] (some smokeUserCall)
+
+def smokeMultiAssignUserCall : AstStmt :=
+  .Assign ["x", "y"] smokeUserCall
+
+def smokeNestedLetUserCall : AstStmt :=
+  .Let ["x"] (some smokeNestedUserCall)
+
+def smokeIfUserCall : AstStmt :=
+  .If smokeUserCall []
+
+def smokeSwitchUserCall : AstStmt :=
+  .Switch smokeUserCall [] []
+
+def smokeForUserCall : AstStmt :=
+  .For smokeUserCall [] []
+
+def smokeExprStmtUserCall : AstStmt :=
+  .ExprStmtCall smokeUserCall
+
+def smokeStopStmt : AstStmt :=
+  .ExprStmtCall
+    (.Call (.inl ((.StopArith .STOP : EvmYul.Operation .Yul))) [])
+
+def smokeReturnStmt : AstStmt :=
+  .ExprStmtCall
+    (.Call (.inl ((.System .RETURN : EvmYul.Operation .Yul)))
+      [.Lit smokeOne, .Lit smokeOne])
+
+def smokeRevertStmt : AstStmt :=
+  .ExprStmtCall
+    (.Call (.inl ((.System .REVERT : EvmYul.Operation .Yul)))
+      [.Lit smokeOne, .Lit smokeOne])
+
+def smokeSelfdestructStmt : AstStmt :=
+  .ExprStmtCall
+    (.Call (.inl ((.System .SELFDESTRUCT : EvmYul.Operation .Yul)))
+      [.Lit smokeOne])
+
+def smokeExternalCallExpr : AstExpr :=
+  .Call (.inl ((.System .CALL : EvmYul.Operation .Yul)))
+    [.Lit smokeOne, .Lit smokeOne, .Lit smokeOne, .Lit smokeOne,
+      .Lit smokeOne, .Lit smokeOne, .Lit smokeOne]
+
+def smokeExternalCallcodeExpr : AstExpr :=
+  .Call (.inl ((.System .CALLCODE : EvmYul.Operation .Yul)))
+    [.Lit smokeOne, .Lit smokeOne, .Lit smokeOne, .Lit smokeOne,
+      .Lit smokeOne, .Lit smokeOne, .Lit smokeOne]
+
+def smokeExternalStaticCallExpr : AstExpr :=
+  .Call (.inl ((.System .STATICCALL : EvmYul.Operation .Yul)))
+    [.Lit smokeOne, .Lit smokeOne, .Lit smokeOne, .Lit smokeOne,
+      .Lit smokeOne, .Lit smokeOne]
+
+def smokeExternalDelegateCallExpr : AstExpr :=
+  .Call (.inl ((.System .DELEGATECALL : EvmYul.Operation .Yul)))
+    [.Lit smokeOne, .Lit smokeOne, .Lit smokeOne, .Lit smokeOne,
+      .Lit smokeOne, .Lit smokeOne]
+
+def smokeCreateExpr : AstExpr :=
+  .Call (.inl ((.System .CREATE : EvmYul.Operation .Yul)))
+    [.Lit smokeOne, .Lit smokeOne, .Lit smokeOne]
+
+def smokeCreate2Expr : AstExpr :=
+  .Call (.inl ((.System .CREATE2 : EvmYul.Operation .Yul)))
+    [.Lit smokeOne, .Lit smokeOne, .Lit smokeOne, .Lit smokeOne]
+
+def smokeBalanceExpr : AstExpr :=
+  .Call (.inl ((.Env .BALANCE : EvmYul.Operation .Yul))) [.Lit smokeOne]
+
+def smokeExtcodesizeExpr : AstExpr :=
+  .Call (.inl ((.Env .EXTCODESIZE : EvmYul.Operation .Yul))) [.Lit smokeOne]
+
+def smokeExtcodehashExpr : AstExpr :=
+  .Call (.inl ((.Env .EXTCODEHASH : EvmYul.Operation .Yul))) [.Lit smokeOne]
+
+def smokeExtcodecopyStmt : AstStmt :=
+  .ExprStmtCall
+    (.Call (.inl ((.Env .EXTCODECOPY : EvmYul.Operation .Yul)))
+      [.Lit smokeOne, .Lit smokeOne, .Lit smokeOne, .Lit smokeOne])
+
+def smokeObjectDataBytes : List UInt8 :=
+  [1, 2, 3]
+
+def smokeObjectNameBytes : List UInt8 :=
+  [98, 108, 111, 98]
+
+def smokeLinkerSymbolNameBytes : List UInt8 :=
+  [76, 73, 66]
+
+def smokeObjectLayout : Solidity.Frontend.ObjectLayout :=
+  { entries := [] }
+
+def smokeObjectProgram : Solidity.Frontend.Program :=
+  { source := "ObjectSmoke.sol"
+    contract := "ObjectSmoke"
+    object :=
+      { name := "runtime"
+        dispatcher :=
+          [ .letDecl ["size"]
+              (some
+                (.call .objectBuiltin "datasize" [.stringLit "blob"]))
+          , .letDecl ["offset"]
+              (some
+                (.call .objectBuiltin "dataoffset" [.stringLit "blob"]))
+          , .letDecl ["guard"]
+              (some
+                (.call .objectBuiltin "memoryguard"
+                  [.lit (EvmYul.UInt256.ofNat 128)]))
+          , .exprStmt
+              (.call .objectBuiltin "datacopy"
+                [ .lit (EvmYul.UInt256.ofNat 0)
+                , .call .objectBuiltin "dataoffset" [.stringLit "blob"]
+                , .call .objectBuiltin "datasize" [.stringLit "blob"] ]) ]
+        functions := []
+        data := [{ name? := some "blob", bytes := smokeObjectDataBytes }]
+        objects := []
+        items := [.data 0] } }
+
+def smokeObjectContext : Solidity.Frontend.ObjectBuiltinContext :=
+  { layout := smokeObjectLayout
+    dataSizes := [("blob", EvmYul.UInt256.ofNat smokeObjectDataBytes.length)]
+    dataOffsets := [("blob", EvmYul.UInt256.ofNat 64)]
+    linkerSymbols := [("LIB", smokeOne)] }
+
+#guard ObjectBuiltin.unsupported? "f" = false
+#guard ObjectBuiltin.unsupported? "datasize" = true
+#guard ObjectBuiltin.unsupported? "dataoffset" = true
+#guard ObjectBuiltin.unsupported? "datacopy" = true
+#guard ObjectBuiltin.unsupported? "setimmutable" = true
+#guard ObjectBuiltin.unsupported? "loadimmutable" = true
+#guard ObjectBuiltin.unsupported? "linkersymbol" = true
+#guard ObjectBuiltin.unsupported? "memoryguard" = true
+
+#guard
+  Prim.terminal? ((.StopArith .STOP : EvmYul.Operation .Yul)) =
+    some .stop
+
+#guard
+  Prim.terminal? ((.System .RETURN : EvmYul.Operation .Yul)) =
+    some .return
+
+#guard
+  Prim.terminal? ((.System .REVERT : EvmYul.Operation .Yul)) =
+    some .revert
+
+#guard
+  Prim.terminal? ((.System .SELFDESTRUCT : EvmYul.Operation .Yul)) =
+    some .selfdestruct
+
+#guard
+  (match Solidity.Frontend.Expr.toYul? smokeFrontendUserCallExpr with
+  | some (.Call (.inr "f") [.Var "a", .Lit value]) =>
+      value.toNat == smokeOne.toNat
+  | _ => false) = true
+
+#guard
+  (match smokeFrontendSingleCallProgram.toYulProgram? with
+  | some program =>
+      match program.contract.dispatcher with
+      | .Block [.Let ["x"] (some (.Call (.inr "f") []))] => true
+      | _ => false
+  | none => false) = true
+
+#guard
+  (match smokeFrontendControlCallProgram.toYulProgram? with
+  | some program =>
+      match program.contract.dispatcher with
+      | .Block
+          [ .If (.Call (.inr "f") []) []
+          , .Switch (.Call (.inr "f") []) [(value, [])] []
+          , .For (.Call (.inr "f") []) [] [] ] =>
+            value.toNat == smokeOne.toNat
+      | _ => false
+  | none => false) = true
+
+#guard
+  (match Solidity.Frontend.BridgeJson.parseProgram? smokeBridgeJsonSingleCall with
+  | .ok program =>
+      match program.toYulProgram? with
+      | some yul =>
+          match yul.contract.dispatcher with
+          | .Block [.Let ["x"] (some (.Call (.inr "f") []))] => true
+          | _ => false
+      | none => false
+  | .error _ => false) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeUserCall))
+      smokeUserCall) = true
+
+#guard
+  Expr.List.directCallArgsSafe? [.Var "a", .Lit smokeOne] = false
+
+#guard
+  Expr.List.directCallArgsSafe? [.Call (.inr "g") []] = false
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeUserCallWithDirectArgs))
+      smokeUserCallWithDirectArgs) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeNestedUserCall))
+      smokeNestedUserCall) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeNestedUserCallArg))
+      smokeNestedUserCallArg) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeTwoUserCallsInPrimitive))
+      smokeTwoUserCallsInPrimitive) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeDirectLetUserCall))
+      smokeDirectLetUserCall) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeDirectAssignUserCall))
+      smokeDirectAssignUserCall) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeDirectLetUserCallWithArgs))
+      smokeDirectLetUserCallWithArgs) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeDirectAssignUserCallWithArgs))
+      smokeDirectAssignUserCallWithArgs) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeLetNestedUserCallArg))
+      smokeLetNestedUserCallArg) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeAssignNestedUserCallArg))
+      smokeAssignNestedUserCallArg) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeNestedLetUserCall))
+      smokeNestedLetUserCall) = true
+
+#guard
+  (match
+      Stmt.toFunctionsListFuel? 16
+        (Fresh.initial (Stmt.names smokeDirectLetUserCall))
+        smokeDirectLetUserCall with
+    | some
+        ([Functions.Stmt.let_ "x" _,
+          Functions.Stmt.call ["x"] "f" []], _) => true
+    | _ => false) = true
+
+#guard
+  (match
+      Stmt.toFunctionsListFuel? 16
+        (Fresh.initial (Stmt.names smokeDirectAssignUserCall))
+        smokeDirectAssignUserCall with
+    | some ([Functions.Stmt.call ["x"] "f" []], _) => true
+    | _ => false) = true
+
+#guard
+  (match
+      Stmt.toFunctionsListFuel? 16
+        (Fresh.initial (Stmt.names smokeMultiLetUserCall))
+        smokeMultiLetUserCall with
+    | some
+        ([Functions.Stmt.let_ "x" _,
+          Functions.Stmt.let_ "y" _,
+          Functions.Stmt.call ["x", "y"] "f" []], _) => true
+    | _ => false) = true
+
+#guard
+  (match
+      Stmt.toFunctionsListFuel? 16
+        (Fresh.initial (Stmt.names smokeMultiAssignUserCall))
+        smokeMultiAssignUserCall with
+    | some ([Functions.Stmt.call ["x", "y"] "f" []], _) => true
+    | _ => false) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeIfUserCall))
+      smokeIfUserCall) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeSwitchUserCall))
+      smokeSwitchUserCall) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeForUserCall))
+      smokeForUserCall) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeExprStmtUserCall))
+      smokeExprStmtUserCall) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeStopStmt))
+      smokeStopStmt) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeReturnStmt))
+      smokeReturnStmt) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeRevertStmt))
+      smokeRevertStmt) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeSelfdestructStmt))
+      smokeSelfdestructStmt) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeExternalCallExpr))
+      smokeExternalCallExpr) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeExternalCallcodeExpr))
+      smokeExternalCallcodeExpr) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeExternalStaticCallExpr))
+      smokeExternalStaticCallExpr) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeExternalDelegateCallExpr))
+      smokeExternalDelegateCallExpr) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeCreateExpr))
+      smokeCreateExpr) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeCreate2Expr))
+      smokeCreate2Expr) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeBalanceExpr))
+      smokeBalanceExpr) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeExtcodesizeExpr))
+      smokeExtcodesizeExpr) = true
+
+#guard
+  smokeSome
+    (Expr.lower1? (Fresh.initial (Expr.names smokeExtcodehashExpr))
+      smokeExtcodehashExpr) = true
+
+#guard
+  smokeSome
+    (Stmt.toFunctionsListFuel? 16
+      (Fresh.initial (Stmt.names smokeExtcodecopyStmt))
+      smokeExtcodecopyStmt) = true
+
+#guard
+  (match
+      smokeObjectProgram.object.toYulProgramWithLocalDataBase?
+        smokeObjectLayout 64 with
+  | some program =>
+      match program.contract.dispatcher with
+      | .Block
+          [ .Let ["size"] (some (.Lit size))
+          , .Let ["offset"] (some (.Lit offset))
+          , .Let ["guard"] (some (.Lit guard))
+          , .ExprStmtCall
+              (.Call (.inl ((.Env .CODECOPY : EvmYul.Operation .Yul)))
+                [.Lit target, .Lit copyOffset, .Lit copySize]) ] =>
+            size.toNat == smokeObjectDataBytes.length &&
+              offset.toNat == 64 &&
+              guard.toNat == 128 &&
+              target.toNat == 0 &&
+              copyOffset.toNat == 64 &&
+              copySize.toNat == smokeObjectDataBytes.length
+      | _ => false
+  | none => false) = true
+
+#guard
+  (match
+      Solidity.Frontend.Expr.resolveObjectBuiltinsIn?
+        (.call .objectBuiltin "linkersymbol" [.stringLit "LIB"])
+        smokeObjectContext >>= Solidity.Frontend.Expr.toYul? with
+  | some (.Lit value) => value.toNat == smokeOne.toNat
+  | _ => false) = true
+
+#guard
+  (match
+      Solidity.Frontend.Expr.resolveObjectBuiltinsIn?
+        (.call .objectBuiltin "datasize" [.bytesLit smokeObjectNameBytes])
+        smokeObjectContext >>= Solidity.Frontend.Expr.toYul? with
+  | some (.Lit value) => value.toNat == smokeObjectDataBytes.length
+  | _ => false) = true
+
+#guard
+  (match
+      Solidity.Frontend.Expr.resolveObjectBuiltinsIn?
+        (.call .objectBuiltin "dataoffset" [.bytesLit smokeObjectNameBytes])
+        smokeObjectContext >>= Solidity.Frontend.Expr.toYul? with
+  | some (.Lit value) => value.toNat == 64
+  | _ => false) = true
+
+#guard
+  (match
+      Solidity.Frontend.Expr.resolveObjectBuiltinsIn?
+        (.call .objectBuiltin "linkersymbol"
+          [.bytesLit smokeLinkerSymbolNameBytes])
+        smokeObjectContext >>= Solidity.Frontend.Expr.toYul? with
+  | some (.Lit value) => value.toNat == smokeOne.toNat
+  | _ => false) = true
+
+end
+
+end Yul
+end EvmCompiler

@@ -55,6 +55,14 @@ theorem basicOp_eq_toBasicOp_of_callKind
     simp [OpenExternal.CallKind.ofBasicOp?,
       OpenExternal.CallKind.toBasicOp] at hKind ⊢
 
+theorem basicOp_eq_toBasicOp_of_createKind
+    {op : Structured.BasicOp} {kind : OpenExternal.CreateKind}
+    (hKind : OpenExternal.CreateKind.ofBasicOp? op = some kind) :
+    op = kind.toBasicOp := by
+  cases op <;> cases kind <;>
+    simp [OpenExternal.CreateKind.ofBasicOp?,
+      OpenExternal.CreateKind.toBasicOp] at hKind ⊢
+
 theorem basicOp_toPrimOp_haltKind?_none (op : Structured.BasicOp) :
     (Assembly.Instr.prim op.toPrimOp).haltKind? = none := by
   cases op <;> rfl
@@ -1201,7 +1209,6 @@ theorem evmOpenCall?_resume_pc
       rfl
 
 def basicOpSourceBridgeSafe? : Structured.BasicOp → Bool
-  | .extcodesize | .extcodecopy | .extcodehash => false
   | .msize => false
   | .dup1 | .dup2 | .dup3 | .dup4
   | .dup5 | .dup6 | .dup7 | .dup8
@@ -18156,10 +18163,8 @@ theorem compilerOpenPrimitive_no_callCreate_stepAtResult
         (Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
           prim op compiler values)
         [] (.ok (compiler.withShared sharedAfter, valuesAfter)) :=
-    Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_resolves_closed_ok_of_not_callKind
-      (Reference.SourceBridgeFacts.CompilerOpen.Primitive.callKind_none_of_no_callCreate
-        hNoCallCreate)
-      hEval
+    Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_resolves_closed_ok_of_no_callCreate
+      hNoCallCreate hEval
   have hTargetStep :
       Assembly.Source.stepAtResult program pc (.prim op.toPrimOp) state =
         .ok (.running evmAfter) := by
@@ -18237,10 +18242,8 @@ theorem compilerOpenPrimitive_no_callCreate_stepAtResult_pc
         (Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
           prim op compiler values)
         [] (.ok (compiler.withShared sharedAfter, valuesAfter)) :=
-    Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_resolves_closed_ok_of_not_callKind
-      (Reference.SourceBridgeFacts.CompilerOpen.Primitive.callKind_none_of_no_callCreate
-        hNoCallCreate)
-      hEval
+    Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_resolves_closed_ok_of_no_callCreate
+      hNoCallCreate hEval
   have hTargetStep :
       Assembly.Source.stepAtResult program pc (.prim op.toPrimOp) state =
         .ok (.running evmAfter) := by
@@ -18908,8 +18911,8 @@ theorem compilerOpenPrimitive_stackPrefix_openRunNResult_continue_of_resolves_ok
         · exact BasicOpSourceBridgeSafe.no_callCreate hSafe
         · rw [hKind] at hSome
           cases hSome
-      rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
-        hKind] at hResolve
+      rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_no_callCreate
+        hNoCallCreate] at hResolve
       cases hEval : prim.eval op compiler.shared values with
       | error err =>
           simp [hEval] at hResolve
@@ -19003,8 +19006,8 @@ theorem compilerOpenPrimitive_stackPrefix_openRunNResult_continue_pc_of_resolves
         · exact BasicOpSourceBridgeSafe.no_callCreate hSafe
         · rw [hKind] at hSome
           cases hSome
-      rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
-        hKind] at hResolve
+      rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_no_callCreate
+        hNoCallCreate] at hResolve
       cases hEval : prim.eval op compiler.shared values with
       | error err =>
           simp [hEval] at hResolve
@@ -19074,16 +19077,82 @@ theorem compilerOpenPrimitive_eval_resolves_ok_length
       Reference.SourceBridgeFacts.CompilerOpen.Primitive.openCall?
         compiler op values with
   | none =>
-      simp [hOpen] at hResolve
-      cases hEval : prim.eval op compiler.shared values with
-      | error err =>
-          simp [hEval] at hResolve
-          cases hResolve
-      | ok primResult =>
-          rcases primResult with ⟨sharedAfter, valuesAfter'⟩
-          simp [hEval] at hResolve
-          cases hResolve
-          exact hPrim.eval_length hEval
+      cases hOpenCreate :
+          Reference.SourceBridgeFacts.CompilerOpen.Primitive.openCreate?
+            compiler op values with
+      | none =>
+          simp [hOpen, hOpenCreate] at hResolve
+          cases hEval : prim.eval op compiler.shared values with
+          | error err =>
+              simp [hEval] at hResolve
+              cases hResolve
+          | ok primResult =>
+              rcases primResult with ⟨sharedAfter, valuesAfter'⟩
+              simp [hEval] at hResolve
+              cases hResolve
+              exact hPrim.eval_length hEval
+      | some create =>
+          simp [hOpen, hOpenCreate] at hResolve
+          cases hResolve with
+          | @create create' response _trace _result hTail =>
+              cases hCreateResult : create.resume response with
+              | error err =>
+                  simp [hCreateResult] at hTail
+                  cases hTail
+              | ok resultPair =>
+                  rcases resultPair with ⟨compilerAfter', valuesAfter'⟩
+                  simp [hCreateResult] at hTail
+                  cases hTail
+                  unfold
+                    Reference.SourceBridgeFacts.CompilerOpen.Primitive.openCreate?
+                    at hOpenCreate
+                  cases hKind : OpenExternal.CreateKind.ofBasicOp? op with
+                  | none =>
+                      simp [hKind] at hOpenCreate
+                  | some kind =>
+                      cases hCompilerCreate :
+                          Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCreate?
+                            compiler kind values with
+                      | none =>
+                          simp [hKind, hCompilerCreate] at hOpenCreate
+                      | some compilerCreate =>
+                          simp [hKind, hCompilerCreate] at hOpenCreate
+                          rcases hOpenCreate with rfl
+                          have hOp : op = kind.toBasicOp :=
+                            basicOp_eq_toBasicOp_of_createKind hKind
+                          cases hOp
+                          have hPairEq :
+                              compilerCreate.resume response =
+                                (compilerAfter, valuesAfter) :=
+                            Except.ok.inj hCreateResult
+                          have hResumeLen :
+                              (compilerCreate.resume response).2.length = 1 := by
+                            unfold
+                              Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCreate?
+                              at hCompilerCreate
+                            cases hPrimitiveCreate :
+                                OpenExternal.CreateKind.primitiveSharedOpenCreate?
+                                  compiler.shared kind values with
+                            | none =>
+                                simp [hPrimitiveCreate] at hCompilerCreate
+                            | some primitiveCreate =>
+                                simp [hPrimitiveCreate] at hCompilerCreate
+                                rcases hCompilerCreate with rfl
+                                unfold
+                                  OpenExternal.CreateKind.primitiveSharedOpenCreate?
+                                  at hPrimitiveCreate
+                                cases hSite :
+                                    OpenExternal.CreateKind.primitiveCreateSite?
+                                      compiler.shared kind values with
+                                | none =>
+                                    simp [hSite] at hPrimitiveCreate
+                                | some site =>
+                                    simp [hSite] at hPrimitiveCreate
+                                    rcases hPrimitiveCreate with rfl
+                                    simp
+                          simpa [hPairEq,
+                            OpenExternal.CreateKind.outputs_toBasicOp] using
+                            hResumeLen
   | some call =>
       simp [hOpen] at hResolve
       cases hResolve with
@@ -22790,9 +22859,8 @@ theorem compilerOpenPrimitive_no_callCreate_stackPrefixSuffixErased_openRunNResu
         OpenExternal.OpenResultResolves
           (OpenAssembly.Source.openRunNResult program (fuel + 1) state)
           (trace ++ tailTrace) result := by
-  rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
-    (Reference.SourceBridgeFacts.CompilerOpen.Primitive.callKind_none_of_no_callCreate
-      hNoCallCreate)] at hResolve
+  rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_no_callCreate
+    hNoCallCreate] at hResolve
   cases hEval : prim.eval op compiler.shared values with
   | error err =>
       simp [hEval] at hResolve
@@ -41635,6 +41703,72 @@ theorem basicOpSourceBridgeSafe_step_sharedStateRel
             (address := address) hShared
       · rfl
     · simp at hStep
+  case extcodesize =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.unaryStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop, EvmYul.Stack.push, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack address hStack
+      cases hStep
+      refine ⟨{ sourceShared with
+        toState :=
+          (EvmYul.State.extCodeSize sourceShared.toState address).1 },
+        ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.extCodeSize (cfg := cfg)
+            (sourceShared := sourceShared) (target := state)
+            (address := address) hShared
+      · rfl
+    · simp at hStep
+  case extcodecopy =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.quaternaryCopyOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop4, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack address memStart codeStart size hStack
+      cases hStep
+      refine
+        ⟨EvmYul.SharedState.extCodeCopy' sourceShared address memStart
+          codeStart size, ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.extCodeCopy (cfg := cfg)
+            (sourceShared := sourceShared) (targetShared := state.toSharedState)
+            (address := address) (memStart := memStart)
+            (codeStart := codeStart) (size := size) hShared
+      · rfl
+    · simp at hStep
+  case extcodehash =>
+    simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.unaryStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop, EvmYul.Stack.push, Id.run] at hSafe hStep ⊢
+    repeat (first | split at hStep | split)
+    · rename_i _x stack address hStack
+      cases hStep
+      refine ⟨{ sourceShared with
+        toState :=
+          (EvmYul.State.extCodeHash sourceShared.toState address).1 },
+        ?_, ?_⟩
+      · simpa using
+          Reference.SharedStateRel.extCodeHash (cfg := cfg)
+            (sourceShared := sourceShared) (target := state)
+            (address := address) hShared
+      · rfl
+    · simp at hStep
   case calldatacopy =>
     simp [BasicOpSourceBridgeSafe, basicOpSourceBridgeSafe?,
       Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
@@ -41684,12 +41818,12 @@ theorem basicOpSourceBridgeSafe_step_sharedStateRel
       Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
       Assembly.Target.stepInstr, Assembly.PrimOp.step,
       Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
-      EvmYul.EVM.ternaryMachineStateOp,
       EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC,
       EvmYul.Stack.pop3, Id.run] at hSafe hStep ⊢
     repeat (first | split at hStep | split)
-    · rename_i _x stack memStart dataStart size hStack
+    · simp at hStep
+    · rename_i _x stack memStart dataStart size hStack hBounds
       cases hStep
       refine
         ⟨{ sourceShared with
@@ -42345,6 +42479,59 @@ theorem openTraceResult_append_running
       state (prefixTrace ++ suffixTrace) result :=
   openTraceResult_append_running_of_result hPrefix rfl hSuffix
 
+structure SourceOpenCurrentSharedBridgeBoundaryRel
+    (cfg : Reference.StateRelConfig)
+    (program : Assembly.Program)
+    (state : EvmYul.EVM.State) : Prop where
+  call :
+    ∀ {pc : Nat} {op : Assembly.PrimOp}
+      {kind : OpenExternal.CallKind}
+      {call : OpenExternal.OpenCall EvmYul.EVM.State},
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, .prim op) →
+      OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind →
+      OpenExternal.CallKind.evmOpenCall? state kind = some call →
+      FunctionsOpenCurrentSharedStateBridgeRel cfg state
+  create :
+    ∀ {pc : Nat} {op : Assembly.PrimOp}
+      {kind : OpenExternal.CreateKind}
+      {create : OpenExternal.OpenCreate EvmYul.EVM.State},
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, .prim op) →
+      OpenExternal.CallKind.ofEVMOperation? op.toEVM = none →
+      OpenExternal.CreateKind.ofEVMOperation? op.toEVM = some kind →
+      OpenExternal.CreateKind.evmOpenCreate? state kind = some create →
+      FunctionsOpenCurrentSharedStateBridgeRel cfg state
+
+instance SourceOpenCurrentSharedBridgeBoundaryRel.instCoeFun
+    {cfg : Reference.StateRelConfig}
+    {program : Assembly.Program}
+    {state : EvmYul.EVM.State} :
+    CoeFun (SourceOpenCurrentSharedBridgeBoundaryRel cfg program state)
+      (fun _ =>
+        ∀ {pc : Nat} {op : Assembly.PrimOp}
+          {kind : OpenExternal.CallKind}
+          {call : OpenExternal.OpenCall EvmYul.EVM.State},
+          Assembly.Program.instrAtPc program state.pc.toNat =
+            some (pc, .prim op) →
+          OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind →
+          OpenExternal.CallKind.evmOpenCall? state kind = some call →
+          FunctionsOpenCurrentSharedStateBridgeRel cfg state) where
+  coe hRel := hRel.call
+
+namespace SourceOpenCurrentSharedBridgeBoundaryRel
+
+def of_shared_bridge
+    {cfg : Reference.StateRelConfig}
+    {program : Assembly.Program}
+    {state : EvmYul.EVM.State}
+    (hBridge : FunctionsOpenCurrentSharedStateBridgeRel cfg state) :
+    SourceOpenCurrentSharedBridgeBoundaryRel cfg program state := {
+  call := fun _hAt _hKind _hCall => hBridge
+  create := fun _hAt _hCallKind _hKind _hCreate => hBridge }
+
+end SourceOpenCurrentSharedBridgeBoundaryRel
+
 inductive SourceOpenTraceCurrentSharedBridgeReadyFor
     {cfg : Reference.StateRelConfig}
     {program : Assembly.Program} :
@@ -42368,15 +42555,8 @@ inductive SourceOpenTraceCurrentSharedBridgeReadyFor
       {hRest :
         OpenAssembly.Source.OpenTraceResult program fuel mid tailTrace
           result}
-      (hCallBridgeRel :
-        ∀ {pc : Nat} {op : Assembly.PrimOp}
-          {kind : OpenExternal.CallKind}
-          {call : OpenExternal.OpenCall EvmYul.EVM.State},
-          Assembly.Program.instrAtPc program state.pc.toNat =
-            some (pc, .prim op) →
-          OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind →
-          OpenExternal.CallKind.evmOpenCall? state kind = some call →
-          FunctionsOpenCurrentSharedStateBridgeRel cfg state)
+      (hBoundaryBridgeRel :
+        SourceOpenCurrentSharedBridgeBoundaryRel cfg program state)
       (hRestReady :
         SourceOpenTraceCurrentSharedBridgeReadyFor (cfg := cfg) hRest) :
       SourceOpenTraceCurrentSharedBridgeReadyFor
@@ -42410,10 +42590,11 @@ theorem stepRunning_of_shared_bridge
       FunctionsOpenCurrentSharedStateBridgeRel cfg state)
     (hRestReady :
       SourceOpenTraceCurrentSharedBridgeReadyFor (cfg := cfg) hRest) :
-    SourceOpenTraceCurrentSharedBridgeReadyFor (cfg := cfg)
+  SourceOpenTraceCurrentSharedBridgeReadyFor (cfg := cfg)
       (OpenAssembly.Source.OpenTraceResult.stepRunning hStep hRest) :=
   SourceOpenTraceCurrentSharedBridgeReadyFor.stepRunning (cfg := cfg) hStep
-    (fun _hAt _hKind _hCall => hBridgeRel)
+    (SourceOpenCurrentSharedBridgeBoundaryRel.of_shared_bridge
+      (program := program) hBridgeRel)
     hRestReady
 
 theorem current_stepAt_running_continue
@@ -42430,13 +42611,10 @@ theorem current_stepAt_running_continue
       OpenExternal.OpenResultResolves
         (OpenAssembly.Source.openStepAtResult program pc0 instr state)
         headTrace (.ok (.running mid)))
-    (hCallBridgeRel :
-      ∀ {op : Assembly.PrimOp} {kind : OpenExternal.CallKind}
-        {call : OpenExternal.OpenCall EvmYul.EVM.State},
+    (hBoundaryBridgeRel :
+      ∀ {op : Assembly.PrimOp},
         instr = .prim op →
-        OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind →
-        OpenExternal.CallKind.evmOpenCall? state kind = some call →
-        FunctionsOpenCurrentSharedStateBridgeRel cfg state)
+          SourceOpenCurrentSharedBridgeBoundaryRel cfg program state)
     {hRest :
       OpenAssembly.Source.OpenTraceResult program fuel mid tailTrace result}
     (hRestReady :
@@ -42452,14 +42630,25 @@ theorem current_stepAt_running_continue
   exact
     SourceOpenTraceCurrentSharedBridgeReadyFor.stepRunning (cfg := cfg)
       hStepCurrent
-      (fun {pc} {op} {kind} {call} hAt' hKind hCall => by
-        have hCurrentEq :
-            (some (pc, Assembly.Instr.prim op) :
-                Option (Nat × Assembly.Instr)) =
-              some (pc0, instr) := by
-          exact hAt'.symm.trans hAt
-        cases hCurrentEq
-        exact hCallBridgeRel rfl hKind hCall)
+      { call := by
+          intro pc op kind call hAt' hKind hCall
+          have hCurrentEq :
+              (some (pc, Assembly.Instr.prim op) :
+                  Option (Nat × Assembly.Instr)) =
+                some (pc0, instr) := by
+            exact hAt'.symm.trans hAt
+          cases hCurrentEq
+          exact (hBoundaryBridgeRel rfl).call hAt' hKind hCall
+        create := by
+          intro pc op kind create hAt' hCallKind hKind hCreate
+          have hCurrentEq :
+              (some (pc, Assembly.Instr.prim op) :
+                  Option (Nat × Assembly.Instr)) =
+                some (pc0, instr) := by
+            exact hAt'.symm.trans hAt
+          cases hCurrentEq
+          exact
+            (hBoundaryBridgeRel rfl).create hAt' hCallKind hKind hCreate }
       hRestReady
 
 theorem current_stepAt_running_continue_no_call
@@ -42485,15 +42674,39 @@ theorem current_stepAt_running_continue_no_call
       (OpenAssembly.Source.OpenTraceResult.current_stepAt_running_continue
         hAt hStep hRest) :=
   current_stepAt_running_continue (cfg := cfg) hAt hStep
-    (fun {op} {kind} {_call} hInstr hKind _hCall => by
+    (fun {op} hInstr => by
       cases hInstr
-      have hNoOp : op.isCallCreate = false := by
-        simpa [Assembly.Instr.usesCallCreate] using hNoInstr
-      have hNone :
-          OpenExternal.CallKind.ofEVMOperation? op.toEVM = none :=
-        OpenAssembly.Target.callKind_none_of_not_isCallCreate hNoOp
-      rw [hKind] at hNone
-      cases hNone)
+      exact
+      { call := by
+          intro pc op' kind call hAt' hKind _hCall
+          have hCurrentEq :
+              (some (pc, Assembly.Instr.prim op') :
+                  Option (Nat × Assembly.Instr)) =
+                some (pc0, Assembly.Instr.prim op) := by
+            exact hAt'.symm.trans hAt
+          cases hCurrentEq
+          have hNoOp : op.isCallCreate = false := by
+            simpa [Assembly.Instr.usesCallCreate] using hNoInstr
+          have hNone :
+              OpenExternal.CallKind.ofEVMOperation? op.toEVM = none :=
+            OpenAssembly.Target.callKind_none_of_not_isCallCreate hNoOp
+          rw [hKind] at hNone
+          cases hNone
+        create := by
+          intro pc op' kind create hAt' _hCallKind hKind _hCreate
+          have hCurrentEq :
+              (some (pc, Assembly.Instr.prim op') :
+                  Option (Nat × Assembly.Instr)) =
+                some (pc0, Assembly.Instr.prim op) := by
+            exact hAt'.symm.trans hAt
+          cases hCurrentEq
+          have hNoOp : op.isCallCreate = false := by
+            simpa [Assembly.Instr.usesCallCreate] using hNoInstr
+          have hNone :
+              OpenExternal.CreateKind.ofEVMOperation? op.toEVM = none :=
+            OpenAssembly.Target.createKind_none_of_not_isCallCreate hNoOp
+          rw [hKind] at hNone
+          cases hNone })
     hRestReady
 
 theorem current_no_call_running_continue_of_current_instr_exists
@@ -42533,20 +42746,36 @@ theorem current_no_call_running_continue_of_current_instr_exists
         hStepTrace :=
     SourceOpenTraceCurrentSharedBridgeReadyFor.stepRunning (cfg := cfg)
       hOpenStep
-      (fun {pc} {op} {kind} {_call} hAt' hKind _hCall => by
-        have hCurrentEq :
-            (some (pc, Assembly.Instr.prim op) :
-                Option (Nat × Assembly.Instr)) =
-              some (pc0, instr) := by
-          exact hAt'.symm.trans hAt
-        cases hCurrentEq
-        have hNoOp : op.isCallCreate = false := by
-          simpa [Assembly.Instr.usesCallCreate] using hNoInstr
-        have hNone :
-            OpenExternal.CallKind.ofEVMOperation? op.toEVM = none :=
-          OpenAssembly.Target.callKind_none_of_not_isCallCreate hNoOp
-        rw [hKind] at hNone
-        cases hNone)
+      { call := by
+          intro pc op kind call hAt' hKind _hCall
+          have hCurrentEq :
+              (some (pc, Assembly.Instr.prim op) :
+                  Option (Nat × Assembly.Instr)) =
+                some (pc0, instr) := by
+            exact hAt'.symm.trans hAt
+          cases hCurrentEq
+          have hNoOp : op.isCallCreate = false := by
+            simpa [Assembly.Instr.usesCallCreate] using hNoInstr
+          have hNone :
+              OpenExternal.CallKind.ofEVMOperation? op.toEVM = none :=
+            OpenAssembly.Target.callKind_none_of_not_isCallCreate hNoOp
+          rw [hKind] at hNone
+          cases hNone
+        create := by
+          intro pc op kind create hAt' _hCallKind hKind _hCreate
+          have hCurrentEq :
+              (some (pc, Assembly.Instr.prim op) :
+                  Option (Nat × Assembly.Instr)) =
+                some (pc0, instr) := by
+            exact hAt'.symm.trans hAt
+          cases hCurrentEq
+          have hNoOp : op.isCallCreate = false := by
+            simpa [Assembly.Instr.usesCallCreate] using hNoInstr
+          have hNone :
+              OpenExternal.CreateKind.ofEVMOperation? op.toEVM = none :=
+            OpenAssembly.Target.createKind_none_of_not_isCallCreate hNoOp
+          rw [hKind] at hNone
+          cases hNone }
       hRestReady
   have hFullTrace :
       OpenAssembly.Source.OpenTraceResult program (fuel + 1) state
@@ -47321,18 +47550,32 @@ theorem of_program_no_callCreate
       exact
         SourceOpenTraceCurrentSharedBridgeReadyFor.stepRunning (cfg := cfg)
           hStep
-          (fun {pc} {op} {kind} {_call} hAt hKind _hCall => by
-            have hNoInstr :
-                Assembly.Instr.usesCallCreate (.prim op) = false :=
-              OpenAssembly.Source.instr_usesCallCreate_false_of_instrAtPc
-                hNoCallCreate hAt
-            have hNoOp : op.isCallCreate = false := by
-              simpa [Assembly.Instr.usesCallCreate] using hNoInstr
-            have hNone :
-                OpenExternal.CallKind.ofEVMOperation? op.toEVM = none :=
-              OpenAssembly.Target.callKind_none_of_not_isCallCreate hNoOp
-            rw [hKind] at hNone
-            cases hNone)
+          { call := by
+              intro pc op kind call hAt hKind _hCall
+              have hNoInstr :
+                  Assembly.Instr.usesCallCreate (.prim op) = false :=
+                OpenAssembly.Source.instr_usesCallCreate_false_of_instrAtPc
+                  hNoCallCreate hAt
+              have hNoOp : op.isCallCreate = false := by
+                simpa [Assembly.Instr.usesCallCreate] using hNoInstr
+              have hNone :
+                  OpenExternal.CallKind.ofEVMOperation? op.toEVM = none :=
+                OpenAssembly.Target.callKind_none_of_not_isCallCreate hNoOp
+              rw [hKind] at hNone
+              cases hNone
+            create := by
+              intro pc op kind create hAt _hCallKind hKind _hCreate
+              have hNoInstr :
+                  Assembly.Instr.usesCallCreate (.prim op) = false :=
+                OpenAssembly.Source.instr_usesCallCreate_false_of_instrAtPc
+                  hNoCallCreate hAt
+              have hNoOp : op.isCallCreate = false := by
+                simpa [Assembly.Instr.usesCallCreate] using hNoInstr
+              have hNone :
+                  OpenExternal.CreateKind.ofEVMOperation? op.toEVM = none :=
+                OpenAssembly.Target.createKind_none_of_not_isCallCreate hNoOp
+              rw [hKind] at hNone
+              cases hNone }
           ih
   | stepHalted hStep =>
       exact SourceOpenTraceCurrentSharedBridgeReadyFor.stepHalted hStep
@@ -47561,7 +47804,9 @@ theorem compilerOpenPrimitive_callKind_stackPrefix_sourceTrace_currentSharedBrid
       SourceOpenTraceCurrentSharedBridgeReadyFor (cfg := cfg) hRawTrace :=
     SourceOpenTraceCurrentSharedBridgeReadyFor.current_stepAt_running_continue
       hAt hStepAt
-      (fun _hInstr _hKind _hCall => hBridgeRel)
+      (fun _hInstr =>
+        SourceOpenCurrentSharedBridgeBoundaryRel.of_shared_bridge
+          (program := program) hBridgeRel)
       hTailReady
   have hFullTrace :
       OpenAssembly.Source.OpenTraceResult program (fuel + 1) state
@@ -47698,7 +47943,9 @@ theorem compilerOpenPrimitive_callKind_stackPrefixSuffixErased_sourceTrace_curre
       SourceOpenTraceCurrentSharedBridgeReadyFor (cfg := cfg) hRawTrace :=
     SourceOpenTraceCurrentSharedBridgeReadyFor.current_stepAt_running_continue
       hAt hStepAt
-      (fun _hInstr _hKind _hCall => hBridgeRel)
+      (fun _hInstr =>
+        SourceOpenCurrentSharedBridgeBoundaryRel.of_shared_bridge
+          (program := program) hBridgeRel)
       hTailReady
   have hFullTrace :
       OpenAssembly.Source.OpenTraceResult program (fuel + 1) state
@@ -48044,9 +48291,8 @@ theorem compilerOpenPrimitive_no_callCreate_stackPrefixSuffixErased_sourceTrace_
         (Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
           prim op compiler values)
         [] (.ok (compiler.withShared sharedAfter, valuesAfter)) := by
-    rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
-      (Reference.SourceBridgeFacts.CompilerOpen.Primitive.callKind_none_of_no_callCreate
-        hNoCallCreate)]
+    rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_no_callCreate
+      hNoCallCreate]
     simp [hEval, Locals.Source.State.withShared]
     exact OpenExternal.OpenResultResolves.done
   have hNoInstr :
@@ -48130,8 +48376,8 @@ theorem compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedB
         · exact BasicOpSourceBridgeSafe.no_callCreate hSafe
         · rw [hKind] at hSome
           cases hSome
-      rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
-        hKind] at hResolve
+      rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_no_callCreate
+        hNoCallCreate] at hResolve
       cases hEval : prim.eval op compiler.shared values with
       | error err =>
           simp [hEval] at hResolve
@@ -48329,8 +48575,8 @@ theorem compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedB
           cases hSome
       have hNoCallCreate : op.toPrimOp.isCallCreate = false :=
         BasicOpSourceBridgeSafe.no_callCreate hOpSafe
-      rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
-        hKind] at hResolve
+      rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_no_callCreate
+        hNoCallCreate] at hResolve
       cases hEval : prim.eval op compiler.shared values with
       | error err =>
           simp [hEval] at hResolve
@@ -50687,6 +50933,19 @@ abbrev SourceOpenTraceResponsesSharedBridgeRel
         Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
           targetShared event.response
 
+abbrev SourceOpenTraceCreateResponsesSharedBridgeRel
+    (cfg : Reference.StateRelConfig) (trace : OpenExternal.OpenTrace) :
+    Prop :=
+  ∀ {event : OpenExternal.OpenEvent}, event ∈ trace →
+    match event.create? with
+    | none => True
+    | some (_site, response) =>
+        ∀ {sourceShared : EvmYul.SharedState .Yul}
+          {targetShared : EvmYul.SharedState .EVM},
+          Reference.SharedStateRel cfg sourceShared targetShared →
+            Reference.SharedStateRel.OpenExternalCreateResponseRel cfg
+              sourceShared targetShared response
+
 namespace SourceOpenTraceResponsesSharedBridgeRel
 
 theorem left_of_append
@@ -50708,6 +50967,28 @@ theorem right_of_append
   exact hResponses (List.mem_append_right left hMem) hShared
 
 end SourceOpenTraceResponsesSharedBridgeRel
+
+namespace SourceOpenTraceCreateResponsesSharedBridgeRel
+
+theorem left_of_append
+    {cfg : Reference.StateRelConfig}
+    {left right : OpenExternal.OpenTrace}
+    (hResponses :
+      SourceOpenTraceCreateResponsesSharedBridgeRel cfg (left ++ right)) :
+    SourceOpenTraceCreateResponsesSharedBridgeRel cfg left := by
+  intro event hMem
+  exact hResponses (List.mem_append_left right hMem)
+
+theorem right_of_append
+    {cfg : Reference.StateRelConfig}
+    {left right : OpenExternal.OpenTrace}
+    (hResponses :
+      SourceOpenTraceCreateResponsesSharedBridgeRel cfg (left ++ right)) :
+    SourceOpenTraceCreateResponsesSharedBridgeRel cfg right := by
+  intro event hMem
+  exact hResponses (List.mem_append_right left hMem)
+
+end SourceOpenTraceCreateResponsesSharedBridgeRel
 
 theorem compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_args_responses
     {prim : Objects.Source.PrimitiveSemantics}
@@ -51763,8 +52044,8 @@ theorem compilerOpenPrimitive_stackPrefix_sourceTrace_currentSharedBridgeReady_o
         · exact BasicOpSourceBridgeSafe.no_callCreate hSafe
         · rw [hKind] at hSome
           cases hSome
-      rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
-        hKind] at hResolve
+      rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_no_callCreate
+        hNoCallCreate] at hResolve
       cases hEval : prim.eval op compiler.shared values with
       | error err =>
           simp [hEval] at hResolve

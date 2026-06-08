@@ -14,10 +14,9 @@ The first assembly layer deliberately has no `GAS` or exact gas accounting in
 its syntax, and raw EVM jumps are represented by labeled control-flow
 instructions. Account/code reads, logs, storage, memory, and terminal
 `SELFDESTRUCT` reuse shared EVMYulLean state transformers in the gasless source
-step relation.  `CALL`/`CREATE` are admitted at the syntax/encoding level, but
-their deployed behavior is exposed separately by
-`ExternalInteractionAssumption` until the bridge to `EvmYul.EVM.step/X` is
-proved.
+step relation.  `CALL`/`CREATE` are admitted at the syntax/encoding level; the
+deployed open-world request/response behavior is handled by the higher Yul
+open-boundary theorem, not by an extra assembly-layer oracle.
 -/
 def accepted (_op : PrimOp) : Bool :=
   true
@@ -250,53 +249,6 @@ structure CurrentContractProjectionAssumption
     (_program : Program) (_initial : EvmYul.EVM.State) : Prop where
   compareOnlyGasErasedExecutionState : True
 
-/--
-Concrete agreement package for opcodes whose full deployed behavior is provided
-by EVMYulLean's gas-aware `X` runner rather than by the gasless source step
-relation alone.
-
-Most account/storage/log operations already reuse shared EVMYulLean state
-transformers in the gasless source semantics.  The call/create family is
-different: the imported generic `EvmYul.step` is not the real EVM call/create
-interpreter, so a complete source theorem must either prove a dedicated bridge
-to `EvmYul.EVM.step/X` or carry this agreement as an explicit assumption.
--/
-structure CallCreateAgreementWithGasAwareRunner
-    (_program : Program) (_target : TargetProgram)
-    (_initial : EvmYul.EVM.State) : Prop where
-  callCreateAgreementWithGasAwareRunner : True
-
-/--
-External-interaction boundary for call/create opcodes.
-
-Programs that do not contain call/create opcodes discharge this boundary
-syntactically.  Programs that do contain them must supply the explicit agreement
-package above, which is intentionally not constructed by a default helper.
--/
-structure ExternalInteractionAssumption
-    (program : Program) (target : TargetProgram)
-    (initial : EvmYul.EVM.State) : Prop where
-  callCreateBoundary :
-    program.usesCallCreate = false ∨
-      CallCreateAgreementWithGasAwareRunner program target initial
-
-namespace ExternalInteractionAssumption
-
-def noCallCreate {program : Program} {target : TargetProgram}
-    {initial : EvmYul.EVM.State}
-    (hNoCallCreate : program.usesCallCreate = false) :
-    ExternalInteractionAssumption program target initial where
-  callCreateBoundary := Or.inl hNoCallCreate
-
-def withAgreement {program : Program} {target : TargetProgram}
-    {initial : EvmYul.EVM.State}
-    (hAgreement :
-      CallCreateAgreementWithGasAwareRunner program target initial) :
-    ExternalInteractionAssumption program target initial where
-  callCreateBoundary := Or.inr hAgreement
-
-end ExternalInteractionAssumption
-
 namespace OutOfGasPolicyAssumption
 
 def trivial {program : Program} {initial : EvmYul.EVM.State} :
@@ -320,9 +272,7 @@ gas-aware EVM execution theorem.
 No field is a new trusted constant: each later theorem must either require this
 structure as a hypothesis or prove the relevant field for a concrete execution.
 Keeping the fields here makes the trust boundary for gas and out-of-gas
-behavior visible to later compiler layers.  This legacy package is target-free;
-the target-aware `RuntimeAssumptions` additionally records the call/create
-agreement boundary.
+behavior visible to later compiler layers.
 -/
 structure EVMExecutionAssumptions (program : Program) (initial : EvmYul.EVM.State) : Prop where
   accepted : Accepted program

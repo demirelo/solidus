@@ -349,9 +349,12 @@ def run (step : PrimStep) (state : EvmYul.EVM.State) :
   | .returndatacopy =>
       match state.stack.pop3 with
       | some ⟨stack, μ₀, μ₁, μ₂⟩ =>
-          let mState' := state.toMachineState.returndatacopy μ₀ μ₁ μ₂
-          let state' := { state with toMachineState := mState' }
-          .ok <| state'.replaceStackAndIncrPC stack
+          if state.returnData.size < μ₁.toNat + μ₂.toNat then
+            .error .InvalidMemoryAccess
+          else
+            let mState' := state.toMachineState.returndatacopy μ₀ μ₁ μ₂
+            let state' := { state with toMachineState := mState' }
+            .ok <| state'.replaceStackAndIncrPC stack
       | none => .error .StackUnderflow
   | .dup n => EvmYul.dup n state
   | .swap n => EvmYul.swap n state
@@ -899,6 +902,8 @@ theorem run_isolated_length_safe
         rcases tup with ⟨rest, a, b, c⟩
         simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
           EvmYul.EVM.State.incrPC] at hRun ⊢
+        split at hRun
+        · simp at hRun
         have hRestLen := Stack.length_of_pop3_some hPop
         have hRestZero : rest.length = 0 := by
           rw [hRestLen] at hLen
@@ -1153,6 +1158,8 @@ theorem run_stack_length_safe
         rcases tup with ⟨rest, a, b, c⟩
         simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
           EvmYul.EVM.State.incrPC] at hRun ⊢
+        split at hRun
+        · simp at hRun
         cases hRun
         have hLen := Stack.length_of_pop3_some hPop
         simp [hLen]
@@ -1464,9 +1471,12 @@ theorem run_suffix_sound_safe
         have hPopTarget := Stack.pop3_append_of_some (tail := base) hPop
         rw [hStack, hPopTarget] at hRun
         simp [hPop, hShared] at hIso hRun
-        cases hIso
-        cases hRun
-        simp
+        split at hIso
+        · simp at hIso
+        · simp [*] at hRun
+          cases hIso
+          cases hRun
+          simp
   case log1 =>
     cases hPop : stack.pop3 with
     | none => simp [hPop] at hIso
@@ -1692,6 +1702,9 @@ theorem run_suffix_exists_safe
             have hPopTarget := Stack.pop3_append_of_some (tail := base) hPop
             rw [hStack, hPopTarget] at hRun
             simp [hPop, hShared] at hIso hRun
+            split at hIso
+            · simp at hIso
+            · simp [*] at hRun
       case log1 =>
         cases hPop : stack.pop3 with
         | none => simp [hPop] at hIso

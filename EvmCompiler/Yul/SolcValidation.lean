@@ -181,6 +181,8 @@ def primitiveAvailable? (profile : DialectProfile)
       profile.evmVersion.atLeast? .cancun
   | .StackMemFlow .MSIZE =>
       false
+  | .StackMemFlow .GAS =>
+      false
   | _ => true
 
 def hasDoubleDot? : List Char → Bool

@@ -18,10 +18,12 @@ abbrev AstContract := EvmYul.Yul.Ast.YulContract
 /--
 The kind of Yul call as it appears in solc's Yul AST.
 
-The existing compiler backend can lower primitive EVM/Yul operations and user
-functions through `EvmYul.Yul.Ast.Expr.Call`. Object and dialect builtins are
-kept here so the front-end import remains structural even before the backend
-has object/data-section support.
+The compiler backend lowers primitive EVM/Yul operations and user functions
+through `EvmYul.Yul.Ast.Expr.Call`. Object builtins are kept as their own call
+kind until the object-image path computes object/data placement, resolves them,
+and only then enters core Yul lowering. Dialect builtins are preserved so the
+bridge can reject unsupported dialect surfaces explicitly instead of losing that
+source-shape information.
 -/
 inductive CallKind where
   | primitive
@@ -134,7 +136,8 @@ Resolving through this structure only replaces `datasize("name")` and
 `dataoffset("name")` with literals before entering the current backend
 `Yul.Program`.  The executable `bytecodeImageUnchecked?` path below computes
 its own object/data layout and appends payload bytes; this witness remains for
-the older code-only conversion path and for checked layout theorem work.
+explicit-layout debugging, compatibility code-only conversions, and checked
+layout theorem work.
 -/
 structure ObjectLayout.Entry where
   name : Name
@@ -493,6 +496,18 @@ end ObjectBuiltinContext
 
 namespace Primitive
 
+/--
+Primitive names recognized from solc's Yul AST.
+
+This is intentionally the broad Solidity/Yul import surface, not the old
+CALL-free structured subset.  The table includes CALL-family boundaries
+(`call`, `callcode`, `delegatecall`, `staticcall`), CREATE-family boundaries
+(`create`, `create2`), and account-code/state queries (`balance`,
+`extcodesize`, `extcodecopy`, `extcodehash`).  Yul object builtins such as
+`datasize`, `dataoffset`, `datacopy`, `loadimmutable`, `setimmutable`, and
+`memoryguard` are handled through `CallKind.objectBuiltin` and the computed
+object-image path rather than through this primitive table.
+-/
 def ofName? : Name → Option (EvmYul.Operation .Yul)
   | "stop" => some .STOP
   | "add" => some .ADD
@@ -786,6 +801,18 @@ def immutableReferenceEntriesFromCodes
 
 end Bytecode
 
+namespace Expr
+
+def objectBuiltinNameFromBytes (bytes : List UInt8) : Name :=
+  String.ofList (bytes.map (fun byte => Char.ofNat byte.toNat))
+
+def objectBuiltinNameArg? : Expr → Option Name
+  | .stringLit name => some name
+  | .bytesLit bytes => some (objectBuiltinNameFromBytes bytes)
+  | _ => none
+
+end Expr
+
 mutual
   def Expr.toYul? : Expr → Option AstExpr
     | .lit value => some (.Lit value)
@@ -883,16 +910,20 @@ mutual
     | .stringLit value => some (.stringLit value)
     | .bytesLit bytes => some (.bytesLit bytes)
     | .var name => some (.var name)
-    | .call .objectBuiltin "datasize" [.stringLit name] => do
+    | .call .objectBuiltin "datasize" [nameArg] => do
+        let name ← Expr.objectBuiltinNameArg? nameArg
         let size ← context.size? name
         some (.lit size)
-    | .call .objectBuiltin "dataoffset" [.stringLit name] => do
+    | .call .objectBuiltin "dataoffset" [nameArg] => do
+        let name ← Expr.objectBuiltinNameArg? nameArg
         let offset ← context.offset? name
         some (.lit offset)
-    | .call .objectBuiltin "linkersymbol" [.stringLit name] => do
+    | .call .objectBuiltin "linkersymbol" [nameArg] => do
+        let name ← Expr.objectBuiltinNameArg? nameArg
         let value ← context.findLinkerSymbol? name
         some (.lit value)
-    | .call .objectBuiltin "loadimmutable" [.stringLit name] => do
+    | .call .objectBuiltin "loadimmutable" [nameArg] => do
+        let name ← Expr.objectBuiltinNameArg? nameArg
         let value ← context.findImmutableValue? name
         some (.lit value)
     | .call .objectBuiltin "datacopy" [target, offset, size] => do
@@ -900,6 +931,8 @@ mutual
         let offset' ← Expr.resolveObjectBuiltinsIn? offset context
         let size' ← Expr.resolveObjectBuiltinsIn? size context
         some (.call .primitive "codecopy" [target', offset', size'])
+    | .call .objectBuiltin "memoryguard" [value] =>
+        Expr.resolveObjectBuiltinsIn? value context
     | .call kind callee args => do
         let args' ← Expr.List.resolveObjectBuiltinsIn? args context
         some (.call kind callee args')
@@ -928,7 +961,8 @@ mutual
         let value' ← value.resolveObjectBuiltinsIn? context
         some (.assign names value')
     | .exprStmt (.call .objectBuiltin "setimmutable"
-          [base, .stringLit name, value]) => do
+          [base, nameArg, value]) => do
+        let name ← Expr.objectBuiltinNameArg? nameArg
         let base' ← base.resolveObjectBuiltinsIn? context
         let value' ← value.resolveObjectBuiltinsIn? context
         let references ← context.findImmutableReferences? name
@@ -1075,9 +1109,9 @@ theorem resolveObjectBuiltins_datasize_namedData
           dataOffsets := []
           linkerSymbols := [] } =
       some (.lit (EvmYul.UInt256.ofNat bytes.length)) := by
-  simp [Expr.resolveObjectBuiltinsIn?, ObjectBuiltinContext.size?,
-    ObjectBuiltinContext.findDataSize?, DataSection.sizeEntries,
-    DataSection.sizeEntry?, DataSection.size, hName]
+  simp [Expr.resolveObjectBuiltinsIn?, Expr.objectBuiltinNameArg?,
+    ObjectBuiltinContext.size?, ObjectBuiltinContext.findDataSize?,
+    DataSection.sizeEntries, DataSection.sizeEntry?, DataSection.size, hName]
 
 theorem resolveObjectBuiltins_dataoffset_namedDataBase
     {name : Name} {bytes : List UInt8} {layout : ObjectLayout} {base : Nat}
@@ -1091,9 +1125,9 @@ theorem resolveObjectBuiltins_dataoffset_namedDataBase
           ]
           linkerSymbols := [] } =
       some (.lit (EvmYul.UInt256.ofNat base)) := by
-  simp [Expr.resolveObjectBuiltinsIn?, ObjectBuiltinContext.offset?,
-    ObjectBuiltinContext.findDataOffset?, DataSection.offsetEntriesFromNat,
-    DataSection.offsetEntryFromNat?, hName]
+  simp [Expr.resolveObjectBuiltinsIn?, Expr.objectBuiltinNameArg?,
+    ObjectBuiltinContext.offset?, ObjectBuiltinContext.findDataOffset?,
+    DataSection.offsetEntriesFromNat, DataSection.offsetEntryFromNat?, hName]
 
 theorem toYul_after_resolveObjectBuiltins_datasize_namedData
     {name : Name} {bytes : List UInt8} {layout : ObjectLayout}
@@ -1142,6 +1176,15 @@ theorem toYul_after_resolveObjectBuiltins_datacopy_codecopy
   simp [resolveObjectBuiltins_datacopy_codecopy hTarget hOffset hSize,
     Expr.toYul?, Expr.List.toYul?, Primitive.ofName?, hTargetYul, hOffsetYul,
     hSizeYul]
+
+theorem resolveObjectBuiltins_memoryguard
+    {context : ObjectBuiltinContext} {value value' : Expr}
+    (hValue : value.resolveObjectBuiltinsIn? context = some value') :
+    Expr.resolveObjectBuiltinsIn?
+        (.call .objectBuiltin "memoryguard" [value])
+        context =
+      some value' := by
+  simp [Expr.resolveObjectBuiltinsIn?, hValue]
 
 end Expr
 
@@ -2495,11 +2538,27 @@ def toObjectsUnchecked? (program : Program) : Option Objects.Program := do
   let root ← Object.toObjectsUnchecked? program.object
   some { root := root }
 
+/--
+Compile only the core code of the selected object tree.
+
+This compatibility helper is useful for lower-layer debugging because it returns
+an `Assembly.TargetProgram`.  It is not the Solidity-facing bytecode image:
+object/data payloads, `datasize`/`dataoffset`, `datacopy`, subobjects, and
+immutables are handled by the computed object-image entrypoints below.
+-/
 def compileUnchecked? (program : Program) :
     Option Assembly.TargetProgram := do
   let lower ← program.toObjectsUnchecked?
   Objects.Program.compile? lower
 
+/--
+Encode only the core code compiled by `compileUnchecked?`.
+
+For Solidity creation/runtime bytecode use `bytecodeImageUnchecked?` or the
+checked `bytecodeImageChecked?` witness. Those object-image paths recursively
+compile child objects, compute object/data layout, resolve object builtins, and
+append payload bytes in the imported Yul object order.
+-/
 def bytecodeUnchecked? (program : Program) : Option ByteArray := do
   let target ← program.compileUnchecked?
   some (Assembly.Bytecode.encodeTarget target)
@@ -2743,6 +2802,14 @@ def bytecodeUncheckedWithComputedObjectData? (program : Program) :
     Option ByteArray :=
   program.bytecodeUncheckedWithComputedObjectDataAndLinkerSymbols? []
 
+/--
+Solidity-facing executable bytecode image for the selected Yul object.
+
+This is the entrypoint used by the bytecode/artifact runner: it preserves the
+Yul object tree, computes child-object/data placement from this compiler's
+emitted code lengths, resolves object builtins, and returns code plus appended
+payload bytes.
+-/
 def bytecodeImageUnchecked? (program : Program) : Option ByteArray :=
   program.object.bytecodeUncheckedImage?
 

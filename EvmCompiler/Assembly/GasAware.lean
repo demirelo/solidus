@@ -2861,7 +2861,12 @@ theorem PrimStep_run_returndatacopy_gasAvailable_eq
   simp [PrimStep.run, EvmYul.MachineState.returndatacopy,
     EvmYul.writeBytes, EvmYul.EVM.State.replaceStackAndIncrPC,
     EvmYul.EVM.State.incrPC] at hRun
-  split at hRun <;> cases hRun <;> rfl
+  split at hRun
+  · split at hRun
+    · simp at hRun
+    · cases hRun
+      rfl
+  · simp at hRun
 
 theorem PrimStep_run_dup_gasAvailable_eq (n : Nat)
     {state post : EVMState}
@@ -3145,43 +3150,48 @@ theorem EvmYul_step_returndatacopy_preserves_gasExecRel
   | some popped =>
       rcases popped with ⟨stack, mstart, rstart, size⟩
       simp [PrimStep.run, hPop] at hTarget
-      cases hTarget
-      let fullGas : EVMState :=
-        { target with
-          gasAvailable := full.gasAvailable,
-          execLength := full.execLength }
-      change
-        EvmYul.step (τ := .EVM) EvmYul.Operation.RETURNDATACOPY none
-          fullGas = .ok fullPost at hFull
-      have hStackTarget :
-          target.stack = mstart :: rstart :: size :: stack :=
-        stack_eq_cons_cons_cons_of_pop3 hPop
-      have hStep :
+      by_cases hBounds :
+          target.returnData.size < rstart.toNat + size.toNat
+      · simp [hBounds] at hTarget
+      · simp [hBounds] at hTarget
+        cases hTarget
+        let fullGas : EVMState :=
+          { target with
+            gasAvailable := full.gasAvailable,
+            execLength := full.execLength }
+        change
           EvmYul.step (τ := .EVM) EvmYul.Operation.RETURNDATACOPY none
-              fullGas =
-            .ok
-              (EvmYul.EVM.State.replaceStackAndIncrPC
-                { fullGas with
-                  toMachineState :=
-                    fullGas.toMachineState.returndatacopy mstart rstart size }
-                stack) := by
-        dsimp [fullGas]
-        rw [hStackTarget]
-        rfl
-      rw [hStep] at hFull
-      cases hFull
-      have hMachineRel :
-          fullGas.toMachineState =
-            { target.toMachineState with
-              gasAvailable := fullGas.toMachineState.gasAvailable } := by
-        simp [fullGas]
-      have hCopy :=
-        machine_returndatacopy_gasAvailable_rel
-          (mstart := mstart) (rstart := rstart) (size := size) hMachineRel
-      dsimp
-      rw [hCopy]
-      simp [GasExecRel, fullGas, EvmYul.EVM.State.replaceStackAndIncrPC,
-        EvmYul.EVM.State.incrPC]
+            fullGas = .ok fullPost at hFull
+        have hStackTarget :
+            target.stack = mstart :: rstart :: size :: stack :=
+          stack_eq_cons_cons_cons_of_pop3 hPop
+        have hStep :
+            EvmYul.step (τ := .EVM) EvmYul.Operation.RETURNDATACOPY none
+                fullGas =
+              .ok
+                (EvmYul.EVM.State.replaceStackAndIncrPC
+                  { fullGas with
+                    toMachineState :=
+                      fullGas.toMachineState.returndatacopy mstart rstart size }
+                  stack) := by
+          dsimp [fullGas]
+          rw [hStackTarget]
+          rw [EvmYul_step_returndatacopy_eq_PrimStep_run]
+          simp [PrimStep.run, EvmYul.Stack.pop3, hBounds]
+        rw [hStep] at hFull
+        cases hFull
+        have hMachineRel :
+            fullGas.toMachineState =
+              { target.toMachineState with
+                gasAvailable := fullGas.toMachineState.gasAvailable } := by
+          simp [fullGas]
+        have hCopy :=
+          machine_returndatacopy_gasAvailable_rel
+            (mstart := mstart) (rstart := rstart) (size := size) hMachineRel
+        dsimp
+        rw [hCopy]
+        simp [GasExecRel, fullGas, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
 
 theorem EvmYul_step_log0_preserves_gasExecRel
     {full target fullPost targetPost : EVMState}
@@ -4270,37 +4280,43 @@ theorem EvmYul_step_continuing_prim_exists_gasExecRel
       | some popped =>
           rcases popped with ⟨stack, mstart, rstart, size⟩
           simp [PrimStep.run, hPop] at hTarget
-          cases hTarget
-          have hStackTarget :
-              target.stack = mstart :: rstart :: size :: stack :=
-            stack_eq_cons_cons_cons_of_pop3 hPop
-          let fullGas : EVMState :=
-            { target with
-              gasAvailable := full.gasAvailable,
-              execLength := full.execLength }
-          refine
-            ⟨EvmYul.EVM.State.replaceStackAndIncrPC
-                { fullGas with
-                  toMachineState :=
-                    fullGas.toMachineState.returndatacopy mstart rstart size }
-                stack,
-              ?_, ?_⟩
-          · dsimp [fullGas]
-            rw [hStackTarget]
-            rfl
-          · have hMachineRel :
-                fullGas.toMachineState =
-                  { target.toMachineState with
-                    gasAvailable := fullGas.toMachineState.gasAvailable } := by
-              simp [fullGas]
-            have hCopy :=
-              machine_returndatacopy_gasAvailable_rel
-                (mstart := mstart) (rstart := rstart) (size := size)
-                hMachineRel
-            dsimp
-            rw [hCopy]
-            simp [GasExecRel, fullGas, EvmYul.EVM.State.replaceStackAndIncrPC,
-              EvmYul.EVM.State.incrPC]
+          by_cases hBounds :
+              target.returnData.size < rstart.toNat + size.toNat
+          · simp [hBounds] at hTarget
+          · simp [hBounds] at hTarget
+            cases hTarget
+            have hStackTarget :
+                target.stack = mstart :: rstart :: size :: stack :=
+              stack_eq_cons_cons_cons_of_pop3 hPop
+            let fullGas : EVMState :=
+              { target with
+                gasAvailable := full.gasAvailable,
+                execLength := full.execLength }
+            refine
+              ⟨EvmYul.EVM.State.replaceStackAndIncrPC
+                  { fullGas with
+                    toMachineState :=
+                      fullGas.toMachineState.returndatacopy mstart rstart size }
+                  stack,
+                ?_, ?_⟩
+            · dsimp [fullGas]
+              rw [hStackTarget]
+              simp only [PrimOp.toEVM]
+              rw [EvmYul_step_returndatacopy_eq_PrimStep_run]
+              simp [PrimStep.run, EvmYul.Stack.pop3, hBounds]
+            · have hMachineRel :
+                  fullGas.toMachineState =
+                    { target.toMachineState with
+                      gasAvailable := fullGas.toMachineState.gasAvailable } := by
+                simp [fullGas]
+              have hCopy :=
+                machine_returndatacopy_gasAvailable_rel
+                  (mstart := mstart) (rstart := rstart) (size := size)
+                  hMachineRel
+              dsimp
+              rw [hCopy]
+              simp [GasExecRel, fullGas, EvmYul.EVM.State.replaceStackAndIncrPC,
+                EvmYul.EVM.State.incrPC]
   | dup n =>
       obtain ⟨fullPost, hRun, hRelPost⟩ :=
         PrimStep_run_dup_exists_gasExecRel n hRel hTarget
@@ -5384,6 +5400,83 @@ theorem XNonGasChecksPass.intro' {validJumps : Array Word}
     XNonGasChecksPass validJumps state op :=
   ⟨hDelta, hStack, hJump, hJumpi, hReturnData, hOverflow, hStatic, hCreate⟩
 
+def XReturnDataCopyBoundsPass (state : EVMState) (op : EVMOp) : Prop :=
+  op = EvmYul.Operation.RETURNDATACOPY →
+    (state.stack.getD 1 ⟨0⟩).toNat +
+        (state.stack.getD 2 ⟨0⟩).toNat ≤
+      state.returnData.size
+
+theorem XReturnDataCopyBoundsPass.of_no_returnDataCopy
+    {state : EVMState} {op : EVMOp}
+    (hNoReturnDataCopy : op ≠ EvmYul.Operation.RETURNDATACOPY) :
+    XReturnDataCopyBoundsPass state op := by
+  intro hOp
+  exact False.elim (hNoReturnDataCopy hOp)
+
+theorem XReturnDataCopyBoundsPass_iff_of_gasExecRel
+    {full target : EVMState} {op : EVMOp}
+    (hRel : GasExecRel full target) :
+    XReturnDataCopyBoundsPass full op ↔
+      XReturnDataCopyBoundsPass target op := by
+  rw [hRel]
+  cases target
+  rfl
+
+theorem XReturnDataCopyBoundsPass.of_stepInstrResult_ok
+    {instr : TargetInstr} {target : EVMState} {result : StepResult}
+    (hStep : Target.stepInstrResult instr target = .ok result) :
+    XReturnDataCopyBoundsPass target instr.op := by
+  intro hOp
+  cases instr with
+  | push32 value =>
+      simp [TargetInstr.op] at hOp
+  | jump =>
+      simp [TargetInstr.op] at hOp
+  | jumpi =>
+      simp [TargetInstr.op] at hOp
+  | jumpdest =>
+      simp [TargetInstr.op] at hOp
+  | prim op =>
+      cases op <;> simp [TargetInstr.op, PrimOp.toEVM] at hOp
+      case returndatacopy =>
+        clear hOp
+        rw [Target.stepInstrResult, Target.stepInstr] at hStep
+        cases hPop : target.stack.pop3 with
+        | none =>
+            simp [PrimOp.step, PrimOp.continuingStep?, PrimStep.run,
+              hPop] at hStep
+            cases hStep
+        | some popped =>
+            rcases popped with ⟨stack, memStart, dataStart, size⟩
+            by_cases hBounds :
+                target.returnData.size < dataStart.toNat + size.toNat
+            · simp [PrimOp.step, PrimOp.continuingStep?, PrimStep.run,
+                hPop, hBounds] at hStep
+              cases hStep
+            · have hLe :
+                  dataStart.toNat + size.toNat ≤ target.returnData.size :=
+                Nat.le_of_not_gt hBounds
+              have hStack :
+                  target.stack = memStart :: dataStart :: size :: stack :=
+                stack_eq_cons_cons_cons_of_pop3 hPop
+              simpa [XReturnDataCopyBoundsPass, hStack] using hLe
+
+theorem XNonGasChecksPass.of_core_returnDataCopyBounds_no_create
+    {validJumps : Array Word}
+    {state : EVMState} {op : EVMOp}
+    (hCore : XNonGasCoreChecksPass validJumps state op)
+    (hReturnDataCopyBounds : XReturnDataCopyBoundsPass state op)
+    (hNoCreate : op.isCreate = false) :
+    XNonGasChecksPass validJumps state op := by
+  rcases hCore with
+    ⟨hDelta, hStack, hJump, hJumpi, hOverflow, hStatic⟩
+  refine
+    XNonGasChecksPass.intro' hDelta hStack hJump hJumpi
+      hReturnDataCopyBounds hOverflow hStatic ?_
+  intro hCreate
+  rw [hNoCreate] at hCreate
+  cases hCreate
+
 theorem XNonGasChecksPass.of_core_no_returnDataCopy_no_create
     {validJumps : Array Word}
     {state : EVMState} {op : EVMOp}
@@ -5397,7 +5490,9 @@ theorem XNonGasChecksPass.of_core_no_returnDataCopy_no_create
     XNonGasChecksPass.intro' hDelta hStack hJump hJumpi ?_
       hOverflow hStatic ?_
   · intro hOp
-    exact False.elim (hNoReturnDataCopy hOp)
+    exact
+      XReturnDataCopyBoundsPass.of_no_returnDataCopy
+        hNoReturnDataCopy hOp
   · intro hCreate
     rw [hNoCreate] at hCreate
     cases hCreate
@@ -6745,19 +6840,19 @@ def XResultAgrees (targetResult : StepResult) :
 Final committed-result observation for gas-aware execution.
 
 Successful execution observes the persistent/shared EVM state and return
-output.  All revert-like outcomes are collapsed by the run-level predicates
-below, so revert data and remaining gas are intentionally not part of the
-committed observation.
+output. Reverts reset state, so the committed observation records only their
+caller-visible output bytes. Remaining gas is still deliberately outside this
+observation: low-gas safety is about final effects, not refund exactness.
 -/
 inductive XCommittedObservation where
   | committed (state : EvmYul.State .EVM) (output : ByteArray)
-  | reverted
+  | reverted (output : ByteArray)
 
 def XTargetCommittedObservation : StepResult → XCommittedObservation
   | .running state => .committed state.toState ByteArray.empty
   | .halted halt =>
       match halt.kind with
-      | .revert => .reverted
+      | .revert => .reverted halt.output
       | .stop => .committed halt.state.toState halt.output
       | .return => .committed halt.state.toState halt.output
       | .selfdestruct => .committed halt.state.toState halt.output
@@ -6765,11 +6860,10 @@ def XTargetCommittedObservation : StepResult → XCommittedObservation
 def XResultCommittedObservation :
     EvmYul.EVM.ExecutionResult EVMState → XCommittedObservation
   | .success state output => .committed state.toState output
-  | .revert _gas _output => .reverted
+  | .revert _gas output => .reverted output
 
 def XRunOutcomeFails :
     Except EVMException (EvmYul.EVM.ExecutionResult EVMState) → Prop
-  | .ok (.revert _gas _output) => True
   | .error EvmYul.EVM.ExecutionException.OutOfGass => True
   | _ => False
 
@@ -6779,6 +6873,8 @@ def XRunOutcomeCommitsTo
   match outcome with
   | .ok (.success state output) =>
       observation = .committed state.toState output
+  | .ok (.revert _gas output) =>
+      observation = .reverted output
   | _ => False
 
 namespace XRunOutcomeCommitsTo
@@ -6792,7 +6888,7 @@ theorem ok_result_observation
   | success state output =>
       simpa [XRunOutcomeCommitsTo, XResultCommittedObservation] using hCommit
   | revert gas output =>
-      simp [XRunOutcomeCommitsTo] at hCommit
+      simpa [XRunOutcomeCommitsTo, XResultCommittedObservation] using hCommit
 
 end XRunOutcomeCommitsTo
 
@@ -6823,7 +6919,9 @@ theorem outcomeSafelyMatches
           simpa [XRunOutcomeCommitsTo, XResultCommittedObservation]
             using hCommit.symm.trans hObservation
       | revert gas output =>
-          simp [XRunOutcomeCommitsTo] at hCommit
+          refine Or.inl ⟨.revert gas output, rfl, ?_⟩
+          simpa [XRunOutcomeCommitsTo, XResultCommittedObservation]
+            using hCommit.symm.trans hObservation
   | error err =>
       simp [XRunOutcomeCommitsTo] at hCommit
 
@@ -6875,7 +6973,11 @@ theorem ok_refl (result : EvmYul.EVM.ExecutionResult EVMState) :
             by simp [XRunOutcomeCommitsTo],
             by simp [XRunOutcomeCommitsTo]⟩
   | revert gas output =>
-      exact Or.inr (by simp [XRunOutcomeFails])
+      exact
+        Or.inl
+          ⟨.reverted output,
+            by simp [XRunOutcomeCommitsTo],
+            by simp [XRunOutcomeCommitsTo]⟩
 
 theorem retarget_ok
     {candidate : Except EVMException (EvmYul.EVM.ExecutionResult EVMState)}
@@ -6900,10 +7002,17 @@ theorem retarget_ok
                   rw [← hState, ← hOutput]
                   exact hLeft⟩
         | revert gas output =>
-            simp [XRunOutcomeCommitsTo,
-              XResultCommittedObservation] at hLeft hObservation
+            cases hObservation
     | revert gas output =>
-        simp [XRunOutcomeCommitsTo] at hLeft
+        cases right with
+        | success rightState rightOutput =>
+            cases hObservation
+        | revert rightGas rightOutput =>
+            exact
+              Or.inl
+                ⟨observation, hCandidate, by
+                  simpa [XRunOutcomeCommitsTo, XResultCommittedObservation]
+                    using hLeft.trans hObservation⟩
   · exact Or.inr hFails
 
 theorem outcomeSafelyMatches_of_result
@@ -6971,11 +7080,12 @@ theorem XResultAgrees.committedObservation
       | running state =>
           cases hAgree
       | halted halt =>
-          rcases hAgree with ⟨hKind, _hOutput⟩
+          rcases hAgree with ⟨hKind, hOutput⟩
           rcases halt with ⟨kind, state, haltOutput⟩
           cases kind <;>
             simp [XResultCommittedObservation, XTargetCommittedObservation]
-              at hKind ⊢
+              at hKind hOutput ⊢
+          exact hOutput
 
 theorem XResultAgrees.outcomeSafelyMatches
     {targetResult : StepResult}
@@ -7452,9 +7562,12 @@ theorem PrimStep.run_preserves_code
       | some popped =>
           rcases popped with ⟨stack, a, b, c⟩
           simp [PrimStep.run, hPop] at hRun
-          cases hRun
-          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
-            EvmYul.EVM.State.incrPC]
+          by_cases hBounds : state.returnData.size < b.toNat + c.toNat
+          · simp [hBounds] at hRun
+          · simp [hBounds] at hRun
+            cases hRun
+            simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+              EvmYul.EVM.State.incrPC]
   | dup n =>
       by_cases hLen : n ≤ state.stack.length
       · simp [PrimStep.run, EvmYul.dup, hLen] at hRun
@@ -7803,9 +7916,12 @@ theorem PrimStep.run_preserves_perm
       | some popped =>
           rcases popped with ⟨stack, a, b, c⟩
           simp [PrimStep.run, hPop] at hRun
-          cases hRun
-          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
-            EvmYul.EVM.State.incrPC]
+          by_cases hBounds : state.returnData.size < b.toNat + c.toNat
+          · simp [hBounds] at hRun
+          · simp [hBounds] at hRun
+            cases hRun
+            simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+              EvmYul.EVM.State.incrPC]
   | dup n =>
       by_cases hLen : n ≤ state.stack.length
       · simp [PrimStep.run, EvmYul.dup, hLen] at hRun
@@ -8361,6 +8477,157 @@ def XRunListPathCoreChecksReady (validJumps : Array Word) :
             result = .halted halt
         | .error _ =>
             False
+
+def XRunListPathReturnDataCopyBoundsReady :
+    List TargetInstr → EVMState → EVMState → StepResult → Prop
+  | [], target, full, result =>
+      result = .running target ∧ GasExecRel full target
+  | instr :: rest, target, full, result =>
+      GasExecRel full target ∧
+        XReturnDataCopyBoundsPass full instr.op ∧
+        match Target.stepInstrResult instr target with
+        | .ok (.running targetPost) =>
+            ∀ {stepFuel : Nat} {fullPost : EVMState},
+              EvmYul.EVM.step stepFuel.succ
+                  (EvmYul.EVM.C' (memoryGasState full instr.op) instr.op)
+                  (some (instr.op, instr.arg))
+                  (memoryGasState full instr.op) =
+                .ok fullPost →
+              XRunListPathReturnDataCopyBoundsReady rest targetPost
+                fullPost result
+        | .ok (.halted halt) =>
+            result = .halted halt
+        | .error _ =>
+            False
+
+theorem XRunListPathReturnDataCopyBoundsReady.of_run_noReturnDataCopy_noCallCreate :
+    ∀ {code : List TargetInstr} {target full : EVMState}
+      {targetResult : StepResult},
+      Target.runListResult code target = .ok targetResult →
+      (∀ instr ∈ code, targetInstrNoReturnDataCopy instr = true) →
+      (∀ instr ∈ code, targetInstrUsesCallCreate instr = false) →
+      GasExecRel full target →
+      XRunListPathReturnDataCopyBoundsReady code target full
+        targetResult := by
+  intro code
+  induction code with
+  | nil =>
+      intro target full targetResult hRun _hNoReturnDataCopy _hNoCallCreate
+        hRel
+      simp [Target.runListResult] at hRun
+      subst targetResult
+      exact ⟨rfl, hRel⟩
+  | cons instr rest ih =>
+      intro target full targetResult hRun hNoReturnDataCopy hNoCallCreate
+        hRel
+      have hNoReturnInstr :
+          instr.op ≠ EvmYul.Operation.RETURNDATACOPY :=
+        targetInstr_op_ne_returnDataCopy_of_noReturnDataCopy
+          (hNoReturnDataCopy instr (by simp))
+      have hReturnDataCopyBounds :
+          XReturnDataCopyBoundsPass full instr.op :=
+        XReturnDataCopyBoundsPass.of_no_returnDataCopy hNoReturnInstr
+      have hNoCallInstr :
+          targetInstrUsesCallCreate instr = false :=
+        hNoCallCreate instr (by simp)
+      simp [XRunListPathReturnDataCopyBoundsReady, hRel,
+        hReturnDataCopyBounds]
+      cases hStepResult : Target.stepInstrResult instr target with
+      | error err =>
+          change False
+          rw [Target.runListResult, hStepResult] at hRun
+          change
+            (Except.error err : Except EVMException StepResult) =
+              .ok targetResult at hRun
+          cases hRun
+      | ok stepResult =>
+          cases stepResult with
+          | halted halt =>
+              simp [Target.runListResult, hStepResult] at hRun
+              cases hRun
+              rfl
+          | running targetPost =>
+              simp [Target.runListResult, hStepResult] at hRun
+              intro stepFuel fullPost hStep
+              have hRelPost :
+                  GasExecRel fullPost targetPost :=
+                EVM_step_targetInstr_preserves_gasExecRel_of_ok
+                  (gasCost :=
+                    EvmYul.EVM.C' (memoryGasState full instr.op) instr.op)
+                  hNoCallInstr (hRel.memoryGasState_left (op := instr.op))
+                  (Target.stepInstrResult_running_stepInstr
+                    hStepResult).1 hStep
+              have hNoReturnRest :
+                  ∀ instr' ∈ rest,
+                    targetInstrNoReturnDataCopy instr' = true := by
+                intro instr' hMemRest
+                exact hNoReturnDataCopy instr' (by simp [hMemRest])
+              have hNoCallRest :
+                  ∀ instr' ∈ rest,
+                    targetInstrUsesCallCreate instr' = false := by
+                intro instr' hMemRest
+                exact hNoCallCreate instr' (by simp [hMemRest])
+              exact ih hRun hNoReturnRest hNoCallRest hRelPost
+
+theorem XRunListPathReturnDataCopyBoundsReady.of_run_noCallCreate :
+    ∀ {code : List TargetInstr} {target full : EVMState}
+      {targetResult : StepResult},
+      Target.runListResult code target = .ok targetResult →
+      (∀ instr ∈ code, targetInstrUsesCallCreate instr = false) →
+      GasExecRel full target →
+      XRunListPathReturnDataCopyBoundsReady code target full
+        targetResult := by
+  intro code
+  induction code with
+  | nil =>
+      intro target full targetResult hRun _hNoCallCreate hRel
+      simp [Target.runListResult] at hRun
+      subst targetResult
+      exact ⟨rfl, hRel⟩
+  | cons instr rest ih =>
+      intro target full targetResult hRun hNoCallCreate hRel
+      have hNoCallInstr :
+          targetInstrUsesCallCreate instr = false :=
+        hNoCallCreate instr (by simp)
+      cases hStepResult : Target.stepInstrResult instr target with
+      | error err =>
+          rw [Target.runListResult, hStepResult] at hRun
+          change
+            (Except.error err : Except EVMException StepResult) =
+              .ok targetResult at hRun
+          cases hRun
+      | ok stepResult =>
+          have hReturnDataCopyBounds :
+              XReturnDataCopyBoundsPass full instr.op :=
+            (XReturnDataCopyBoundsPass_iff_of_gasExecRel hRel).2
+              (XReturnDataCopyBoundsPass.of_stepInstrResult_ok
+                hStepResult)
+          cases stepResult with
+          | halted halt =>
+              simp [XRunListPathReturnDataCopyBoundsReady, hRel,
+                hReturnDataCopyBounds, hStepResult]
+              simp [Target.runListResult, hStepResult] at hRun
+              cases hRun
+              rfl
+          | running targetPost =>
+              simp [XRunListPathReturnDataCopyBoundsReady, hRel,
+                hReturnDataCopyBounds, hStepResult]
+              simp [Target.runListResult, hStepResult] at hRun
+              intro stepFuel fullPost hStep
+              have hRelPost :
+                  GasExecRel fullPost targetPost :=
+                EVM_step_targetInstr_preserves_gasExecRel_of_ok
+                  (gasCost :=
+                    EvmYul.EVM.C' (memoryGasState full instr.op) instr.op)
+                  hNoCallInstr (hRel.memoryGasState_left (op := instr.op))
+                  (Target.stepInstrResult_running_stepInstr
+                    hStepResult).1 hStep
+              have hNoCallRest :
+                  ∀ instr' ∈ rest,
+                    targetInstrUsesCallCreate instr' = false := by
+                intro instr' hMemRest
+                exact hNoCallCreate instr' (by simp [hMemRest])
+              exact ih hRun hNoCallRest hRelPost
 
 /--
 Gasless target execution with the non-gas `EVM.X` core checks made explicit.
@@ -10340,6 +10607,55 @@ theorem XRunListPathChecksReady.of_path_core_noReturnDataCopy_noCallCreate
               intro stepFuel fullPost hStep
               exact ih (hTail hStep) hNoReturnRest hNoCallRest
 
+theorem XRunListPathChecksReady.of_path_core_returnDataCopyBounds_noCallCreate
+    {validJumps : Array Word} :
+    ∀ {code : List TargetInstr} {target full : EVMState}
+      {targetResult : StepResult},
+      XRunListPathCoreChecksReady validJumps code target full targetResult →
+      XRunListPathReturnDataCopyBoundsReady code target full targetResult →
+      (∀ instr ∈ code, targetInstrUsesCallCreate instr = false) →
+      XRunListPathChecksReady validJumps code target full targetResult := by
+  intro code
+  induction code with
+  | nil =>
+      intro target full targetResult hCore _hReturnDataCopyBounds
+        _hNoCallCreate
+      simpa [XRunListPathCoreChecksReady, XRunListPathChecksReady] using hCore
+  | cons instr rest ih =>
+      intro target full targetResult hCore hReturnDataCopyBounds hNoCallCreate
+      have hMem : instr ∈ instr :: rest := by simp
+      have hNoCallInstr : targetInstrUsesCallCreate instr = false :=
+        hNoCallCreate instr hMem
+      have hNoCreate : instr.op.isCreate = false :=
+        targetInstr_op_isCreate_false_of_usesCallCreate_false hNoCallInstr
+      have hNoCallRest :
+          ∀ instr' ∈ rest, targetInstrUsesCallCreate instr' = false := by
+        intro instr' hMemRest
+        exact hNoCallCreate instr' (by simp [hMemRest])
+      simp [XRunListPathCoreChecksReady] at hCore
+      rcases hCore with ⟨hRel, hCoreStep, hTailCore⟩
+      simp [XRunListPathReturnDataCopyBoundsReady] at hReturnDataCopyBounds
+      rcases hReturnDataCopyBounds with
+        ⟨_hRelBounds, hReturnDataCopyStep, hTailBounds⟩
+      have hNonGasStep :
+          XNonGasChecksPass validJumps full instr.op :=
+        XNonGasChecksPass.of_core_returnDataCopyBounds_no_create
+          hCoreStep hReturnDataCopyStep hNoCreate
+      simp [XRunListPathChecksReady, hRel, hNonGasStep, hNoCallInstr]
+      cases hStepResult : Target.stepInstrResult instr target with
+      | error err =>
+          simp [hStepResult] at hTailCore
+      | ok stepResult =>
+          cases stepResult with
+          | halted halt =>
+              simp [hStepResult] at hTailCore hTailBounds
+              exact hTailCore
+          | running targetPost =>
+              simp [hStepResult] at hTailCore hTailBounds
+              intro stepFuel fullPost hStep
+              exact
+                ih (hTailCore hStep) (hTailBounds hStep) hNoCallRest
+
 theorem XRunListPathCoreChecksReady.of_suffix_core_noCallCreate
     {validJumps : Array Word} :
     ∀ {code : List TargetInstr} {target full : EVMState}
@@ -10907,6 +11223,25 @@ theorem XRunListPathChecksReady.of_suffix_core_noReturnDataCopy_noCallCreate
                 exact hNoCallCreate instr' (by simp [hMemRest])
               exact
                 ih hRun hCoreRest hNoReturnRest hNoCallRest hRelPost
+
+theorem XRunListPathChecksReady.of_suffix_core_returnDataCopyBounds_noCallCreate
+    {validJumps : Array Word} :
+    ∀ {code : List TargetInstr} {target full : EVMState}
+      {targetResult : StepResult},
+      Target.runListResult code target = .ok targetResult →
+      XRunListSuffixCoreNonGasReady validJumps code →
+      XRunListPathReturnDataCopyBoundsReady code target full targetResult →
+      (∀ instr ∈ code, targetInstrUsesCallCreate instr = false) →
+      GasExecRel full target →
+      XRunListPathChecksReady validJumps code target full targetResult := by
+  intro code target full targetResult hRun hCore hReturnDataCopyBounds
+    hNoCallCreate hRel
+  exact
+    XRunListPathChecksReady.of_path_core_returnDataCopyBounds_noCallCreate
+      (XRunListPathCoreChecksReady.of_suffix_core_noCallCreate
+        hRun hCore hNoCallCreate hRel)
+      hReturnDataCopyBounds
+      hNoCallCreate
 
 theorem XRunListPathReady.of_suffix_ready {validJumps : Array Word} :
     ∀ {code : List TargetInstr} {target full : EVMState}
@@ -11959,6 +12294,21 @@ def XBlockPathCoreChecksReady
               (emitted.map LocatedTarget.instr) blockState fullState
               blockResult
 
+def XBlockPathReturnDataCopyBoundsReady
+    (program : Program) (target : TargetProgram) : Prop :=
+  ∀ {pc : Nat} {instr : Instr}
+      {emitted before after : List LocatedTarget}
+      {blockState fullState : EVMState} {blockResult : StepResult},
+    Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+      emitInstr? program pc instr = some emitted →
+        target.code = before ++ emitted ++ after →
+          Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+            .ok blockResult →
+          GasExecRel fullState blockState →
+            XRunListPathReturnDataCopyBoundsReady
+              (emitted.map LocatedTarget.instr) blockState fullState
+              blockResult
+
 def XBlockReplayGasReady
     (program : Program) (target : TargetProgram) : Prop :=
   ∀ {pc : Nat} {instr : Instr}
@@ -12050,6 +12400,35 @@ theorem XBlockReplayNoReturnDataCopy.op_ne_returnDataCopy_of_suffix
     (hNoReturnDataCopy hAt hEmit hTargetBlock hRun targetInstr
       (targetInstr_mem_of_suffix hSuffix))
 
+theorem XBlockPathReturnDataCopyBoundsReady.of_noReturnDataCopy_noCallCreate
+    {program : Program} {target : TargetProgram}
+    (hNoReturnDataCopy : XBlockReplayNoReturnDataCopy program target)
+    (hNoCallCreate : XBlockReplayNoCallCreate program target) :
+    XBlockPathReturnDataCopyBoundsReady program target := by
+  intro pc instr emitted before after blockState fullState blockResult hAt
+    hEmit hTargetBlock hRun hRel
+  exact
+    XRunListPathReturnDataCopyBoundsReady.of_run_noReturnDataCopy_noCallCreate
+      hRun
+      (fun targetInstr hMem =>
+        hNoReturnDataCopy hAt hEmit hTargetBlock hRun targetInstr hMem)
+      (fun targetInstr hMem =>
+        hNoCallCreate hAt hEmit hTargetBlock hRun targetInstr hMem)
+      hRel
+
+theorem XBlockPathReturnDataCopyBoundsReady.of_run_noCallCreate
+    {program : Program} {target : TargetProgram}
+    (hNoCallCreate : XBlockReplayNoCallCreate program target) :
+    XBlockPathReturnDataCopyBoundsReady program target := by
+  intro pc instr emitted before after blockState fullState blockResult hAt
+    hEmit hTargetBlock hRun hRel
+  exact
+    XRunListPathReturnDataCopyBoundsReady.of_run_noCallCreate
+      hRun
+      (fun targetInstr hMem =>
+        hNoCallCreate hAt hEmit hTargetBlock hRun targetInstr hMem)
+      hRel
+
 theorem XBlockPathChecksReady.of_core_noReturnDataCopy_noCallCreate
     {program : Program} {target : TargetProgram}
     {validJumps : Array Word}
@@ -12065,6 +12444,25 @@ theorem XBlockPathChecksReady.of_core_noReturnDataCopy_noCallCreate
       (hCore hAt hEmit hTargetBlock hRun)
       (fun targetInstr hMem =>
         hNoReturnDataCopy hAt hEmit hTargetBlock hRun targetInstr hMem)
+      (fun targetInstr hMem =>
+        hNoCallCreate hAt hEmit hTargetBlock hRun targetInstr hMem)
+      hRel
+
+theorem XBlockPathChecksReady.of_core_returnDataCopyBounds_noCallCreate
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word}
+    (hCore : XBlockReplayCoreNonGasReady program target validJumps)
+    (hReturnDataCopyBounds :
+      XBlockPathReturnDataCopyBoundsReady program target)
+    (hNoCallCreate : XBlockReplayNoCallCreate program target) :
+    XBlockPathChecksReady program target validJumps := by
+  intro pc instr emitted before after blockState fullState blockResult hAt hEmit
+    hTargetBlock hRun hRel
+  exact
+    XRunListPathChecksReady.of_suffix_core_returnDataCopyBounds_noCallCreate
+      hRun
+      (hCore hAt hEmit hTargetBlock hRun)
+      (hReturnDataCopyBounds hAt hEmit hTargetBlock hRun hRel)
       (fun targetInstr hMem =>
         hNoCallCreate hAt hEmit hTargetBlock hRun targetInstr hMem)
       hRel
@@ -12482,11 +12880,14 @@ theorem PrimStep.run_preserves_return_buffers
       | some popped =>
           rcases popped with ⟨stack, a, b, c⟩
           simp [PrimStep.run, hPop] at hRun
-          cases hRun
-          have hBuffers := hPreserve state.toMachineState a b c
-          simpa [PrimStepPreservesReturnBuffers, MachineReturnBuffersPreserved,
-            EvmYul.EVM.State.replaceStackAndIncrPC,
-            EvmYul.EVM.State.incrPC] using hBuffers
+          by_cases hBounds : state.returnData.size < b.toNat + c.toNat
+          · simp [hBounds] at hRun
+          · simp [hBounds] at hRun
+            cases hRun
+            have hBuffers := hPreserve state.toMachineState a b c
+            simpa [PrimStepPreservesReturnBuffers, MachineReturnBuffersPreserved,
+              EvmYul.EVM.State.replaceStackAndIncrPC,
+              EvmYul.EVM.State.incrPC] using hBuffers
   | dup n =>
       by_cases hLen : n ≤ state.stack.length
       · simp [PrimStep.run, EvmYul.dup, hLen] at hRun
@@ -14408,6 +14809,39 @@ theorem blockTraceResult_runs_at_or_above_computed_gas_of_core_noReturnDataCopy_
         hCore hNoReturnDataCopy hNoCallCreate))
     hNoCallCreate hDoneContinue hGasAtLeast hGasFits
 
+theorem blockTraceResult_runs_at_or_above_computed_gas_of_core_returnDataCopyBounds_no_call_create_and_budget
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState} {targetResult : StepResult}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hCode : initial.executionEnv.code = Bytecode.encodeTarget target)
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetResult)
+    (hCore :
+      XBlockReplayCoreNonGasReady program target (validJumps target))
+    (hReturnDataCopyBounds :
+      XBlockPathReturnDataCopyBoundsReady program target)
+    (hNoCallCreate : XBlockReplayNoCallCreate program target)
+    (hDoneContinue :
+      XTracePathDoneContinuation (validJumps target) targetResult)
+    {gas : Nat}
+    (hGasAtLeast :
+      XBlockTraceGasBudget program targetFuel initial targetResult ≤ gas)
+    (hGasFits : gas < EvmYul.UInt256.size) :
+    ∃ evmFuel evmResult,
+      EvmYul.EVM.X evmFuel (validJumps target)
+          (installCodeAndGas target gas initial) =
+        .ok evmResult ∧
+      XResultAgrees targetResult evmResult :=
+  blockTraceResult_runs_at_or_above_computed_gas_of_trace_checks_no_call_create_and_budget
+    hEncoding hSafety hCode hTrace
+    (XBlockTraceChecksReadyFor.of_block_path_checks hTrace
+      (XBlockPathChecksReady.of_core_returnDataCopyBounds_noCallCreate
+        hCore hReturnDataCopyBounds hNoCallCreate))
+    hNoCallCreate hDoneContinue hGasAtLeast hGasFits
+
 theorem blockTraceResult_concrete_gas_of_nonGas_no_call_create_and_budget
     {program : Program} {target : TargetProgram}
     {targetFuel : Nat} {initial : EVMState} {targetResult : StepResult}
@@ -14893,15 +15327,14 @@ structure XBridgeEvidence
   encodingCorrect : Bytecode.EncodingCorrect target (Bytecode.encodeTarget target)
   outOfGasPolicy : OutOfGasPolicyAssumption program initial
   currentContractProjection : CurrentContractProjectionAssumption program initial
-  externalInteraction : ExternalInteractionAssumption program target initial
-  blockTrace :
+  blockTrace : (
     ∃ targetFinal,
       Preservation.BlockTrace program target fuel initial targetFinal ∧
-        eraseGas targetFinal = eraseGas sourceFinal
-  sufficientGas :
+        eraseGas targetFinal = eraseGas sourceFinal)
+  sufficientGas : (
     ∃ evmFuel gasBound,
       gasBound < EvmYul.UInt256.size ∧
-      XRunsSuccessfullyAbove target initial sourceFinal evmFuel gasBound
+        XRunsSuccessfullyAbove target initial sourceFinal evmFuel gasBound)
 
 namespace XBridgeEvidence
 
@@ -14965,22 +15398,21 @@ theorem compile_whole_program_X_bridge {program : Program}
     (hRun : Source.runN program fuel initial = .ok sourceFinal)
     (hPreconditions : XPreconditionAssumptions target initial sourceFinal) :
     XBridgeEvidence program target fuel initial sourceFinal := by
-  obtain
-    ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection,
-      targetFinal, hTrace, hErase⟩ :=
-    compile_whole_program_sound hCompile hRuntime hRun
-  exact
-    { accepted := hAccepted
-      compileBytes_eq := hBytes
-      encodingCorrect := hEncoding
-      outOfGasPolicy := hOutOfGas
-      currentContractProjection := hProjection
-      externalInteraction := hRuntime.externalInteraction
-      blockTrace := ⟨targetFinal, hTrace, hErase⟩
-      sufficientGas :=
-        ⟨hPreconditions.evmFuel, hPreconditions.gasBound,
-          hPreconditions.gasBoundFits,
-          hPreconditions.runsAboveBound⟩ }
+    have hSound := compile_whole_program_sound hCompile hRuntime hRun
+    rcases hSound with
+      ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection,
+        targetFinal, hTrace, hErase⟩
+    exact
+      { accepted := hAccepted
+        compileBytes_eq := hBytes
+        encodingCorrect := hEncoding
+        outOfGasPolicy := hOutOfGas
+        currentContractProjection := hProjection
+        blockTrace := ⟨targetFinal, hTrace, hErase⟩
+        sufficientGas :=
+          ⟨hPreconditions.evmFuel, hPreconditions.gasBound,
+            hPreconditions.gasBoundFits,
+            hPreconditions.runsAboveBound⟩ }
 
 /--
 Gas-aware whole-program bridge to EVMYulLean `X`.

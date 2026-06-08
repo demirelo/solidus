@@ -130,6 +130,7 @@ required_primitives = {
     "returndatasize",
     "revert",
     "log2",
+    "gas",
 }
 missing_primitives = sorted(required_primitives - primitives)
 if missing_primitives:
@@ -143,19 +144,19 @@ if compatibility.get("status") != "blocked":
         f"unexpected TryCatchBox backend compatibility: {compatibility!r}"
     )
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-missing_blockers = sorted({"call"} - unsupported)
-if missing_blockers:
+if unsupported != {"gas"}:
     raise SystemExit(
-        f"TryCatchBox summary missing backend blockers: {missing_blockers!r}"
+        f"TryCatchBox summary expected only gas as a backend blocker: "
+        f"{unsupported!r}"
     )
 if "log2" in unsupported:
     raise SystemExit(
         f"TryCatchBox incorrectly marked log2 unsupported: {compatibility!r}"
     )
 notes = compatibility.get("notes", [])
-if not any("external call/create primitives" in note for note in notes):
+if not any("open external-boundary" in note for note in notes):
     raise SystemExit(
-        f"TryCatchBox summary missing external-call blocker note: {compatibility!r}"
+        f"TryCatchBox summary missing external-call proof note: {compatibility!r}"
     )
 
 check = json.loads(check_path.read_text())

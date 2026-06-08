@@ -10,7 +10,7 @@ external request as open Yul evaluation, then resume for every shared response.
 
 This module mirrors the stack-free source interpreters, using the same closed
 semantics for ordinary primitives and user functions, while suspending at
-CALL/CALLCODE/DELEGATECALL/STATICCALL primitive expressions.
+CALL/CALLCODE/DELEGATECALL/STATICCALL and CREATE/CREATE2 primitive expressions.
 -/
 
 namespace EvmCompiler
@@ -44,6 +44,23 @@ def openCall?
             { site := call.site
               resume := fun response => .ok (call.resume response) }
 
+def openCreate?
+    (state : Objects.Source.State) (op : Structured.BasicOp)
+    (values : List Word) :
+    Option
+      (OpenExternal.OpenCreate
+        (Except Functions.EVMException
+          (Objects.Source.State × List Word))) :=
+  match OpenExternal.CreateKind.ofBasicOp? op with
+  | none => none
+  | some kind =>
+      match SourceStateRel.compilerPrimitiveOpenCreate? state kind values with
+      | none => none
+      | some create =>
+          some
+            { site := create.site
+              resume := fun response => .ok (create.resume response) }
+
 def eval (prim : Objects.Source.PrimitiveSemantics)
     (op : Structured.BasicOp) (state : Objects.Source.State)
     (values : List Word) :
@@ -54,10 +71,16 @@ def eval (prim : Objects.Source.PrimitiveSemantics)
         { site := call.site
           resume := fun response => .done (call.resume response) }
   | none =>
-      match prim.eval op state.shared values with
-      | .ok (sharedAfter, valuesAfter) =>
-          .ok (state.withShared sharedAfter, valuesAfter)
-      | .error err => .error err
+      match openCreate? state op values with
+      | some create =>
+          .create
+            { site := create.site
+              resume := fun response => .done (create.resume response) }
+      | none =>
+          match prim.eval op state.shared values with
+          | .ok (sharedAfter, valuesAfter) =>
+              .ok (state.withShared sharedAfter, valuesAfter)
+          | .error err => .error err
 
 theorem openCall?_none_of_not_callKind
     {state : Objects.Source.State} {op : Structured.BasicOp}
@@ -66,40 +89,51 @@ theorem openCall?_none_of_not_callKind
     openCall? state op values = none := by
   simp [openCall?, hKind]
 
-theorem eval_of_not_callKind
+theorem openCreate?_none_of_not_createKind
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {values : List Word}
+    (hKind : OpenExternal.CreateKind.ofBasicOp? op = none) :
+    openCreate? state op values = none := by
+  simp [openCreate?, hKind]
+
+theorem eval_of_not_call_or_createKind
     {prim : Objects.Source.PrimitiveSemantics}
     {state : Objects.Source.State} {op : Structured.BasicOp}
     {values : List Word}
-    (hKind : OpenExternal.CallKind.ofBasicOp? op = none) :
+    (hCallKind : OpenExternal.CallKind.ofBasicOp? op = none)
+    (hCreateKind : OpenExternal.CreateKind.ofBasicOp? op = none) :
     eval prim op state values =
       match prim.eval op state.shared values with
       | .ok (sharedAfter, valuesAfter) =>
           .ok (state.withShared sharedAfter, valuesAfter)
       | .error err => .error err := by
-  simp [eval, openCall?_none_of_not_callKind hKind]
+  simp [eval, openCall?_none_of_not_callKind hCallKind,
+    openCreate?_none_of_not_createKind hCreateKind]
 
-theorem eval_resolves_closed_ok_of_not_callKind
+theorem eval_resolves_closed_ok_of_not_call_or_createKind
     {prim : Objects.Source.PrimitiveSemantics}
     {state : Objects.Source.State} {op : Structured.BasicOp}
     {values valuesAfter : List Word}
     {sharedAfter : EvmYul.SharedState .EVM}
-    (hKind : OpenExternal.CallKind.ofBasicOp? op = none)
+    (hCallKind : OpenExternal.CallKind.ofBasicOp? op = none)
+    (hCreateKind : OpenExternal.CreateKind.ofBasicOp? op = none)
     (hEval : prim.eval op state.shared values =
       .ok (sharedAfter, valuesAfter)) :
     OpenExternal.OpenResultResolves (eval prim op state values) []
       (.ok (state.withShared sharedAfter, valuesAfter)) := by
-  rw [eval_of_not_callKind hKind, hEval]
+  rw [eval_of_not_call_or_createKind hCallKind hCreateKind, hEval]
   exact OpenExternal.OpenResultResolves.done
 
-theorem eval_resolves_closed_error_of_not_callKind
+theorem eval_resolves_closed_error_of_not_call_or_createKind
     {prim : Objects.Source.PrimitiveSemantics}
     {state : Objects.Source.State} {op : Structured.BasicOp}
     {values : List Word} {err : Functions.EVMException}
-    (hKind : OpenExternal.CallKind.ofBasicOp? op = none)
+    (hCallKind : OpenExternal.CallKind.ofBasicOp? op = none)
+    (hCreateKind : OpenExternal.CreateKind.ofBasicOp? op = none)
     (hEval : prim.eval op state.shared values = .error err) :
     OpenExternal.OpenResultResolves (eval prim op state values) []
       (.error err) := by
-  rw [eval_of_not_callKind hKind, hEval]
+  rw [eval_of_not_call_or_createKind hCallKind hCreateKind, hEval]
   exact OpenExternal.OpenResultResolves.done
 
 theorem callKind_none_of_no_callCreate
@@ -110,6 +144,14 @@ theorem callKind_none_of_no_callCreate
     simp [OpenExternal.CallKind.ofBasicOp?, Structured.BasicOp.toPrimOp,
       Assembly.PrimOp.isCallCreate] at hNoCallCreate ⊢
 
+theorem createKind_none_of_no_callCreate
+    {op : Structured.BasicOp}
+    (hNoCallCreate : op.toPrimOp.isCallCreate = false) :
+    OpenExternal.CreateKind.ofBasicOp? op = none := by
+  cases op <;>
+    simp [OpenExternal.CreateKind.ofBasicOp?, Structured.BasicOp.toPrimOp,
+      Assembly.PrimOp.isCallCreate] at hNoCallCreate ⊢
+
 theorem openCall?_none_of_no_callCreate
     {state : Objects.Source.State} {op : Structured.BasicOp}
     {values : List Word}
@@ -117,6 +159,14 @@ theorem openCall?_none_of_no_callCreate
     openCall? state op values = none :=
   openCall?_none_of_not_callKind
     (callKind_none_of_no_callCreate hNoCallCreate)
+
+theorem openCreate?_none_of_no_callCreate
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {values : List Word}
+    (hNoCallCreate : op.toPrimOp.isCallCreate = false) :
+    openCreate? state op values = none :=
+  openCreate?_none_of_not_createKind
+    (createKind_none_of_no_callCreate hNoCallCreate)
 
 theorem eval_of_no_callCreate
     {prim : Objects.Source.PrimitiveSemantics}
@@ -128,7 +178,24 @@ theorem eval_of_no_callCreate
       | .ok (sharedAfter, valuesAfter) =>
           .ok (state.withShared sharedAfter, valuesAfter)
       | .error err => .error err :=
-  eval_of_not_callKind (callKind_none_of_no_callCreate hNoCallCreate)
+  eval_of_not_call_or_createKind
+    (callKind_none_of_no_callCreate hNoCallCreate)
+    (createKind_none_of_no_callCreate hNoCallCreate)
+
+theorem eval_resolves_closed_ok_of_no_callCreate
+    {prim : Objects.Source.PrimitiveSemantics}
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {values valuesAfter : List Word}
+    {sharedAfter : EvmYul.SharedState .EVM}
+    (hNoCallCreate : op.toPrimOp.isCallCreate = false)
+    (hEval : prim.eval op state.shared values =
+      .ok (sharedAfter, valuesAfter)) :
+    OpenExternal.OpenResultResolves (eval prim op state values) []
+      (.ok (state.withShared sharedAfter, valuesAfter)) :=
+  eval_resolves_closed_ok_of_not_call_or_createKind
+    (callKind_none_of_no_callCreate hNoCallCreate)
+    (createKind_none_of_no_callCreate hNoCallCreate)
+    hEval
 
 theorem openCall?_of_basicOp
     {state : Objects.Source.State} {op : Structured.BasicOp}
@@ -143,6 +210,20 @@ theorem openCall?_of_basicOp
         { site := call.site
           resume := fun response => .ok (call.resume response) } := by
   simp [openCall?, hKind, hCall]
+
+theorem openCreate?_of_basicOp
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {kind : OpenExternal.CreateKind} {values : List Word}
+    {create : OpenExternal.OpenCreate (Objects.Source.State × List Word)}
+    (hKind : OpenExternal.CreateKind.ofBasicOp? op = some kind)
+    (hCreate :
+      SourceStateRel.compilerPrimitiveOpenCreate? state kind values =
+        some create) :
+    openCreate? state op values =
+      some
+        { site := create.site
+          resume := fun response => .ok (create.resume response) } := by
+  simp [openCreate?, hKind, hCreate]
 
 theorem eval_suspends_of_basicOp
     {prim : Objects.Source.PrimitiveSemantics}
@@ -159,6 +240,23 @@ theorem eval_suspends_of_basicOp
           resume := fun response => .done (.ok (call.resume response)) } := by
   simp [eval, openCall?_of_basicOp hKind hCall]
 
+theorem eval_suspends_create_of_basicOp
+    {prim : Objects.Source.PrimitiveSemantics}
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {kind : OpenExternal.CreateKind} {values : List Word}
+    {create : OpenExternal.OpenCreate (Objects.Source.State × List Word)}
+    (hKind : OpenExternal.CreateKind.ofBasicOp? op = some kind)
+    (hCallKind : OpenExternal.CallKind.ofBasicOp? op = none)
+    (hCreate :
+      SourceStateRel.compilerPrimitiveOpenCreate? state kind values =
+        some create) :
+    eval prim op state values =
+      .create
+        { site := create.site
+          resume := fun response => .done (.ok (create.resume response)) } := by
+  simp [eval, openCall?_none_of_not_callKind hCallKind,
+    openCreate?_of_basicOp hKind hCreate]
+
 theorem openCall?_toBasicOp
     {state : Objects.Source.State} (kind : OpenExternal.CallKind)
     {values : List Word}
@@ -172,6 +270,21 @@ theorem openCall?_toBasicOp
           resume := fun response => .ok (call.resume response) } :=
   openCall?_of_basicOp
     (kind := kind) (OpenExternal.CallKind.ofBasicOp?_toBasicOp kind) hCall
+
+theorem openCreate?_toBasicOp
+    {state : Objects.Source.State} (kind : OpenExternal.CreateKind)
+    {values : List Word}
+    {create : OpenExternal.OpenCreate (Objects.Source.State × List Word)}
+    (hCreate :
+      SourceStateRel.compilerPrimitiveOpenCreate? state kind values =
+        some create) :
+    openCreate? state kind.toBasicOp values =
+      some
+        { site := create.site
+          resume := fun response => .ok (create.resume response) } :=
+  openCreate?_of_basicOp
+    (kind := kind) (OpenExternal.CreateKind.ofBasicOp?_toBasicOp kind)
+    hCreate
 
 theorem eval_suspends_toBasicOp
     {prim : Objects.Source.PrimitiveSemantics}
@@ -187,6 +300,22 @@ theorem eval_suspends_toBasicOp
           resume := fun response => .done (.ok (call.resume response)) } :=
   eval_suspends_of_basicOp
     (kind := kind) (OpenExternal.CallKind.ofBasicOp?_toBasicOp kind) hCall
+
+theorem eval_suspends_create_toBasicOp
+    {prim : Objects.Source.PrimitiveSemantics}
+    {state : Objects.Source.State} (kind : OpenExternal.CreateKind)
+    {values : List Word}
+    {create : OpenExternal.OpenCreate (Objects.Source.State × List Word)}
+    (hCreate :
+      SourceStateRel.compilerPrimitiveOpenCreate? state kind values =
+        some create) :
+    eval prim kind.toBasicOp state values =
+      .create
+        { site := create.site
+          resume := fun response => .done (.ok (create.resume response)) } :=
+  eval_suspends_create_of_basicOp
+    (kind := kind) (OpenExternal.CreateKind.ofBasicOp?_toBasicOp kind)
+    (by cases kind <;> rfl) hCreate
 
 def ResultRel (cfg : StateRelConfig) (layout : List Name) :
     Except EvmYul.Yul.Exception (EvmYul.Yul.State × List Word) →
@@ -250,6 +379,62 @@ theorem yulCompilerOpenCallRel_toYulOperation
     · intro response hResponse
       dsimp [sourceExceptCall, compilerExceptCall, ResultRel]
       exact hCallRel.preservesAllResponses response hResponse
+
+theorem yulCompilerOpenCreateRel_toYulOperation
+    {cfg : StateRelConfig} {layout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    (hRel :
+      SourceStateRel cfg layout (.Ok sourceShared store) compiler)
+    (kind : OpenExternal.CreateKind)
+    (operands : OpenExternal.CreateOperands) :
+    ∃ sourceCreate :
+        OpenExternal.OpenCreate
+          (Except EvmYul.Yul.Exception
+            (EvmYul.Yul.State × List Word)),
+    ∃ compilerCreate :
+        OpenExternal.OpenCreate
+          (Except Functions.EVMException
+            (Objects.Source.State × List Word)),
+      OpenExternal.CreateKind.yulPrimitiveEvalValuesOpenCreate?
+          (.Ok sourceShared store) kind.toYulOperation
+          (kind.args operands) =
+        some sourceCreate ∧
+      openCreate? compiler kind.toBasicOp (kind.args operands).reverse =
+        some compilerCreate ∧
+      OpenExternal.OpenCreateRel
+        (SharedStateRel.OpenExternalCreateResponseRel cfg sourceShared
+          compiler.shared)
+        (ResultRel cfg layout) sourceCreate compilerCreate := by
+  rcases
+      SourceStateRel.openExternalPrimitiveOpenCreateRel_of_args
+        hRel kind operands with
+    ⟨sourceCreate, compilerCreate, hSourceCreate, hCompilerCreate,
+      hCreateRel⟩
+  let sourceExceptCreate :
+      OpenExternal.OpenCreate
+        (Except EvmYul.Yul.Exception (EvmYul.Yul.State × List Word)) :=
+    { site := sourceCreate.site
+      resume := fun response => .ok (sourceCreate.resume response) }
+  let compilerExceptCreate :
+      OpenExternal.OpenCreate
+        (Except Functions.EVMException
+          (Objects.Source.State × List Word)) :=
+    { site := compilerCreate.site
+      resume := fun response => .ok (compilerCreate.resume response) }
+  refine ⟨sourceExceptCreate, compilerExceptCreate, ?_, ?_, ?_⟩
+  · simp [OpenExternal.CreateKind.yulPrimitiveEvalValuesOpenCreate?,
+      OpenExternal.CreateKind.ofYulOperation?_toYulOperation, hSourceCreate,
+      sourceExceptCreate]
+  · simpa [compilerExceptCreate] using
+      openCreate?_toBasicOp (state := compiler) kind hCompilerCreate
+  · constructor
+    · simpa [sourceExceptCreate, compilerExceptCreate] using
+        hCreateRel.sameSite
+    · intro response hResponse
+      dsimp [sourceExceptCreate, compilerExceptCreate, ResultRel]
+      exact hCreateRel.preservesAllResponses response hResponse
 
 end Primitive
 

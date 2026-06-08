@@ -57,7 +57,7 @@ grep -q '^forge_compare_tests_failed=0$' "$OUTDIR/compare.log"
 grep -q '^forge_compare_tests_skipped=0$' "$OUTDIR/compare.log"
 grep -q '^bridge_json_manifest_validated=yes$' "$OUTDIR/compare.log"
 grep -q '^bridge_json_summary_validated=yes$' "$OUTDIR/compare.log"
-grep -q '^bridge_json_backend_compatibility=blocked$' "$OUTDIR/compare.log"
+grep -q '^bridge_json_backend_compatibility=ready$' "$OUTDIR/compare.log"
 grep -q '^bridge_json_summary_objects=2$' "$OUTDIR/compare.log"
 grep -q '^bridge_json_summary_skipped_contracts=0$' "$OUTDIR/compare.log"
 
