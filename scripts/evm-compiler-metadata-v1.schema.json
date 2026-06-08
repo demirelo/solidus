@@ -96,7 +96,8 @@
                 "ast": {
                     "enum": [
                         "irAst",
-                        "irOptimizedAst"
+                        "irOptimizedAst",
+                        "yulAst"
                     ]
                 }
             }

@@ -107,7 +107,7 @@
           "const": "solc"
         },
         "ast": {
-          "enum": ["irAst", "irOptimizedAst"]
+          "enum": ["irAst", "irOptimizedAst", "yulAst"]
         }
       }
     },

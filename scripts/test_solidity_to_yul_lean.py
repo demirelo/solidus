@@ -224,6 +224,163 @@ class SolidityToYulLeanTests(unittest.TestCase):
             "library MathLib {}",
         )
 
+    def test_yul_standard_json_input_requests_source_ast(self):
+        request = bridge.yul_standard_json_input(
+            "Object.yul",
+            'object "Object" { code { let x := 1 } }',
+            experimental=True,
+        )
+
+        self.assertEqual(request["language"], "Yul")
+        self.assertNotIn("viaIR", request["settings"])
+        self.assertTrue(request["settings"]["experimental"])
+        self.assertEqual(
+            request["settings"]["outputSelection"]["*"]["*"],
+            ["ast"],
+        )
+
+    def test_standard_json_yul_outputs_preserve_existing_outputs_and_add_ast(self):
+        request = {
+            "language": "Yul",
+            "sources": {
+                "Object.yul": {
+                    "content": 'object "Object" { code { let x := 1 } }'
+                }
+            },
+            "settings": {
+                "outputSelection": {
+                    "*": {
+                        "*": ["evm.bytecode.object"],
+                    }
+                }
+            },
+        }
+
+        updated = bridge.ensure_standard_json_yul_outputs(
+            request,
+            default_experimental=True,
+        )
+
+        self.assertTrue(updated["settings"]["experimental"])
+        self.assertEqual(
+            updated["settings"]["outputSelection"]["*"]["*"],
+            ["evm.bytecode.object", "ast"],
+        )
+
+    def test_load_yul_source_ast_selects_standalone_yul_source(self):
+        ast = {
+            "nodeType": "YulObject",
+            "name": "Object",
+            "code": {"block": block([]), "nodeType": "YulCode"},
+            "subObjects": [],
+        }
+        output = {
+            "sources": {
+                "Other.yul": {"id": 0},
+                "Object.yul": {"id": 1, "ast": ast},
+            }
+        }
+
+        source_name, loaded = bridge.load_yul_source_ast(output, "Object.yul")
+
+        self.assertEqual(source_name, "Object.yul")
+        self.assertIs(loaded, ast)
+
+    def test_standalone_yul_data_name_recovery_annotates_solc_source_ast(self):
+        source = """
+        object "Object" {
+          code {
+            if 1 { let data := "not a declaration" }
+          }
+          data "blob" hex"00ff"
+          object "Object_deployed" {
+            code { stop() }
+            data "nested" hex"aa"
+          }
+        }
+        """
+        ast = {
+            "nodeType": "YulObject",
+            "name": "Object",
+            "code": {"block": block([]), "nodeType": "YulCode"},
+            "subObjects": [
+                {"nodeType": "YulData", "value": "00ff"},
+                {
+                    "nodeType": "YulObject",
+                    "name": "Object_deployed",
+                    "code": {"block": block([]), "nodeType": "YulCode"},
+                    "subObjects": [
+                        {"nodeType": "YulData", "value": "aa"},
+                    ],
+                },
+            ],
+        }
+
+        bridge.recover_standalone_yul_data_names(ast, source)
+
+        self.assertEqual(ast["subObjects"][0]["name"], "blob")
+        self.assertEqual(ast["subObjects"][1]["subObjects"][0]["name"], "nested")
+
+    def test_standalone_yul_render_preserves_yul_ast_frontend_metadata(self):
+        root = bridge.parse_yul_object(
+            {
+                "nodeType": "YulObject",
+                "name": "Object",
+                "code": {
+                    "block": block(
+                        [
+                            {
+                                "nodeType": "YulVariableDeclaration",
+                                "variables": [{"name": "x"}],
+                                "value": literal("1"),
+                                "nativeSrc": "0:0:0",
+                            }
+                        ]
+                    ),
+                    "nodeType": "YulCode",
+                },
+                "subObjects": [
+                    {
+                        "nodeType": "YulData",
+                        "name": "blob",
+                        "value": "00ff",
+                    }
+                ],
+            }
+        )
+        args = SimpleNamespace(
+            list_objects=False,
+            check=False,
+            auto_object_layout=False,
+            format="bridge-json",
+            object=None,
+            bridge_json=None,
+            bridge_json_dir=None,
+            linker_symbol=[],
+            object_layout=[],
+            data_base=None,
+            lake="lake",
+            lake_cwd=Path.cwd(),
+            definition="program",
+            namespace=None,
+        )
+
+        rendered, source_name, contract_name, selected_name = (
+            bridge.render_standalone_yul_object_output(
+                args,
+                root,
+                "Object.yul",
+                "Object",
+            )
+        )
+        decoded = json.loads(rendered)
+
+        self.assertEqual(source_name, "Object.yul")
+        self.assertEqual(contract_name, "Object")
+        self.assertEqual(selected_name, "Object")
+        self.assertEqual(decoded["frontend"], {"producer": "solc", "ast": "yulAst"})
+        self.assertEqual(decoded["selectedObject"]["data"][0]["name"], "blob")
+
     def test_import_path_scanner_handles_common_forms_and_comments(self):
         paths = bridge.iter_solidity_import_paths(
             """
@@ -3342,10 +3499,13 @@ class SolidityToYulLeanTests(unittest.TestCase):
             "bridge-json-v3.schema.json"
         )
         schema = json.loads(schema_path.read_text())
-        rendered = json.loads(bridge.render_bridge_json(obj, "Schema.sol", "Schema"))
+        rendered = json.loads(
+            bridge.render_bridge_json(obj, "Schema.yul", "Schema", "yulAst")
+        )
 
         jsonschema.Draft202012Validator.check_schema(schema)
         jsonschema.validate(rendered, schema)
+        self.assertEqual(rendered["frontend"], {"producer": "solc", "ast": "yulAst"})
 
     @unittest.skipIf(jsonschema is None, "jsonschema package is unavailable")
     def test_bridge_json_schema_rejects_unknown_statement_property(self):

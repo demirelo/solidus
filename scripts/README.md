@@ -127,16 +127,28 @@ library, `VALUE` should be the deployed library address.  The example above
 uses zero only because the emitted symbol is dead in this internal-library
 fixture.
 
-The script invokes `solc --standard-json`, requests the experimental `irAst`
-output, parses the Yul JSON AST, selects the runtime `*_deployed` object by
-default, and emits an `EvmCompiler.Yul.Program` definition.  Pass
-`--object creation` to select the constructor object, or pass an explicit Yul
-object name.
+For Solidity input the script invokes `solc --standard-json`, requests the
+experimental `irAst` output, parses the Yul JSON AST, selects the runtime
+`*_deployed` object by default, and emits an `EvmCompiler.Yul.Program`
+definition.  Pass `--object creation` to select the constructor object, or pass
+an explicit Yul object name.  Standalone Yul sources are accepted with
+`--input-format yul`; that path asks solc for the source-level Yul object AST
+(`frontend.ast = "yulAst"`) and sends the same object/function/data frontend to
+Lean.  Because solc's standalone source AST omits `YulData.name`, the bridge
+recovers only object/data header names from the original Yul source while still
+using solc's AST for code statements and expressions.  Solidity artifact
+formats still require Solidity ABI/metadata output.
 
 Useful inspection modes:
 
 ```sh
 scripts/solidity_to_yul_lean.py examples/Simple.sol --contract Simple --list-objects
+
+scripts/solidity_to_yul_lean.py examples/Object.yul \
+  --input-format yul \
+  --format bridge-json \
+  --object creation \
+  --output /tmp/Object.bridge.json
 
 scripts/solidity_to_yul_lean.py examples/Simple.sol \
   --contract Simple \
@@ -242,7 +254,9 @@ preserve object/dialect builtins that the current Lean `YulContract` entrypoint
 still rejects during Lean emission.  Bridge JSON schema v3 represents data
 sections as `{ "name": ..., "bytes": [...] }` objects, matching the typed Lean
 IR's explicit `DataSection` byte-list shape even when solc emits anonymous
-metadata.  The machine-readable contract for external producers is
+metadata.  Frontend metadata uses `frontend.ast = "irAst"` or
+`"irOptimizedAst"` for Solidity-produced IR, and `"yulAst"` for standalone Yul
+source ASTs.  The machine-readable contract for external producers is
 `scripts/bridge-json-v3.schema.json`; persisted bridge directories also have
 `scripts/bridge-json-manifest-v1.schema.json` for their `manifest.json` file,
 `bridgeJson` provenance blocks are covered by
@@ -1225,6 +1239,12 @@ SOLC=/Users/dan/.local/bin/solc LAKE=/Users/dan/.elan/bin/lake \
 
 Current bridge limits are intentionally explicit:
 
+- Standalone Yul files are accepted with `--input-format yul`, including Yul
+  object trees, object-code blocks, nested objects, data sections, functions,
+  for-initializer blocks, switches, and the same expression/statement syntax
+  accepted from Solidity-produced Yul ASTs.  Solc Standard JSON requests with
+  `language: "Yul"` are accepted through `--input-format standard-json` and use
+  the same `sources[...].ast` frontend path.
 - Single-result user calls are accepted anywhere a one-word expression is
   expected.  Direct `let x := f(...)`, `x := f(...)`, and statement-level
   `f(...)` calls lower to direct `Functions.Stmt.call` statements after any

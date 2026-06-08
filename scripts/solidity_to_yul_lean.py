@@ -4,11 +4,12 @@
 The Solidity-facing Lean frontend accepts a typed selected Yul object tree:
 dispatcher code, functions, data sections, child objects, and solc's mixed
 object/data item order.  This tool keeps that front half structural: it asks
-solc for `irAst` or `irOptimizedAst`, normalizes the JSON Yul AST into bridge
-JSON or `EvmCompiler.Solidity.Frontend.Program`, and never reparses
-pretty-printed Yul text.  Bytecode/artifact paths use the computed object-image
-entrypoints; lower `EvmCompiler.Yul.Program` conversions remain available for
-proof and debugging boundaries.
+solc for `irAst`, `irOptimizedAst`, or standalone Yul source `ast`,
+normalizes the JSON Yul AST into bridge JSON or
+`EvmCompiler.Solidity.Frontend.Program`, and never reparses pretty-printed Yul
+text.  Bytecode/artifact paths use the computed object-image entrypoints; lower
+`EvmCompiler.Yul.Program` conversions remain available for proof and debugging
+boundaries.
 """
 
 from __future__ import annotations
@@ -569,10 +570,14 @@ def solc_yul_ast_output(optimized: bool) -> str:
     return "irOptimizedAst" if optimized else "irAst"
 
 
+def solc_standalone_yul_ast_output() -> str:
+    return "yulAst"
+
+
 def bridge_json_frontend_metadata(ast_output: Optional[str]) -> Optional[Json]:
     if ast_output is None:
         return None
-    if ast_output not in {"irAst", "irOptimizedAst"}:
+    if ast_output not in {"irAst", "irOptimizedAst", "yulAst"}:
         fail(f"Unsupported solc Yul AST output kind: {ast_output!r}")
     return {
         "producer": BRIDGE_JSON_FRONTEND_PRODUCER,
@@ -1208,8 +1213,233 @@ class YulObject:
         }
 
 
+@dataclass(frozen=True)
+class StandaloneYulDataNameTree:
+    name: str
+    data_names: List[str]
+    subobjects: List["StandaloneYulDataNameTree"]
+
+
+@dataclass(frozen=True)
+class YulSourceToken:
+    kind: str
+    value: str
+
+
 def node_src(node: Json) -> str:
     return str(node.get("nativeSrc") or node.get("src") or "<unknown source>")
+
+
+def decode_yul_string_token(token: str) -> str:
+    try:
+        decoded = ast.literal_eval(token)
+    except (SyntaxError, ValueError) as exc:
+        fail(f"Could not decode Yul string token {token!r}: {exc}")
+    if not isinstance(decoded, str):
+        fail(f"Expected Yul string token, got {token!r}")
+    return decoded
+
+
+def yul_source_tokens(source: str) -> List[YulSourceToken]:
+    tokens: List[YulSourceToken] = []
+    i = 0
+    while i < len(source):
+        ch = source[i]
+        if ch.isspace():
+            i += 1
+            continue
+        if source.startswith("//", i):
+            newline = source.find("\n", i + 2)
+            if newline == -1:
+                break
+            i = newline + 1
+            continue
+        if source.startswith("/*", i):
+            end = source.find("*/", i + 2)
+            if end == -1:
+                fail("Unterminated block comment while scanning Yul object names")
+            i = end + 2
+            continue
+        if ch == "{":
+            tokens.append(YulSourceToken("lbrace", ch))
+            i += 1
+            continue
+        if ch == "}":
+            tokens.append(YulSourceToken("rbrace", ch))
+            i += 1
+            continue
+        if source.startswith('hex"', i):
+            start = i
+            i += 4
+            while i < len(source) and source[i] != '"':
+                i += 1
+            if i >= len(source):
+                fail("Unterminated Yul hex string while scanning object names")
+            i += 1
+            tokens.append(YulSourceToken("hexstring", source[start:i]))
+            continue
+        if ch == '"':
+            start = i
+            i += 1
+            escaped = False
+            while i < len(source):
+                current = source[i]
+                if escaped:
+                    escaped = False
+                elif current == "\\":
+                    escaped = True
+                elif current == '"':
+                    i += 1
+                    break
+                i += 1
+            else:
+                fail("Unterminated Yul string while scanning object names")
+            tokens.append(
+                YulSourceToken("string", decode_yul_string_token(source[start:i]))
+            )
+            continue
+        if ch.isascii() and (ch.isalpha() or ch in {"_", "$"}):
+            start = i
+            i += 1
+            while i < len(source):
+                current = source[i]
+                if current == "." or (
+                    current.isascii() and (current.isalnum() or current in {"_", "$"})
+                ):
+                    i += 1
+                else:
+                    break
+            tokens.append(YulSourceToken("ident", source[start:i]))
+            continue
+        i += 1
+    return tokens
+
+
+class StandaloneYulObjectNameParser:
+    def __init__(self, tokens: Sequence[YulSourceToken]) -> None:
+        self.tokens = list(tokens)
+        self.index = 0
+
+    def peek(self) -> Optional[YulSourceToken]:
+        if self.index >= len(self.tokens):
+            return None
+        return self.tokens[self.index]
+
+    def pop(self) -> Optional[YulSourceToken]:
+        token = self.peek()
+        if token is not None:
+            self.index += 1
+        return token
+
+    def expect(self, kind: str, value: Optional[str] = None) -> YulSourceToken:
+        token = self.pop()
+        if token is None or token.kind != kind or (
+            value is not None and token.value != value
+        ):
+            expected = kind if value is None else f"{kind} {value!r}"
+            got = "<eof>" if token is None else f"{token.kind} {token.value!r}"
+            fail(f"Expected {expected} while scanning Yul object names, got {got}")
+        return token
+
+    def skip_braced_block(self) -> None:
+        self.expect("lbrace")
+        depth = 1
+        while depth > 0:
+            token = self.pop()
+            if token is None:
+                fail("Unterminated Yul block while scanning object names")
+            if token.kind == "lbrace":
+                depth += 1
+            elif token.kind == "rbrace":
+                depth -= 1
+
+    def parse_object(self) -> StandaloneYulDataNameTree:
+        self.expect("ident", "object")
+        name = self.expect("string").value
+        self.expect("lbrace")
+        data_names: List[str] = []
+        subobjects: List[StandaloneYulDataNameTree] = []
+        while True:
+            token = self.peek()
+            if token is None:
+                fail("Unterminated Yul object while scanning data names")
+            if token.kind == "rbrace":
+                self.pop()
+                break
+            if token.kind == "ident" and token.value == "code":
+                self.pop()
+                self.skip_braced_block()
+                continue
+            if token.kind == "ident" and token.value == "data":
+                self.pop()
+                data_names.append(self.expect("string").value)
+                payload = self.pop()
+                if payload is None or payload.kind not in {"string", "hexstring"}:
+                    got = (
+                        "<eof>"
+                        if payload is None
+                        else f"{payload.kind} {payload.value!r}"
+                    )
+                    fail(
+                        "Expected Yul data payload while scanning data names, "
+                        f"got {got}"
+                    )
+                continue
+            if token.kind == "ident" and token.value == "object":
+                subobjects.append(self.parse_object())
+                continue
+            self.pop()
+        return StandaloneYulDataNameTree(name, data_names, subobjects)
+
+
+def parse_standalone_yul_data_name_tree(source: str) -> StandaloneYulDataNameTree:
+    parser = StandaloneYulObjectNameParser(yul_source_tokens(source))
+    return parser.parse_object()
+
+
+def apply_standalone_yul_data_names(
+    node: Json,
+    tree: StandaloneYulDataNameTree,
+) -> None:
+    if node.get("nodeType") != "YulObject":
+        fail(
+            "Expected YulObject while applying data names, "
+            f"got {node.get('nodeType')!r}"
+        )
+    name = raw_object_name(node)
+    if name != tree.name:
+        fail(
+            f"Standalone Yul object-name scan found {tree.name!r}, "
+            f"but solc AST has {name!r}"
+        )
+    data_index = 0
+    object_index = 0
+    for subobject in node.get("subObjects", []):
+        if not isinstance(subobject, dict):
+            continue
+        node_type = subobject.get("nodeType")
+        if node_type == "YulData":
+            if subobject.get("name") is None and data_index < len(tree.data_names):
+                subobject["name"] = tree.data_names[data_index]
+            data_index += 1
+        elif node_type == "YulObject":
+            if object_index >= len(tree.subobjects):
+                fail(
+                    f"Standalone Yul object-name scan found too few child objects "
+                    f"under {name!r}"
+                )
+            apply_standalone_yul_data_names(
+                subobject,
+                tree.subobjects[object_index],
+            )
+            object_index += 1
+
+
+def recover_standalone_yul_data_names(root_ast: Json, source: Optional[str]) -> None:
+    if source is None:
+        return
+    tree = parse_standalone_yul_data_name_tree(source)
+    apply_standalone_yul_data_names(root_ast, tree)
 
 
 def typed_names(nodes: Sequence[Json], field: str) -> List[str]:
@@ -4483,6 +4713,23 @@ def standard_json_input(
     return compiler_input
 
 
+def yul_standard_json_input(
+    source_name: str,
+    content: str,
+    experimental: bool,
+) -> Json:
+    compiler_input = {
+        "language": "Yul",
+        "sources": {source_name: {"content": content}},
+        "settings": {
+            "outputSelection": {"*": {"*": ["ast"]}},
+        },
+    }
+    if experimental:
+        compiler_input["settings"]["experimental"] = True
+    return compiler_input
+
+
 def required_contract_outputs(optimized: bool) -> List[str]:
     return [
         "irOptimizedAst" if optimized else "irAst",
@@ -4536,6 +4783,32 @@ def ensure_standard_json_frontend_outputs(
         "contract '*'",
     )
     by_source[""] = append_outputs(by_source.get(""), ["ast"], "source AST")
+    return compiler_input
+
+
+def ensure_standard_json_yul_outputs(
+    compiler_input: Json,
+    default_experimental: bool,
+) -> Json:
+    if not isinstance(compiler_input, dict):
+        fail("Expected solc Standard JSON input to be a JSON object")
+    compiler_input["language"] = "Yul"
+    settings = compiler_input.setdefault("settings", {})
+    if not isinstance(settings, dict):
+        fail("Malformed solc Standard JSON input: settings must be an object")
+    if default_experimental:
+        settings.setdefault("experimental", True)
+    output_selection = settings.setdefault("outputSelection", {})
+    if not isinstance(output_selection, dict):
+        fail("Malformed solc Standard JSON outputSelection must be an object")
+    by_source = output_selection.setdefault("*", {})
+    if not isinstance(by_source, dict):
+        fail("Malformed solc Standard JSON outputSelection for source '*'")
+    by_source["*"] = append_outputs(
+        by_source.get("*"),
+        ["ast"],
+        "Yul source AST",
+    )
     return compiler_input
 
 
@@ -6283,20 +6556,78 @@ def load_ir_ast(contract_output: Json, optimized: bool) -> Json:
     return ast
 
 
+def load_yul_source_ast(output: Json, source_name: Optional[str]) -> Tuple[str, Json]:
+    sources = output.get("sources")
+    if not isinstance(sources, dict):
+        fail("solc Yul output did not include sources")
+    if source_name is not None:
+        if source_name not in sources:
+            available = ", ".join(str(name) for name in sources.keys())
+            fail(
+                f"solc Yul output did not contain source {source_name!r}; "
+                f"available: {available}"
+            )
+        source = sources[source_name]
+        if not isinstance(source, dict):
+            fail(f"Malformed solc Yul source output for {source_name!r}")
+        ast = source.get("ast")
+        if not isinstance(ast, dict):
+            fail(f"solc Yul output did not include sources[{source_name!r}].ast")
+        return source_name, ast
+
+    candidates: List[Tuple[str, Json]] = []
+    for candidate_source_name, source in sources.items():
+        if not isinstance(candidate_source_name, str) or not isinstance(source, dict):
+            continue
+        ast = source.get("ast")
+        if isinstance(ast, dict):
+            candidates.append((candidate_source_name, ast))
+    if not candidates:
+        fail("solc Yul output did not include any source AST")
+    if len(candidates) > 1:
+        available = ", ".join(name for name, _ast in candidates)
+        fail(f"Pass --source-name to select a Yul source; available: {available}")
+    return candidates[0]
+
+
+def standard_json_source_content(
+    compiler_input: Json,
+    source_name: str,
+) -> Optional[str]:
+    sources = compiler_input.get("sources")
+    if not isinstance(sources, dict):
+        return None
+    source = sources.get(source_name)
+    if not isinstance(source, dict):
+        return None
+    content = source.get("content")
+    return content if isinstance(content, str) else None
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "input",
         type=Path,
-        help="Solidity source file, solc Standard JSON file, or '-' for stdin",
+        help=(
+            "Solidity or Yul source file, solc Standard JSON file, "
+            "bridge JSON file, or '-' for stdin"
+        ),
     )
     parser.add_argument(
         "--input-format",
-        choices=["solidity", "standard-json", "bridge-json", "bridge-json-manifest"],
+        choices=[
+            "solidity",
+            "yul",
+            "standard-json",
+            "bridge-json",
+            "bridge-json-manifest",
+        ],
         default="solidity",
         help=(
-            "Interpret input as Solidity source, as a solc Standard JSON request, "
-            "as normalized bridge JSON, or as a bridge JSON manifest"
+            "Interpret input as Solidity source, standalone Yul source, as a "
+            "solc Standard JSON request, as normalized bridge JSON, or as a "
+            "bridge JSON manifest"
         ),
     )
     parser.add_argument("-o", "--output", type=Path, help="Output file to write")
@@ -6380,7 +6711,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--optimized",
         action="store_true",
-        help="Request irOptimizedAst instead of irAst",
+        help=(
+            "Request irOptimizedAst instead of irAst for Solidity input. "
+            "Standalone Yul source imports use solc's source ast."
+        ),
     )
     parser.add_argument(
         "--format",
@@ -6570,7 +6904,12 @@ def render_bridge_json_input_output(
     if args.list_objects:
         if args.check:
             fail("--check is only valid when emitting Lean")
-        return "\n".join(object_tree_lines(root)) + "\n", source_name, contract_name, root.name
+        return (
+            "\n".join(object_tree_lines(root)) + "\n",
+            source_name,
+            contract_name,
+            root.name,
+        )
     if args.format in {"forge-artifact", "standard-json-output"}:
         fail(
             f"--format {args.format} needs ABI/metadata from solc output; "
@@ -6833,6 +7172,215 @@ def render_bridge_json_input_output(
     return rendered, source_name, contract_name, selected_name
 
 
+def reject_standalone_yul_solidity_options(args: argparse.Namespace) -> None:
+    if args.include_source:
+        fail("--include-source is only valid with --input-format solidity")
+    if args.remapping or args.remappings_file:
+        fail(
+            "--remapping and --remappings-file are only valid with "
+            "--input-format solidity"
+        )
+    if not args.auto_include_imports:
+        fail("--no-auto-include-imports is only valid with --input-format solidity")
+    if not args.via_ir:
+        fail("--no-via-ir is only valid with Solidity input")
+    if args.optimized:
+        fail(
+            "--optimized is not supported for standalone Yul source AST imports; "
+            "solc exposes the parsed source ast, not an optimized Yul AST"
+        )
+    if args.all_contracts:
+        fail("--all-contracts is only valid with Solidity Standard JSON input")
+
+
+def render_standalone_yul_object_output(
+    args: argparse.Namespace,
+    root: YulObject,
+    source_name: str,
+    contract_name: str,
+) -> Tuple[str, str, str, str]:
+    ast_output = solc_standalone_yul_ast_output()
+    if args.list_objects:
+        if args.check:
+            fail("--check is only valid when emitting Lean")
+        return "\n".join(object_tree_lines(root)) + "\n", source_name, contract_name, root.name
+    if args.auto_object_layout:
+        fail(
+            "--auto-object-layout requires Solidity creation/deployed bytecode "
+            "and is not valid with standalone Yul input"
+        )
+    if args.format in {"bytecode-artifact", "forge-artifact", "standard-json-output"}:
+        fail(
+            f"--format {args.format} needs Solidity ABI/metadata and creation/"
+            "runtime bytecode; use Solidity or Solidity Standard JSON input"
+        )
+
+    selected = select_object(root, args.object or "runtime")
+    selected_name = selected.name
+    bridge_json = render_bridge_json(selected, source_name, contract_name, ast_output)
+    linker_symbols = merged_linker_symbol_entries(args.linker_symbol)
+
+    if args.bridge_json:
+        args.bridge_json.write_text(bridge_json)
+    if args.bridge_json_dir:
+        write_bridge_json_output(
+            args.bridge_json_dir,
+            selected,
+            source_name,
+            contract_name,
+            args.object or "runtime",
+            linker_symbols,
+            ast_output=ast_output,
+        )
+
+    if args.format == "bridge-json":
+        if args.object_layout:
+            fail(
+                "--object-layout is only valid with --format lean-ir, "
+                "lean-json-ir, or bytecode for standalone Yul input"
+            )
+        if args.data_base is not None:
+            fail(
+                "--data-base is only valid with --format lean-ir, "
+                "lean-json-ir, or bytecode for standalone Yul input"
+            )
+        if args.linker_symbol:
+            fail(
+                "--linker-symbol is only valid with --format lean-ir, "
+                "lean-json-ir, bytecode, or lean-backend-check"
+            )
+        if args.check:
+            fail("--check is only valid when emitting Lean")
+        return bridge_json, source_name, contract_name, selected_name
+
+    if args.format == "bridge-json-summary":
+        if args.object_layout:
+            fail("--object-layout is not used with --format bridge-json-summary")
+        if args.data_base is not None:
+            fail("--data-base is not used with --format bridge-json-summary")
+        if args.linker_symbol:
+            fail("--linker-symbol is not used with --format bridge-json-summary")
+        if args.check:
+            fail("--check is only valid when emitting Lean")
+        return (
+            render_bridge_json_summary(
+                selected,
+                source_name,
+                contract_name,
+                args.object or "runtime",
+                bridge_json_frontend_metadata(ast_output),
+            ),
+            source_name,
+            contract_name,
+            selected_name,
+        )
+
+    if args.format == "lean-json-check":
+        if args.object_layout:
+            fail("--object-layout is not used with --format lean-json-check")
+        if args.data_base is not None:
+            fail("--data-base is not used with --format lean-json-check")
+        if args.linker_symbol:
+            fail("--linker-symbol is not used with --format lean-json-check")
+        if args.check:
+            fail("--check is only valid when emitting Lean")
+        return (
+            check_bridge_json_with_lean(bridge_json, args.lake, args.lake_cwd),
+            source_name,
+            contract_name,
+            selected_name,
+        )
+
+    if args.format == "lean-backend-check":
+        if args.object_layout:
+            fail("--object-layout is not used with --format lean-backend-check")
+        if args.data_base is not None:
+            fail("--data-base is not used with --format lean-backend-check")
+        if args.check:
+            fail("--check is only valid when emitting Lean")
+        return (
+            check_bridge_json_backend_with_lean(
+                bridge_json,
+                args.lake,
+                args.lake_cwd,
+                linker_symbols,
+            ),
+            source_name,
+            contract_name,
+            selected_name,
+        )
+
+    if args.format in {"lean-ir", "lean-json-ir", "bytecode"}:
+        object_layout = [
+            parse_object_layout_entry(entry) for entry in args.object_layout
+        ]
+        if args.format == "lean-ir":
+            rendered = render_frontend_module(
+                selected,
+                source_name,
+                contract_name,
+                args.definition,
+                args.namespace,
+                object_layout,
+                args.data_base,
+                linker_symbols,
+            )
+        elif args.format == "lean-json-ir":
+            rendered = render_frontend_json_module(
+                selected,
+                source_name,
+                contract_name,
+                args.definition,
+                args.namespace,
+                object_layout,
+                args.data_base,
+                linker_symbols,
+            )
+        else:
+            if args.check:
+                fail("--check is only valid when emitting Lean")
+            rendered = (
+                compile_frontend_object_bytecode(
+                    selected,
+                    source_name,
+                    contract_name,
+                    args.definition,
+                    args.namespace,
+                    object_layout,
+                    args.data_base,
+                    linker_symbols,
+                    args.lake,
+                    args.lake_cwd,
+                )
+                + "\n"
+            )
+        return rendered, source_name, contract_name, selected_name
+
+    if args.object_layout:
+        fail(
+            "--object-layout is only valid with --format lean-ir, "
+            "lean-json-ir, or bytecode for standalone Yul input"
+        )
+    if args.data_base is not None:
+        fail(
+            "--data-base is only valid with --format lean-ir, lean-json-ir, "
+            "or bytecode for standalone Yul input"
+        )
+    if args.linker_symbol:
+        fail(
+            "--linker-symbol is only valid with --format lean-ir, lean-json-ir, "
+            "bytecode, or lean-backend-check"
+        )
+    rendered = render_module(
+        selected,
+        source_name,
+        contract_name,
+        args.definition,
+        args.namespace,
+    )
+    return rendered, source_name, contract_name, selected_name
+
+
 def render_bridge_json_manifest_input_output(
     args: argparse.Namespace,
 ) -> Tuple[str, str, str, str]:
@@ -7069,6 +7617,41 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
             check_rendered_lean(args, rendered)
             return 0
+        if args.input_format == "yul":
+            reject_standalone_yul_solidity_options(args)
+            source_name, content = read_source_input(args.input, args.source_name)
+            compiler_input = yul_standard_json_input(
+                source_name,
+                content,
+                experimental=args.experimental,
+            )
+            output = run_solc(args.solc, compiler_input, args.solc_arg)
+            source_name, root_ast = load_yul_source_ast(output, source_name)
+            recover_standalone_yul_data_names(root_ast, content)
+            contract_name = raw_object_name(root_ast)
+            if args.contract is not None and args.contract != contract_name:
+                fail(
+                    f"Standalone Yul root object is {contract_name!r}, not "
+                    f"requested --contract {args.contract!r}"
+                )
+            root = parse_yul_object(root_ast)
+            rendered, source_name, contract_name, selected_name = (
+                render_standalone_yul_object_output(
+                    args,
+                    root,
+                    source_name,
+                    contract_name,
+                )
+            )
+            emit_rendered_output(
+                args,
+                rendered,
+                source_name,
+                contract_name,
+                selected_name,
+            )
+            check_rendered_lean(args, rendered)
+            return 0
         if args.input_format == "standard-json":
             if args.include_source:
                 fail("--include-source is only valid with --input-format solidity")
@@ -7077,8 +7660,48 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "--remapping and --remappings-file are only valid with "
                     "--input-format solidity"
                 )
+            compiler_input = read_standard_json_input(args.input)
+            language = compiler_input.get("language", "Solidity")
+            if language == "Yul":
+                reject_standalone_yul_solidity_options(args)
+                compiler_input = ensure_standard_json_yul_outputs(
+                    compiler_input,
+                    default_experimental=args.experimental,
+                )
+                output = run_solc(args.solc, compiler_input, args.solc_arg)
+                source_name, root_ast = load_yul_source_ast(output, args.source_name)
+                recover_standalone_yul_data_names(
+                    root_ast,
+                    standard_json_source_content(compiler_input, source_name),
+                )
+                contract_name = raw_object_name(root_ast)
+                if args.contract is not None and args.contract != contract_name:
+                    fail(
+                        f"Standalone Yul root object is {contract_name!r}, not "
+                        f"requested --contract {args.contract!r}"
+                    )
+                root = parse_yul_object(root_ast)
+                rendered, source_name, contract_name, selected_name = (
+                    render_standalone_yul_object_output(
+                        args,
+                        root,
+                        source_name,
+                        contract_name,
+                    )
+                )
+                emit_rendered_output(
+                    args,
+                    rendered,
+                    source_name,
+                    contract_name,
+                    selected_name,
+                )
+                check_rendered_lean(args, rendered)
+                return 0
+            if language != "Solidity":
+                fail(f"Unsupported solc Standard JSON language: {language!r}")
             compiler_input = ensure_standard_json_frontend_outputs(
-                read_standard_json_input(args.input),
+                compiler_input,
                 optimized=args.optimized,
                 default_via_ir=args.via_ir,
                 default_experimental=args.experimental,
