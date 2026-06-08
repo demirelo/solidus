@@ -1,5 +1,11 @@
 # Progress Log
 
+## 2026-06-08 09:41 PDT - compaction-resume/object-builtin-check
+Resumed after compaction to recheck `datasize`, `dataoffset`, and
+`setimmutable`: the object-language semantics includes them, while the raw
+primitive Yul compiler still rejects unresolved object builtins unless they are
+handled by the object/front-end resolution path.
+
 ## 2026-06-08 09:03 PDT - compaction-resume/forge-locals-blocker
 Resumed after compaction with object-builtin support reverified; current work is
 reviewing the pending backend-check nested-statement diagnostic and continuing

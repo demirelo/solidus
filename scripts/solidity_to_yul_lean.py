@@ -5685,7 +5685,11 @@ def run_lake_bytecode(lake: str, lean_source: str, cwd: Path) -> str:
         if completed.returncode != 0:
             output = "\n".join(
                 part
-                for part in [completed.stdout.strip(), completed.stderr.strip()]
+                for part in [
+                    f"returncode={completed.returncode}",
+                    completed.stdout.strip(),
+                    completed.stderr.strip(),
+                ]
                 if part
             )
             fail(f"`{lake} env lean --run {temp_path}` failed:\n{output}")
@@ -5732,7 +5736,11 @@ def run_lake_bridge_json_decode(lake: str, lean_source: str, cwd: Path) -> str:
         if completed.returncode != 0:
             output = "\n".join(
                 part
-                for part in [completed.stdout.strip(), completed.stderr.strip()]
+                for part in [
+                    f"returncode={completed.returncode}",
+                    completed.stdout.strip(),
+                    completed.stderr.strip(),
+                ]
                 if part
             )
             fail(f"`{lake} env lean --run {temp_path}` failed:\n{output}")
