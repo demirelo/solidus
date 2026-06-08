@@ -1,5 +1,19 @@
 # Progress Log
 
+## 2026-06-08 09:57 PDT - support/object-image-layout-independent-fast-path
+Added a conservative Solidity frontend object-image fast path: code that does
+not use final code-layout-dependent object builtins (`dataoffset` or
+self-`datasize`) reuses the provisional zero-immutable bytecode instead of
+recompiling after final layout, and objects without `loadimmutable` skip the
+marker-code compile. Mirrored the change in checked and unchecked image
+builders and added Lean smoke guards for layout-sensitive, data-size-only, and
+loadimmutable-only objects. Verification passed for the frontend/bridge build,
+the single-result/object-builtin smoke artifact, and focused Python bridge
+tests. Retrying the saved Uniswap v4 `PoolManager` creation object showed the
+next scale bottleneck remains the huge deployed child runtime's immutable
+marker pass: it stayed CPU-active for over seven minutes before the diagnostic
+run was stopped, with no leftover Lean process.
+
 ## 2026-06-08 09:41 PDT - compaction-resume/object-builtin-check
 Resumed after compaction to recheck `datasize`, `dataoffset`, and
 `setimmutable`: the object-language semantics includes them, while the raw

@@ -306,6 +306,31 @@ def smokeObjectProgram : Solidity.Frontend.Program :=
         objects := []
         items := [.data 0] } }
 
+def smokeDataSizeOnlyObject : Solidity.Frontend.Object :=
+  { name := "runtime"
+    dispatcher :=
+      [ .letDecl ["size"]
+          (some (.call .objectBuiltin "datasize" [.stringLit "blob"]))
+      , .exprStmt (.call .primitive "stop" []) ]
+    functions := []
+    data := [{ name? := some "blob", bytes := smokeObjectDataBytes }]
+    objects := []
+    items := [.data 0] }
+
+def smokeImmutableOnlyObject : Solidity.Frontend.Object :=
+  { name := "runtime"
+    dispatcher :=
+      [ .exprStmt
+          (.call .primitive "mstore"
+            [ .lit (EvmYul.UInt256.ofNat 0)
+            , .call .objectBuiltin "loadimmutable"
+                [.stringLit "IMM"] ])
+      , .exprStmt (.call .primitive "stop" []) ]
+    functions := []
+    data := []
+    objects := []
+    items := [] }
+
 def smokeObjectContext : Solidity.Frontend.ObjectBuiltinContext :=
   { layout := smokeObjectLayout
     dataSizes := [("blob", EvmYul.UInt256.ofNat smokeObjectDataBytes.length)]
@@ -332,6 +357,33 @@ def smokeSetImmutableNoReferenceContext :
 #guard ObjectBuiltin.unsupported? "loadimmutable" = true
 #guard ObjectBuiltin.unsupported? "linkersymbol" = true
 #guard ObjectBuiltin.unsupported? "memoryguard" = true
+
+#guard smokeObjectProgram.object.codeUsesCodeLayoutBuiltin? = true
+
+#guard smokeDataSizeOnlyObject.codeUsesCodeLayoutBuiltin? = false
+
+#guard smokeImmutableOnlyObject.codeUsesCodeLayoutBuiltin? = false
+
+#guard
+  (match
+      smokeDataSizeOnlyObject.computedImageUncheckedWithLinkerSymbols? [] with
+  | some (computed, image) =>
+      computed.codeBase == computed.code.length &&
+        computed.markerCode == computed.code &&
+          image.bytes.length == computed.codeBase + computed.payload.length
+  | none => false) = true
+
+#guard
+  (match
+      smokeImmutableOnlyObject.computedImageUncheckedWithLinkerSymbols? [] with
+  | some (computed, image) =>
+      computed.codeBase == computed.code.length &&
+        computed.markerCode.length == computed.codeBase &&
+          image.bytes.length == computed.codeBase &&
+            match image.immutableReferences with
+            | [("IMM", refs)] => !refs.isEmpty
+            | _ => false
+  | none => false) = true
 
 #guard
   Prim.terminal? ((.StopArith .STOP : EvmYul.Operation .Yul)) =

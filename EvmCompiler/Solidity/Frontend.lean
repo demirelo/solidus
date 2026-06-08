@@ -687,6 +687,71 @@ mutual
           Stmt.CaseList.loadImmutableNames rest
 end
 
+mutual
+  def Expr.usesCodeLayoutBuiltinFor? (objectName : Name) : Expr → Bool
+    | .lit _ => false
+    | .stringLit _ => false
+    | .bytesLit _ => false
+    | .var _ => false
+    | .call .objectBuiltin "dataoffset" _ => true
+    | .call .objectBuiltin "datasize" args =>
+        match args with
+        | [nameArg] =>
+            match Expr.objectBuiltinNameArg? nameArg with
+            | some name => name == objectName && Name.objectPathComponent? objectName
+            | none => true
+        | _ => true
+    | .call _ _ args => Expr.List.usesCodeLayoutBuiltinFor? objectName args
+
+  def Expr.List.usesCodeLayoutBuiltinFor? (objectName : Name) :
+      List Expr → Bool
+    | [] => false
+    | expr :: rest =>
+        Expr.usesCodeLayoutBuiltinFor? objectName expr ||
+          Expr.List.usesCodeLayoutBuiltinFor? objectName rest
+end
+
+mutual
+  def Stmt.usesCodeLayoutBuiltinFor? (objectName : Name) : Stmt → Bool
+    | .block stmts => Stmt.List.usesCodeLayoutBuiltinFor? objectName stmts
+    | .letDecl _ none => false
+    | .letDecl _ (some value) =>
+        Expr.usesCodeLayoutBuiltinFor? objectName value
+    | .assign _ value => Expr.usesCodeLayoutBuiltinFor? objectName value
+    | .exprStmt expr => Expr.usesCodeLayoutBuiltinFor? objectName expr
+    | .functionDef _ _ _ body =>
+        Stmt.List.usesCodeLayoutBuiltinFor? objectName body
+    | .switch scrutinee cases default =>
+        Expr.usesCodeLayoutBuiltinFor? objectName scrutinee ||
+          Stmt.CaseList.usesCodeLayoutBuiltinFor? objectName cases ||
+            Stmt.List.usesCodeLayoutBuiltinFor? objectName default
+    | .forLoop pre condition post body =>
+        Stmt.List.usesCodeLayoutBuiltinFor? objectName pre ||
+          Expr.usesCodeLayoutBuiltinFor? objectName condition ||
+            Stmt.List.usesCodeLayoutBuiltinFor? objectName post ||
+              Stmt.List.usesCodeLayoutBuiltinFor? objectName body
+    | .ifThen condition body =>
+        Expr.usesCodeLayoutBuiltinFor? objectName condition ||
+          Stmt.List.usesCodeLayoutBuiltinFor? objectName body
+    | .break => false
+    | .continue => false
+    | .leave => false
+
+  def Stmt.List.usesCodeLayoutBuiltinFor? (objectName : Name) :
+      List Stmt → Bool
+    | [] => false
+    | stmt :: rest =>
+        Stmt.usesCodeLayoutBuiltinFor? objectName stmt ||
+          Stmt.List.usesCodeLayoutBuiltinFor? objectName rest
+
+  def Stmt.CaseList.usesCodeLayoutBuiltinFor? (objectName : Name) :
+      List (SwitchCaseValue × List Stmt) → Bool
+    | [] => false
+    | (_value, body) :: rest =>
+        Stmt.List.usesCodeLayoutBuiltinFor? objectName body ||
+          Stmt.CaseList.usesCodeLayoutBuiltinFor? objectName rest
+end
+
 namespace NameList
 
 def insertUnique (name : Name) : List Name → List Name
@@ -724,6 +789,12 @@ def loadImmutableNames (object : Object) : List Name :=
   NameList.unique
     (Stmt.List.loadImmutableNames object.dispatcher ++
       FunctionDef.List.loadImmutableNames object.functions)
+
+def codeUsesCodeLayoutBuiltin? (object : Object) : Bool :=
+  Stmt.List.usesCodeLayoutBuiltinFor? object.name object.dispatcher ||
+    object.functions.any
+      (fun entry =>
+        Stmt.List.usesCodeLayoutBuiltinFor? object.name entry.snd.body)
 
 end Object
 
@@ -2163,8 +2234,13 @@ mutual
     if !placeholderContext.objectDataNamesUnique? then
       none
     else
-    let placeholderCode ← object.codeBytesUncheckedIn? placeholderContext
-    let codeBase := placeholderCode.length
+    let (codeBase, code?) ←
+      if object.codeUsesCodeLayoutBuiltin? then
+        let placeholderCode ← object.codeBytesUncheckedIn? placeholderContext
+        some (placeholderCode.length, (none : Option (List UInt8)))
+      else
+        let code ← object.codeBytesUncheckedIn? placeholderContext
+        some (code.length, some code)
     let selfSize := EvmYul.UInt256.ofNat (codeBase + payload.length)
     let layout ←
       ObjectItemRef.List.objectLayoutEntriesFromNat?
@@ -2183,11 +2259,18 @@ mutual
     if !context.objectDataNamesUnique? then
       none
     else
-    let code ← object.codeBytesUncheckedIn? context
+    let code ←
+      match code? with
+      | some code => some code
+      | none => object.codeBytesUncheckedIn? context
     if code.length == codeBase then
-    let markerContext : ObjectBuiltinContext :=
-      { context with immutableValues := markerImmutableValues }
-    let markerCode ← object.codeBytesUncheckedIn? markerContext
+    let markerCode ←
+      match immutableNames with
+      | [] => some code
+      | _ :: _ =>
+          let markerContext : ObjectBuiltinContext :=
+            { context with immutableValues := markerImmutableValues }
+          object.codeBytesUncheckedIn? markerContext
     if markerCode.length == codeBase then
     let ownImmutableReferences :=
       Bytecode.immutableReferenceEntriesFromCodes
@@ -2281,8 +2364,13 @@ mutual
     if !placeholderContext.objectDataNamesUnique? then
       none
     else
-    let placeholderCode ← object.codeBytesCheckedIn? placeholderContext
-    let codeBase := placeholderCode.length
+    let (codeBase, code?) ←
+      if object.codeUsesCodeLayoutBuiltin? then
+        let placeholderCode ← object.codeBytesCheckedIn? placeholderContext
+        some (placeholderCode.length, (none : Option (List UInt8)))
+      else
+        let code ← object.codeBytesCheckedIn? placeholderContext
+        some (code.length, some code)
     let selfSize := EvmYul.UInt256.ofNat (codeBase + payload.length)
     let layout ←
       ObjectItemRef.List.objectLayoutEntriesFromNat?
@@ -2301,11 +2389,18 @@ mutual
     if !context.objectDataNamesUnique? then
       none
     else
-    let code ← object.codeBytesCheckedIn? context
+    let code ←
+      match code? with
+      | some code => some code
+      | none => object.codeBytesCheckedIn? context
     if code.length == codeBase then
-    let markerContext : ObjectBuiltinContext :=
-      { context with immutableValues := markerImmutableValues }
-    let markerCode ← object.codeBytesCheckedIn? markerContext
+    let markerCode ←
+      match immutableNames with
+      | [] => some code
+      | _ :: _ =>
+          let markerContext : ObjectBuiltinContext :=
+            { context with immutableValues := markerImmutableValues }
+          object.codeBytesCheckedIn? markerContext
     if markerCode.length == codeBase then
     let ownImmutableReferences :=
       Bytecode.immutableReferenceEntriesFromCodes
