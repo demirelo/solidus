@@ -84,6 +84,95 @@ theorem generatedAddress_eq_range_word
   conv_lhs => rw [← hBaseWord]
   rw [Assembly.UInt256_ofNat_add]
 
+theorem preallocMachineFromBase_eq_preallocMachine
+    (base : Word) (words : Nat) (machine : EvmYul.MachineState) :
+    preallocMachineFromBase base words machine =
+      (range base words).preallocMachine machine := by
+  cases words with
+  | zero =>
+      rfl
+  | succ slot =>
+      change
+        machine.mstore (base + slotOffset slot) zeroWord =
+          machine.mstore ((range base (slot + 1)).word slot)
+            (EvmYul.UInt256.ofNat 0)
+      rw [generatedAddress_eq_range_word base (slot + 1) slot]
+      rfl
+
+theorem preallocMachineFromBase_ready_succ
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {machine : EvmYul.MachineState} {base : Word} {slot : Nat}
+    (hOffsetLtUInt :
+      base.toNat + 32 * slot < EvmYul.UInt256.size)
+    (hPadNoOverflow :
+      base.toNat + 32 * slot - machine.memory.size < USize.size)
+    (hWithinAfter :
+      base.toNat + 32 * (slot + 1) ≤
+        EvmYul.MachineState.M machine.activeWords.toNat
+          (base.toNat + 32 * slot) 32 * 32)
+    (hActiveAfter :
+      EvmYul.MachineState.M machine.activeWords.toNat
+          (base.toNat + 32 * slot) 32 * 32 <
+        EvmYul.UInt256.size) :
+    ScratchRegionReady
+      (preallocMachineFromBase base (slot + 1) machine)
+      (range base (slot + 1)).base
+      (range base (slot + 1)).words := by
+  let offset : Word := base + slotOffset slot
+  have hOffsetToNat :
+      offset.toNat = base.toNat + 32 * slot := by
+    simp [offset, generatedAddress_eq_range_word base (slot + 1) slot,
+      range, Locals.SourceLowering.StateRel.SpillScratch.ScratchRange.word,
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchRange.slot,
+      EvmYul.UInt256.toNat_ofNat_of_lt hOffsetLtUInt]
+  have hMemorySize :
+      (machine.mstore offset zeroWord).memory.size =
+        max machine.memory.size (base.toNat + 32 * slot + 32) := by
+    have hWriteSize :
+        (zeroWord.toByteArray.write 0 machine.memory offset.toNat 32).size =
+          max machine.memory.size (offset.toNat + 32) :=
+      Locals.SourceLowering.StateRel.SpillScratch.byteArray_write32_size_general
+        hSpec (hWordBytes zeroWord) (by
+          simpa [hOffsetToNat] using hPadNoOverflow)
+    simpa [EvmYul.MachineState.mstore, EvmYul.MachineState.writeWord,
+      EvmYul.writeBytes, hOffsetToNat, zeroWord] using hWriteSize
+  have hMLtUInt :
+      EvmYul.MachineState.M machine.activeWords.toNat
+          (base.toNat + 32 * slot) 32 <
+        EvmYul.UInt256.size := by
+    have hPos : 0 < (32 : Nat) := by decide
+    omega
+  have hActiveWordsToNat :
+      (machine.mstore offset zeroWord).activeWords.toNat =
+        EvmYul.MachineState.M machine.activeWords.toNat
+          (base.toNat + 32 * slot) 32 := by
+    change
+      (EvmYul.UInt256.ofNat
+          (EvmYul.MachineState.M machine.activeWords.toNat
+            offset.toNat 32)).toNat =
+        EvmYul.MachineState.M machine.activeWords.toNat
+          (base.toNat + 32 * slot) 32
+    rw [hOffsetToNat]
+    exact EvmYul.UInt256.toNat_ofNat_of_lt hMLtUInt
+  change
+    ScratchRegionReady
+      (machine.mstore (base + slotOffset slot) zeroWord)
+      base.toNat (slot + 1)
+  exact
+    { allocated := by
+        unfold Locals.SourceLowering.StateRel.SpillScratch.ScratchRegionAllocatedNat
+        simp [offset, hMemorySize]
+        omega
+      withinActive := by
+        unfold Locals.SourceLowering.StateRel.SpillScratch.ScratchRegionWithinActiveNat
+        simp [offset, hActiveWordsToNat]
+        exact hWithinAfter
+      activeNoOverflow := by
+        unfold Locals.SourceLowering.StateRel.SpillScratch.ScratchActiveBytesNoOverflow
+        simp [offset, hActiveWordsToNat]
+        exact hActiveAfter }
+
 theorem run_frameBumpCode (state : EVMState) (words : Nat) :
     ∃ final,
       Structured.Code.run (frameBumpCode words) state = .ok final ∧
@@ -211,6 +300,83 @@ theorem run_frameInitCode (state : EVMState) (words : Nat) :
   · exact hFinalStack
   · rw [hFinalMachine, hMidMachine]
     rfl
+
+theorem frameInitMachine_ready_succ
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {machine : EvmYul.MachineState} {slot : Nat}
+    (hOffsetLtUInt :
+      (machine.mload freePtrWord).1.toNat + 32 * slot <
+        EvmYul.UInt256.size)
+    (hPadNoOverflow :
+      (machine.mload freePtrWord).1.toNat + 32 * slot -
+          (frameBumpMachine (slot + 1) machine).memory.size <
+        USize.size)
+    (hWithinAfter :
+      (machine.mload freePtrWord).1.toNat + 32 * (slot + 1) ≤
+        EvmYul.MachineState.M
+          (frameBumpMachine (slot + 1) machine).activeWords.toNat
+          ((machine.mload freePtrWord).1.toNat + 32 * slot) 32 * 32)
+    (hActiveAfter :
+      EvmYul.MachineState.M
+          (frameBumpMachine (slot + 1) machine).activeWords.toNat
+          ((machine.mload freePtrWord).1.toNat + 32 * slot) 32 * 32 <
+        EvmYul.UInt256.size) :
+    ScratchRegionReady
+      (frameInitMachine (slot + 1) machine)
+      (range (machine.mload freePtrWord).1 (slot + 1)).base
+      (range (machine.mload freePtrWord).1 (slot + 1)).words := by
+  simpa [frameInitMachine] using
+    preallocMachineFromBase_ready_succ hSpec hWordBytes
+      (machine := frameBumpMachine (slot + 1) machine)
+      (base := (machine.mload freePtrWord).1)
+      (slot := slot)
+      hOffsetLtUInt hPadNoOverflow hWithinAfter hActiveAfter
+
+theorem run_frameInitCode_ready_succ
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    (state : EVMState) (slot : Nat)
+    (hOffsetLtUInt :
+      (state.toMachineState.mload freePtrWord).1.toNat + 32 * slot <
+        EvmYul.UInt256.size)
+    (hPadNoOverflow :
+      (state.toMachineState.mload freePtrWord).1.toNat + 32 * slot -
+          (frameBumpMachine (slot + 1) state.toMachineState).memory.size <
+        USize.size)
+    (hWithinAfter :
+      (state.toMachineState.mload freePtrWord).1.toNat +
+          32 * (slot + 1) ≤
+        EvmYul.MachineState.M
+          (frameBumpMachine (slot + 1)
+            state.toMachineState).activeWords.toNat
+          ((state.toMachineState.mload freePtrWord).1.toNat +
+            32 * slot) 32 * 32)
+    (hActiveAfter :
+      EvmYul.MachineState.M
+          (frameBumpMachine (slot + 1)
+            state.toMachineState).activeWords.toNat
+          ((state.toMachineState.mload freePtrWord).1.toNat +
+            32 * slot) 32 * 32 <
+        EvmYul.UInt256.size) :
+    ∃ final,
+      Structured.Code.run (frameInitCode (slot + 1)) state = .ok final ∧
+      final.stack =
+        (state.toMachineState.mload freePtrWord).1 :: state.stack ∧
+      final.toMachineState =
+        frameInitMachine (slot + 1) state.toMachineState ∧
+      ScratchRegionReady final.toMachineState
+        (range (state.toMachineState.mload freePtrWord).1
+          (slot + 1)).base
+        (range (state.toMachineState.mload freePtrWord).1
+          (slot + 1)).words := by
+  rcases run_frameInitCode state (slot + 1) with
+    ⟨final, hRun, hStack, hMachine⟩
+  refine ⟨final, hRun, hStack, hMachine, ?_⟩
+  rw [hMachine]
+  exact
+    frameInitMachine_ready_succ hSpec hWordBytes
+      hOffsetLtUInt hPadNoOverflow hWithinAfter hActiveAfter
 
 theorem generatedAddress_toNat_of_ready
     {machine : EvmYul.MachineState} {base : Word} {words slot : Nat}
