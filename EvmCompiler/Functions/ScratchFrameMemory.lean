@@ -659,6 +659,57 @@ theorem FrameStoreRel.load_lookup
         (machine.mload (base + slotOffset slot)).1 = value := by
   exact hRel hLookup
 
+theorem slotList_mem_of_mem
+    {env : SlotEnv} {name : Name} {slot : Nat}
+    (hMem : (name, slot) ∈ env) :
+    slot ∈ slotList env := by
+  simpa [slotList] using List.mem_map_of_mem (f := Prod.snd) hMem
+
+theorem slotList_nodup_name_eq_of_mem :
+    ∀ {env : SlotEnv} {name other : Name} {slot : Nat},
+      (slotList env).Nodup →
+      (name, slot) ∈ env →
+      (other, slot) ∈ env →
+        other = name
+  | [], name, other, slot, _hNoDup, hNameMem, _hOtherMem => by
+      simp at hNameMem
+  | (headName, headSlot) :: tail, name, other, slot,
+      hNoDup, hNameMem, hOtherMem => by
+      change (headSlot :: slotList tail).Nodup at hNoDup
+      cases hNoDup with
+      | cons hHeadFresh hTailNoDup =>
+          change (name, slot) ∈ (headName, headSlot) :: tail at hNameMem
+          change (other, slot) ∈ (headName, headSlot) :: tail at hOtherMem
+          rw [List.mem_cons] at hNameMem
+          rw [List.mem_cons] at hOtherMem
+          rcases hNameMem with hNameHead | hNameTail
+          · cases hNameHead
+            rcases hOtherMem with hOtherHead | hOtherTail
+            · cases hOtherHead
+              rfl
+            · have hTailSlot : headSlot ∈ slotList tail :=
+                slotList_mem_of_mem hOtherTail
+              exact False.elim (hHeadFresh headSlot hTailSlot rfl)
+          · rcases hOtherMem with hOtherHead | hOtherTail
+            · cases hOtherHead
+              have hTailSlot : headSlot ∈ slotList tail :=
+                slotList_mem_of_mem hNameTail
+              exact False.elim (hHeadFresh headSlot hTailSlot rfl)
+            · exact
+                slotList_nodup_name_eq_of_mem
+                  hTailNoDup hNameTail hOtherTail
+
+theorem lookupSlot?_noAlias_of_slotList_nodup
+    {env : SlotEnv} {name other : Name} {slot : Nat}
+    (hNoDup : (slotList env).Nodup)
+    (hLookup : lookupSlot? name env = some slot)
+    (hOtherLookup : lookupSlot? other env = some slot) :
+    other = name := by
+  exact
+    slotList_nodup_name_eq_of_mem hNoDup
+      (lookupSlot?_some_mem hLookup)
+      (lookupSlot?_some_mem hOtherLookup)
+
 theorem FrameStoreRel.mstore_insert
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
@@ -797,6 +848,59 @@ theorem run_storeTopSlotCode?_frameStore_assign
     exact hReadyStored
   · rw [hFinalMachine, hMachine]
     exact hRelStored
+
+theorem FrameStoreRel.mstore_insert_of_slotList_nodup
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {env : SlotEnv} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {name : Name} {slot : Nat} {value : Word}
+    (hBound : EnvSlotsBounded env words)
+    (hNoDup : (slotList env).Nodup)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (hRel : FrameStoreRel env store machine base)
+    (hLookup : lookupSlot? name env = some slot) :
+    FrameStoreRel env
+      (Locals.Source.Store.insert store name value)
+      (machine.mstore (base + slotOffset slot) value) base :=
+  FrameStoreRel.mstore_insert hSpec hWordBytes hBound hReady hRel hLookup
+    (fun hOtherLookup =>
+      lookupSlot?_noAlias_of_slotList_nodup hNoDup hLookup hOtherLookup)
+
+theorem run_storeTopSlotCode?_frameStore_assign_of_slotList_nodup
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {env : SlotEnv} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {name : Name} {slot valuesAboveBase : Nat}
+    {code : Structured.Code} {value : Word}
+    (hCode : storeTopSlotCode? valuesAboveBase slot = some code)
+    (hBound : EnvSlotsBounded env words)
+    (hNoDup : (slotList env).Nodup)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (hRel : FrameStoreRel env store machine base)
+    (hLookup : lookupSlot? name env = some slot)
+    (state : EVMState) (tail rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (hValues : (value :: tail).length = valuesAboveBase) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := (value :: tail) ++ base :: rest } =
+        .ok final ∧
+      final.stack = tail ++ base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      FrameStoreRel env
+        (Locals.Source.Store.insert store name value)
+        final.toMachineState base := by
+  exact
+    run_storeTopSlotCode?_frameStore_assign hSpec hWordBytes hCode hBound
+      hReady hRel hLookup
+      (fun hOtherLookup =>
+        lookupSlot?_noAlias_of_slotList_nodup hNoDup hLookup hOtherLookup)
+      state tail rest hMachine hValues
 
 end FrameMemory
 

@@ -1,5 +1,21 @@
 # Progress Log
 
+## 2026-06-08 16:20 PDT - compaction-resume/spill-goal-status
+Resumed after context compaction to answer how close the spill-aware compiler
+goal is to completion, checking the current scratch-frame proof checkpoint and
+remaining main-spine integration work.
+
+## 2026-06-08 16:24 PDT - proof/scratch-frame-lookup-slot-noalias
+Proved that scratch-frame slot-list uniqueness discharges the current-slot
+lookup no-alias obligation, and added slot-list-nodup wrappers for frame-store
+`MSTORE`/assignment preservation. Verification passed:
+`lake build EvmCompiler.Functions.ScratchFrameMemory
+EvmCompiler.Functions.ScratchFrameSpill EvmCompiler.Objects.Preservation
+EvmCompiler.Functions.CallAwareSpill`;
+`lake build EvmCompiler.Yul.Compiler EvmCompiler.Solidity.Frontend
+EvmCompiler.Solidity.BridgeJson`; the single-result user-call compiler smoke;
+scratch-frame proof-hole scan; and `git diff --check`.
+
 ## 2026-06-08 16:00 PDT - compaction-resume/scratch-frame-sizing-question
 Resumed after context compaction to answer whether exact scratch-frame sizing
 by dry-run analysis is already reflected in the compiler/proofs and whether it
