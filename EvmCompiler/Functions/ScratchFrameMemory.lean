@@ -378,6 +378,179 @@ theorem run_frameInitCode_ready_succ
     frameInitMachine_ready_succ hSpec hWordBytes
       hOffsetLtUInt hPadNoOverflow hWithinAfter hActiveAfter
 
+theorem run_dupCode?_copyBase
+    {depth : Nat} {code : Structured.Code}
+    (hCode : dupCode? depth = some code)
+    (state : EVMState) (front rest : EvmYul.Stack Word) (base : Word)
+    (hDepth : depth = front.length + 1) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := front ++ base :: rest } = .ok final ∧
+      final.stack = base :: front ++ base :: rest ∧
+      final.toMachineState = state.toMachineState := by
+  subst depth
+  rcases dupCode?_eq_some_inv hCode with ⟨op, hDup, rfl⟩
+  let start : EVMState := { state with stack := front ++ base :: rest }
+  let final : EVMState :=
+    start.replaceStackAndIncrPC (base :: front ++ base :: rest)
+  have hStackAt : start.stack[front.length]? = some base := by
+    simp [start]
+  have hBounds :=
+    Locals.SourceLowering.StateRel.SpillScratch.stackOp_dup?_some_bound hDup
+  rcases Locals.Direct.stackOp_dup?_step_eq_dup
+      (n := front.length + 1) hBounds.1 hBounds.2 start with
+    ⟨derivedOp, hDerivedDup, hDerivedStep⟩
+  rw [hDup] at hDerivedDup
+  cases hDerivedDup
+  have hDupValue :
+      EvmYul.dup (front.length + 1) start = .ok final := by
+    have hDupValue' :=
+      Locals.Direct.evm_dup_succ_get? (state := start)
+        (idx := front.length) hStackAt
+    simpa [final, start] using hDupValue'
+  have hOpStep :
+      Structured.BasicOp.step op start = .ok final := by
+    rw [hDerivedStep, hDupValue]
+  have hRun :
+      Structured.Code.run [Structured.BasicInstr.op op] start =
+        .ok final := by
+    simp [Structured.Code.run, Structured.BasicInstr.step, hOpStep]
+  refine ⟨final, ?_, ?_, ?_⟩
+  · simpa [start] using hRun
+  · simp [final, start, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC]
+  · cases state
+    simp [final, start, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC]
+
+theorem run_slotAddressCode?
+    {valuesAboveBase slot : Nat} {code : Structured.Code}
+    (hCode : slotAddressCode? valuesAboveBase slot = some code)
+    (state : EVMState) (values rest : EvmYul.Stack Word) (base : Word)
+    (hValues : values.length = valuesAboveBase) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.stack = (base + slotOffset slot) :: values ++ base :: rest ∧
+      final.toMachineState = state.toMachineState := by
+  rcases slotAddressCode?_eq_some_inv hCode with
+    ⟨dup, hDup, hCodeEq⟩
+  rcases run_dupCode?_copyBase hDup state values rest base
+      (by omega) with
+    ⟨mid, hDupRun, hMidStack, hMidMachine⟩
+  let offset : Word := slotOffset slot
+  let addr : Word := base + offset
+  let state1 : EVMState :=
+    mid.replaceStackAndIncrPC (offset :: base :: values ++ base :: rest)
+      (pcΔ := 33)
+  let final : EVMState :=
+    state1.replaceStackAndIncrPC (addr :: values ++ base :: rest)
+  have hTailRun :
+      Structured.Code.run
+          [Structured.BasicInstr.push offset,
+            Structured.BasicInstr.op .add] mid = .ok final := by
+    simp [Structured.Code.run, Structured.BasicInstr.step,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.execBinOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.push, EvmYul.Stack.pop2, Id.run,
+      hMidStack, offset, addr, state1, final]
+    rw [word_add_comm]
+    rfl
+  refine ⟨final, ?_, ?_, ?_⟩
+  · rw [hCodeEq, Structured.Preservation.Code.run_append, hDupRun]
+    simpa [offset] using hTailRun
+  · simp [final, state1, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, addr, offset]
+  · simpa [final, state1, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, addr, offset] using hMidMachine
+
+theorem run_loadSlotCode?
+    {valuesAboveBase slot : Nat} {code : Structured.Code}
+    (hCode : loadSlotCode? valuesAboveBase slot = some code)
+    (state : EVMState) (values rest : EvmYul.Stack Word) (base : Word)
+    (hValues : values.length = valuesAboveBase) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.stack =
+        (state.toMachineState.mload (base + slotOffset slot)).1 ::
+          values ++ base :: rest ∧
+      final.toMachineState =
+        (state.toMachineState.mload (base + slotOffset slot)).2 := by
+  rcases loadSlotCode?_eq_some_inv hCode with
+    ⟨addrCode, hAddrCode, hCodeEq⟩
+  rcases run_slotAddressCode? hAddrCode state values rest base hValues with
+    ⟨addrState, hAddrRun, hAddrStack, hAddrMachine⟩
+  let addr : Word := base + slotOffset slot
+  let loaded : Word × EvmYul.MachineState :=
+    state.toMachineState.mload addr
+  let final : EVMState :=
+    ({ addrState with toMachineState := loaded.2 } :
+      EVMState).replaceStackAndIncrPC
+        (loaded.1 :: values ++ base :: rest)
+  have hTailRun :
+      Structured.Code.run [Structured.BasicInstr.op .mload] addrState =
+        .ok final := by
+    simp [Structured.Code.run, Structured.BasicInstr.step,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, EvmYul.Stack.push, EvmYul.Stack.pop,
+      hAddrStack, hAddrMachine, addr, loaded, final]
+  refine ⟨final, ?_, ?_, ?_⟩
+  · rw [hCodeEq, Structured.Preservation.Code.run_append, hAddrRun]
+    simpa [addr] using hTailRun
+  · simp [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, loaded, addr]
+  · simp [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, loaded, addr]
+
+theorem run_storeTopSlotCode?
+    {valuesAboveBase slot : Nat} {code : Structured.Code}
+    (hCode : storeTopSlotCode? valuesAboveBase slot = some code)
+    (state : EVMState) (value : Word)
+    (tail rest : EvmYul.Stack Word) (base : Word)
+    (hValues : (value :: tail).length = valuesAboveBase) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := (value :: tail) ++ base :: rest } =
+        .ok final ∧
+      final.stack = tail ++ base :: rest ∧
+      final.toMachineState =
+        state.toMachineState.mstore (base + slotOffset slot) value := by
+  rcases storeTopSlotCode?_eq_some_inv hCode with
+    ⟨addrCode, hAddrCode, hCodeEq⟩
+  rcases run_slotAddressCode? hAddrCode state (value :: tail) rest base
+      hValues with
+    ⟨addrState, hAddrRun, hAddrStack, hAddrMachine⟩
+  let addr : Word := base + slotOffset slot
+  let final : EVMState :=
+    ({ addrState with
+      toMachineState := state.toMachineState.mstore addr value } :
+      EVMState).replaceStackAndIncrPC (tail ++ base :: rest)
+  have hTailRun :
+      Structured.Code.run [Structured.BasicInstr.op .mstore] addrState =
+        .ok final := by
+    simp [Structured.Code.run, Structured.BasicInstr.step,
+      Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+      EvmYul.EVM.binaryMachineStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.pop2, Id.run, hAddrStack, hAddrMachine, addr, final]
+  refine ⟨final, ?_, ?_, ?_⟩
+  · rw [hCodeEq, Structured.Preservation.Code.run_append, hAddrRun]
+    simpa [addr] using hTailRun
+  · simp [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC]
+  · simp [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, addr]
+
 theorem generatedAddress_toNat_of_ready
     {machine : EvmYul.MachineState} {base : Word} {words slot : Nat}
     (hReady : ScratchRegionReady machine (range base words).base
