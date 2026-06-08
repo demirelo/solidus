@@ -9,5 +9,6 @@ import EvmCompiler.Functions.Semantics
 import EvmCompiler.Functions.Preservation
 import EvmCompiler.Functions.LiveLayoutPreservation
 import EvmCompiler.Functions.CallAwareSpill
+import EvmCompiler.Functions.ScratchFrameMemory
 import EvmCompiler.Functions.CallDepth
 import EvmCompiler.Functions.CallDepthRanked
