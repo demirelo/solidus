@@ -328,6 +328,36 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertEqual(truth, bridge.Lit(1))
         self.assertEqual(falsehood, bridge.Lit(0))
 
+    def test_yul_bool_literals_reject_malformed_string_values(self):
+        truth = bridge.parse_expr(
+            {
+                "nodeType": "YulLiteral",
+                "kind": "bool",
+                "value": "true",
+                "nativeSrc": "0:0:0",
+            }
+        )
+        falsehood = bridge.parse_expr(
+            {
+                "nodeType": "YulLiteral",
+                "kind": "bool",
+                "value": "false",
+                "nativeSrc": "0:0:0",
+            }
+        )
+
+        self.assertEqual(truth, bridge.Lit(1))
+        self.assertEqual(falsehood, bridge.Lit(0))
+        with self.assertRaises(bridge.ConversionError):
+            bridge.parse_expr(
+                {
+                    "nodeType": "YulLiteral",
+                    "kind": "bool",
+                    "value": "truthy",
+                    "nativeSrc": "0:0:0",
+                }
+            )
+
     def test_bridge_json_accepts_memoryguard_object_builtin(self):
         expr = bridge.decode_bridge_expr(
             {

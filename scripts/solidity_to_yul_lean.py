@@ -1337,7 +1337,10 @@ def parse_expr(node: Any, ctx: Optional[ParseContext] = None) -> Expr:
             if isinstance(value, bool):
                 return Lit(1 if value else 0)
             if isinstance(value, str):
-                return Lit(1 if value == "true" else 0)
+                if value == "true":
+                    return Lit(1)
+                if value == "false":
+                    return Lit(0)
         hex_value = node.get("hexValue")
         if kind == "string" and isinstance(hex_value, str):
             return BytesLit(
