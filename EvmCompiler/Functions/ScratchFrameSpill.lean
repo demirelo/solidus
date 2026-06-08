@@ -70,6 +70,9 @@ def lookupFun? (name : Name) : List FunSlots → Option FunSlots
   | [] => none
   | fn :: rest => if fn.name = name then some fn else lookupFun? name rest
 
+def slotList (entries : List (Name × Nat)) : List Nat :=
+  entries.map Prod.snd
+
 def allocateName (name : Name) (state : CompileState) :
     Nat × CompileState :=
   (state.nextSlot,
@@ -94,6 +97,202 @@ def allocateFunctionSignatures : List FunDef → CompileState →
         { name := fn.name, params := params, returns := returns }
       let (tail, state) := allocateFunctionSignatures rest state
       (slots :: tail, state)
+
+theorem lookupSlot?_some_mem {name : Name} {slot : Nat}
+    {env : SlotEnv}
+    (hLookup : lookupSlot? name env = some slot) :
+    (name, slot) ∈ env := by
+  induction env with
+  | nil =>
+      simp [lookupSlot?] at hLookup
+  | cons head rest ih =>
+      rcases head with ⟨candidate, candidateSlot⟩
+      by_cases hName : candidate = name
+      · simp [lookupSlot?, hName] at hLookup
+        cases hLookup
+        simp [hName]
+      · simp [lookupSlot?, hName] at hLookup
+        exact List.mem_cons_of_mem _ (ih hLookup)
+
+theorem allocateName_nextSlot (name : Name) (state : CompileState) :
+    (allocateName name state).2.nextSlot = state.nextSlot + 1 := by
+  simp [allocateName]
+
+theorem allocateName_env (name : Name) (state : CompileState) :
+    (allocateName name state).2.env =
+      (name, state.nextSlot) :: state.env := by
+  simp [allocateName]
+
+theorem allocateNames_nextSlot :
+    ∀ (names : List Name) (state : CompileState),
+      (allocateNames names state).2.nextSlot =
+        state.nextSlot + names.length
+  | [], state => by
+      simp [allocateNames]
+  | name :: rest, state => by
+      let state1 : CompileState :=
+        { env := (name, state.nextSlot) :: state.env,
+          nextSlot := state.nextSlot + 1 }
+      have hTail := allocateNames_nextSlot rest state1
+      simp [state1] at hTail
+      simp [allocateNames, allocateName]
+      omega
+
+theorem allocateNames_entries_length :
+    ∀ (names : List Name) (state : CompileState),
+      (allocateNames names state).1.length = names.length
+  | [], state => by
+      simp [allocateNames]
+  | name :: rest, state => by
+      let state1 : CompileState :=
+        { env := (name, state.nextSlot) :: state.env,
+          nextSlot := state.nextSlot + 1 }
+      have hTail := allocateNames_entries_length rest state1
+      simpa [allocateNames, allocateName, state1] using hTail
+
+theorem allocateNames_entries_names :
+    ∀ (names : List Name) (state : CompileState),
+      (allocateNames names state).1.map Prod.fst = names
+  | [], state => by
+      simp [allocateNames]
+  | name :: rest, state => by
+      let state1 : CompileState :=
+        { env := (name, state.nextSlot) :: state.env,
+          nextSlot := state.nextSlot + 1 }
+      have hTail := allocateNames_entries_names rest state1
+      simpa [allocateNames, allocateName, state1] using hTail
+
+theorem allocateNames_slots_ge_start :
+    ∀ {names : List Name} {state : CompileState}
+      {entry : Name × Nat},
+      entry ∈ (allocateNames names state).1 →
+        state.nextSlot ≤ entry.2
+  | [], state, entry, hMem => by
+      simp [allocateNames] at hMem
+  | name :: rest, state, entry, hMem => by
+      let state1 : CompileState :=
+        { env := (name, state.nextSlot) :: state.env,
+          nextSlot := state.nextSlot + 1 }
+      simp [allocateNames, allocateName, state1] at hMem
+      rcases hMem with hHead | hTail
+      · cases hHead
+        omega
+      · have hGe :=
+          allocateNames_slots_ge_start
+            (names := rest) (state := state1) hTail
+        have hState1Next : state1.nextSlot = state.nextSlot + 1 := rfl
+        omega
+
+theorem allocateNames_slots_lt_final :
+    ∀ {names : List Name} {state : CompileState}
+      {entry : Name × Nat},
+      entry ∈ (allocateNames names state).1 →
+        entry.2 < (allocateNames names state).2.nextSlot
+  | [], state, entry, hMem => by
+      simp [allocateNames] at hMem
+  | name :: rest, state, entry, hMem => by
+      let state1 : CompileState :=
+        { env := (name, state.nextSlot) :: state.env,
+          nextSlot := state.nextSlot + 1 }
+      simp [allocateNames, allocateName, state1] at hMem
+      rcases hMem with hHead | hTail
+      · cases hHead
+        have hNext := allocateNames_nextSlot rest state1
+        simp [state1] at hNext
+        simp [allocateNames, allocateName]
+        omega
+      · have hTailLt :=
+          allocateNames_slots_lt_final
+            (names := rest) (state := state1) hTail
+        simpa [allocateNames, allocateName, state1] using hTailLt
+
+theorem allocateNames_slotList_nodup :
+    ∀ (names : List Name) (state : CompileState),
+      (slotList (allocateNames names state).1).Nodup
+  | [], state => by
+      simp [allocateNames, slotList]
+  | name :: rest, state => by
+      let state1 : CompileState :=
+        { env := (name, state.nextSlot) :: state.env,
+          nextSlot := state.nextSlot + 1 }
+      have hTail := allocateNames_slotList_nodup rest state1
+      simp [allocateNames, allocateName, state1, slotList]
+      constructor
+      · intro other hEntry
+        have hGe :=
+          allocateNames_slots_ge_start
+            (names := rest) (state := state1)
+            (entry := (other, state.nextSlot)) hEntry
+        have hState1Next : state1.nextSlot = state.nextSlot + 1 := rfl
+        omega
+      · exact hTail
+
+theorem allocateFunctionSignatures_names :
+    ∀ (fns : List FunDef) (state : CompileState),
+      (allocateFunctionSignatures fns state).1.map FunSlots.name =
+        fns.map FunDef.name
+  | [], state => by
+      simp [allocateFunctionSignatures]
+  | fn :: rest, state => by
+      cases hParams : allocateNames fn.params state with
+      | mk params stateAfterParams =>
+          cases hReturns : allocateNames fn.returns stateAfterParams with
+          | mk returns stateAfterReturns =>
+              have hTail :=
+                allocateFunctionSignatures_names rest stateAfterReturns
+              simp [allocateFunctionSignatures, hParams, hReturns, hTail]
+
+theorem allocateFunctionSignatures_lookup_of_find? :
+    ∀ {fns : List FunDef} {state : CompileState}
+      {name : Name} {fn : FunDef},
+      FunList.find? name fns = some fn →
+        ∃ slots,
+          lookupFun? name (allocateFunctionSignatures fns state).1 =
+            some slots ∧
+          slots.name = fn.name ∧
+          slots.params.map Prod.fst = fn.params ∧
+          slots.returns.map Prod.fst = fn.returns
+  | [], state, name, fn, hFind => by
+      simp [FunList.find?] at hFind
+  | head :: rest, state, name, fn, hFind => by
+      cases hParams : allocateNames head.params state with
+      | mk params stateAfterParams =>
+          cases hReturns : allocateNames head.returns stateAfterParams with
+          | mk returns stateAfterReturns =>
+              cases hTail :
+                  allocateFunctionSignatures rest stateAfterReturns with
+              | mk tailSlots stateAfterTail =>
+                  by_cases hName : head.name = name
+                  · simp [FunList.find?, hName] at hFind
+                    cases hFind
+                    have hParamsNames :
+                        params.map Prod.fst = head.params := by
+                      simpa [hParams] using
+                        allocateNames_entries_names head.params state
+                    have hReturnsNames :
+                        returns.map Prod.fst = head.returns := by
+                      simpa [hReturns] using
+                        allocateNames_entries_names head.returns
+                          stateAfterParams
+                    refine
+                      ⟨{ name := head.name, params := params,
+                          returns := returns }, ?_, rfl,
+                        hParamsNames, hReturnsNames⟩
+                    simp [allocateFunctionSignatures, lookupFun?, hParams,
+                      hReturns, hTail, hName]
+                  · have hTailFind :
+                        FunList.find? name rest = some fn := by
+                      simpa [FunList.find?, hName] using hFind
+                    rcases
+                        allocateFunctionSignatures_lookup_of_find?
+                          (state := stateAfterReturns) hTailFind with
+                      ⟨slots, hLookup, hSlotName, hParamsNames,
+                        hReturnsNames⟩
+                    refine
+                      ⟨slots, ?_, hSlotName, hParamsNames, hReturnsNames⟩
+                    simp [allocateFunctionSignatures, lookupFun?, hParams,
+                      hReturns, hTail, hName]
+                    simpa [hTail] using hLookup
 
 def dupCode? (depth : Nat) : Option Structured.Code := do
   let op ← Locals.StackOp.dup? depth
@@ -202,9 +401,6 @@ def frameInitCode (words : Nat) : Structured.Code :=
 def swapTopTwoCode? : Option Structured.Code := do
   let op ← Locals.StackOp.swap? 1
   some [Structured.BasicInstr.op op]
-
-def slotList (entries : List (Name × Nat)) : List Nat :=
-  entries.map Prod.snd
 
 def compileStoreTopSlots? : Nat → List Nat → Option Structured.Code
   | _valuesAboveBase, [] => some []
