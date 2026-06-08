@@ -1035,6 +1035,33 @@ class FunctionDef:
 
 
 @dataclass(frozen=True)
+class FunctionStmt(Stmt):
+    name: str
+    function: FunctionDef
+
+    def lean(self) -> str:
+        return f"{LEAN_STMT}.Block []"
+
+    def lean_ir(self) -> str:
+        params = lean_list([lean_string(name) for name in self.function.params], 1)
+        returns = lean_list([lean_string(name) for name in self.function.returns], 1)
+        body = lean_ir_stmt_list(self.function.body, 1)
+        return (
+            f"{LEAN_FRONTEND}.Stmt.functionDef {lean_string(self.name)} "
+            f"{params} {returns} {body}"
+        )
+
+    def bridge_json(self) -> Json:
+        return {
+            "node": "function",
+            "name": self.name,
+            "params": self.function.params,
+            "returns": self.function.returns,
+            "body": [stmt.bridge_json() for stmt in self.function.body],
+        }
+
+
+@dataclass(frozen=True)
 class DataSection:
     name: Optional[str]
     bytes: List[int]
@@ -1427,14 +1454,7 @@ def parse_block(
                     ctx.hoisted_functions.append(
                         (local_functions[source_name], parse_function_def(stmt, ctx))
                     )
-            return [
-                parse_stmt(stmt, ctx)
-                for stmt in statements
-                if not (
-                    isinstance(stmt, dict)
-                    and stmt.get("nodeType") == "YulFunctionDefinition"
-                )
-            ]
+            return [parse_stmt(stmt, ctx) for stmt in statements]
         finally:
             ctx.pop_function_scope()
     finally:
@@ -1484,14 +1504,7 @@ def parse_for_init_block_with_scope(pre_node: Json, ctx: ParseContext) -> List[S
                 ctx.hoisted_functions.append(
                     (local_functions[source_name], parse_function_def(stmt, ctx))
                 )
-        return [
-            parse_stmt(stmt, ctx)
-            for stmt in statements
-            if not (
-                isinstance(stmt, dict)
-                and stmt.get("nodeType") == "YulFunctionDefinition"
-            )
-        ]
+        return [parse_stmt(stmt, ctx) for stmt in statements]
     except BaseException:
         ctx.pop_function_scope()
         raise
@@ -1599,10 +1612,7 @@ def parse_stmt(node: Any, ctx: Optional[ParseContext] = None) -> Stmt:
     if node_type == "YulLeave":
         return Control("Leave")
     if node_type == "YulFunctionDefinition":
-        fail(
-            "Nested Yul function definitions are not representable in the current "
-            f"Lean YulContract entrypoint; found {node.get('name')!r} at {node_src(node)}"
-        )
+        return FunctionStmt(yul_function_name(node), parse_function_def(node, ctx))
     fail(f"Unsupported Yul statement nodeType {node_type!r} at {node_src(node)}")
 
 
@@ -2637,6 +2647,9 @@ def collect_stmt_summary(
             call_kind_counts,
             call_name_counts,
         )
+        return
+    if isinstance(stmt, FunctionStmt):
+        increment_nested(stmt_counts, "function")
         return
     if isinstance(stmt, Switch):
         increment_nested(stmt_counts, "switch")
@@ -3697,6 +3710,18 @@ def decode_bridge_stmt(data: Any) -> Stmt:
         )
     if node == "exprStmt":
         return ExprStmt(decode_bridge_expr(stmt.get("expr")))
+    if node == "function":
+        return FunctionStmt(
+            bridge_string(stmt.get("name"), "function.name"),
+            FunctionDef(
+                bridge_string_array(stmt.get("params"), "function.params"),
+                bridge_string_array(stmt.get("returns"), "function.returns"),
+                [
+                    decode_bridge_stmt(child)
+                    for child in bridge_array(stmt.get("body"), "function.body")
+                ],
+            ),
+        )
     if node == "switch":
         cases = []
         for index, raw_case in enumerate(

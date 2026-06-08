@@ -1234,10 +1234,12 @@ Current bridge limits are intentionally explicit:
 - Multi-result user calls are accepted in their Yul statement forms, including
   `let x, y := f(...)` and `x, y := f(...)`, and lower to direct
   `Functions.Stmt.call` statements with the full destination list.
-- Yul function definitions are split into the `YulContract.functions` map at
-  object-code top level and are also hoisted from nested blocks, including
-  `for` initializer blocks, with local calls rewritten to generated function
-  names before core lowering.
+- Yul function definitions are represented in the frontend statement syntax.
+  Object-code top-level definitions still populate the `YulContract.functions`
+  map; nested definitions, including those in `for` initializer blocks, are
+  preserved as declaration statements and also emitted into the generated flat
+  function table with local calls rewritten to generated function names before
+  core lowering.
 - `datasize(currentObject)` is resolved inside the executable object-image path
   so solc constructor-argument helpers can compute appended ABI argument size
   from `codesize() - datasize(currentObject)`.

@@ -55,6 +55,7 @@ inductive Stmt where
   | letDecl (names : List Name) (value : Option Expr)
   | assign (names : List Name) (value : Expr)
   | exprStmt (expr : Expr)
+  | functionDef (name : Name) (params returns : List Name) (body : List Stmt)
   | switch (scrutinee : Expr) (cases : List (Word × List Stmt))
       (default : List Stmt)
   | forLoop (pre : List Stmt) (condition : Expr) (post : List Stmt)
@@ -345,6 +346,7 @@ mutual
     | .letDecl _ (some value) => Expr.loweringFuel value + 1
     | .assign _ value => Expr.loweringFuel value + 1
     | .exprStmt expr => Expr.loweringFuel expr + 1
+    | .functionDef _ _ _ body => Stmt.List.loweringFuel body + 1
     | .switch scrutinee cases default =>
         Expr.loweringFuel scrutinee +
           Stmt.CaseList.loweringFuel cases +
@@ -634,6 +636,7 @@ mutual
     | .letDecl _ (some value) => value.loadImmutableNames
     | .assign _ value => value.loadImmutableNames
     | .exprStmt expr => expr.loadImmutableNames
+    | .functionDef _ _ _ body => Stmt.List.loadImmutableNames body
     | .switch scrutinee cases default =>
         scrutinee.loadImmutableNames ++
           Stmt.CaseList.loadImmutableNames cases ++
@@ -861,6 +864,8 @@ mutual
     | .exprStmt expr => do
         let expr' ← expr.toYul?
         some (.ExprStmtCall expr')
+    | .functionDef _ _ _ _ =>
+        some (.Block [])
     | .switch scrutinee cases default => do
         let scrutinee' ← scrutinee.toYul?
         let cases' ← Stmt.CaseList.toYul? cases
@@ -982,6 +987,9 @@ mutual
     | .exprStmt expr => do
         let expr' ← expr.resolveObjectBuiltinsIn? context
         some (.exprStmt expr')
+    | .functionDef name params returns body => do
+        let body' ← Stmt.List.resolveObjectBuiltinsIn? body context
+        some (.functionDef name params returns body')
     | .switch scrutinee cases default => do
         let scrutinee' ← scrutinee.resolveObjectBuiltinsIn? context
         let cases' ← Stmt.CaseList.resolveObjectBuiltinsIn? cases context

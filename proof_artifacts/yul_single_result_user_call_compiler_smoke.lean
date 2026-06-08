@@ -43,6 +43,23 @@ def smokeFrontendSingleCallProgram : Solidity.Frontend.Program :=
         objects := []
         items := [] } }
 
+def smokeFrontendNestedFunctionStmtProgram : Solidity.Frontend.Program :=
+  { source := "NestedFunctionSmoke.sol"
+    contract := "NestedFunctionSmoke"
+    object :=
+      { name := "runtime"
+        dispatcher :=
+          [ .functionDef "f" [] ["r"] [.assign ["r"] (.lit smokeOne)]
+          , .letDecl ["x"] (some (.call .user "__yul_gen_0_f" [])) ]
+        functions :=
+          [("__yul_gen_0_f",
+            { params := []
+              returns := ["r"]
+              body := [.assign ["r"] (.lit smokeOne)] })]
+        data := []
+        objects := []
+        items := [] } }
+
 def smokeFrontendControlCallProgram : Solidity.Frontend.Program :=
   { source := "ControlSmoke.sol"
     contract := "ControlSmoke"
@@ -63,6 +80,9 @@ def smokeFrontendControlCallProgram : Solidity.Frontend.Program :=
 
 def smokeBridgeJsonSingleCall : String :=
   "{\"schema\":\"evm-compiler.solc-yul-bridge.v3\",\"source\":\"Smoke.sol\",\"contract\":\"Smoke\",\"selectedObject\":{\"node\":\"object\",\"name\":\"runtime\",\"dispatcher\":[{\"node\":\"let\",\"names\":[\"x\"],\"value\":{\"node\":\"call\",\"calleeKind\":\"user\",\"callee\":\"f\",\"args\":[]}}],\"functions\":[{\"name\":\"f\",\"params\":[],\"returns\":[\"r\"],\"body\":[{\"node\":\"assign\",\"names\":[\"r\"],\"value\":{\"node\":\"literal\",\"value\":1}}]}],\"data\":[],\"subobjects\":[],\"items\":[]}}"
+
+def smokeBridgeJsonNestedFunctionStmt : String :=
+  "{\"schema\":\"evm-compiler.solc-yul-bridge.v3\",\"source\":\"NestedFunctionSmoke.sol\",\"contract\":\"NestedFunctionSmoke\",\"selectedObject\":{\"node\":\"object\",\"name\":\"runtime\",\"dispatcher\":[{\"node\":\"function\",\"name\":\"f\",\"params\":[],\"returns\":[\"r\"],\"body\":[{\"node\":\"assign\",\"names\":[\"r\"],\"value\":{\"node\":\"literal\",\"value\":1}}]},{\"node\":\"let\",\"names\":[\"x\"],\"value\":{\"node\":\"call\",\"calleeKind\":\"user\",\"callee\":\"__yul_gen_0_f\",\"args\":[]}}],\"functions\":[{\"name\":\"__yul_gen_0_f\",\"params\":[],\"returns\":[\"r\"],\"body\":[{\"node\":\"assign\",\"names\":[\"r\"],\"value\":{\"node\":\"literal\",\"value\":1}}]}],\"data\":[],\"subobjects\":[],\"items\":[]}}"
 
 def smokeFrontendForWithInit : Solidity.Frontend.Stmt :=
   .forLoop
@@ -279,6 +299,16 @@ def smokeImmutableContext : Solidity.Frontend.ObjectBuiltinContext :=
   | none => false) = true
 
 #guard
+  (match smokeFrontendNestedFunctionStmtProgram.toYulProgram? with
+  | some program =>
+      match program.contract.dispatcher with
+      | .Block
+          [ .Block []
+          , .Let ["x"] (some (.Call (.inr "__yul_gen_0_f") [])) ] => true
+      | _ => false
+  | none => false) = true
+
+#guard
   (match smokeFrontendControlCallProgram.toYulProgram? with
   | some program =>
       match program.contract.dispatcher with
@@ -303,6 +333,20 @@ def smokeImmutableContext : Solidity.Frontend.ObjectBuiltinContext :=
       | some yul =>
           match yul.contract.dispatcher with
           | .Block [.Let ["x"] (some (.Call (.inr "f") []))] => true
+          | _ => false
+      | none => false
+  | .error _ => false) = true
+
+#guard
+  (match Solidity.Frontend.BridgeJson.parseProgram?
+      smokeBridgeJsonNestedFunctionStmt with
+  | .ok program =>
+      match program.toYulProgram? with
+      | some yul =>
+          match yul.contract.dispatcher with
+          | .Block
+              [ .Block []
+              , .Let ["x"] (some (.Call (.inr "__yul_gen_0_f") [])) ] => true
           | _ => false
       | none => false
   | .error _ => false) = true

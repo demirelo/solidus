@@ -211,6 +211,37 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["node", "name", "params", "returns", "body"],
+          "properties": {
+            "node": {
+              "const": "function"
+            },
+            "name": {
+              "type": "string"
+            },
+            "params": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "returns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "body": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/stmt"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["node", "scrutinee", "cases", "default"],
           "properties": {
             "node": {

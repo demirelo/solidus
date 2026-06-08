@@ -583,7 +583,16 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertEqual(function_names, ["__yul_gen_0_f", "__yul_gen_1_g"])
         dispatcher_block = root.dispatcher[0]
         self.assertIsInstance(dispatcher_block, bridge.Block)
-        nested_let = dispatcher_block.stmts[0]
+        self.assertIsInstance(dispatcher_block.stmts[0], bridge.FunctionStmt)
+        self.assertEqual(dispatcher_block.stmts[0].name, "f")
+        self.assertIsInstance(dispatcher_block.stmts[1], bridge.FunctionStmt)
+        self.assertEqual(dispatcher_block.stmts[1].name, "g")
+        self.assertEqual(dispatcher_block.stmts[0].bridge_json()["node"], "function")
+        self.assertIsInstance(
+            bridge.decode_bridge_stmt(dispatcher_block.stmts[0].bridge_json()),
+            bridge.FunctionStmt,
+        )
+        nested_let = dispatcher_block.stmts[2]
         self.assertIsInstance(nested_let, bridge.Let)
         self.assertIsInstance(nested_let.value, bridge.Call)
         self.assertEqual(nested_let.value.callee, "__yul_gen_1_g")
@@ -1115,7 +1124,9 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertEqual([name for name, _ in root.functions], ["__yul_gen_0_f"])
         loop = root.dispatcher[0]
         self.assertIsInstance(loop, bridge.For)
-        init_let = loop.pre[0]
+        self.assertIsInstance(loop.pre[0], bridge.FunctionStmt)
+        self.assertEqual(loop.pre[0].name, "f")
+        init_let = loop.pre[1]
         self.assertIsInstance(init_let, bridge.Let)
         self.assertIsInstance(init_let.value, bridge.Call)
         self.assertEqual(init_let.value.callee, "__yul_gen_0_f")
@@ -1308,6 +1319,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
         )
 
         self.assertIsInstance(stmt, bridge.For)
+        self.assertIsInstance(stmt.pre[0], bridge.FunctionStmt)
+        self.assertEqual(stmt.pre[0].name, "f")
         self.assertEqual([name for name, _ in ctx.hoisted_functions], ["__yul_gen_0_f"])
 
     def test_for_loop_init_scope_does_not_escape_source_scope(self):
@@ -3245,6 +3258,10 @@ class SolidityToYulLeanTests(unittest.TestCase):
                         [],
                         bridge.CALL_DIALECT_BUILTIN,
                     )
+                ),
+                bridge.FunctionStmt(
+                    "local",
+                    bridge.FunctionDef([], [], [bridge.Control("Leave")]),
                 ),
                 bridge.Switch(
                     bridge.Var("x"),

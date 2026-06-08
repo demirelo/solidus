@@ -148,6 +148,12 @@ mutual
             .ok (.assign names value)
         | "exprStmt" =>
             .ok (.exprStmt (← decodeExpr fuel (← field json "expr")))
+        | "function" =>
+            let name ← stringField json "name"
+            let params ← decodeStringArrayField json "params"
+            let returns ← decodeStringArrayField json "returns"
+            let body ← decodeArrayField (decodeStmt fuel) json "body"
+            .ok (.functionDef name params returns body)
         | "switch" =>
             let scrutinee ← decodeExpr fuel (← field json "scrutinee")
             let cases ← decodeArrayField (decodeSwitchCase fuel) json "cases"
