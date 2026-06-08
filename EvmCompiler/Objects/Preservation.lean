@@ -492,6 +492,19 @@ theorem compileCheckedWithScratchFrameSpill?_noCallCreate
       (by
         simpa [compileCheckedWithScratchFrameSpill?] using hCompile)
 
+theorem compileCheckedWithScratchFrameSpill?_noCallCreate_of_source
+    {maxFrameWords : Nat} {program : Objects.Program}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hProgram : program.toFunctions.usesCallCreate = false)
+    (hCompile :
+      compileCheckedWithScratchFrameSpill? maxFrameWords program =
+        some (exprProgram, asm)) :
+    Assembly.Program.usesCallCreate asm = false :=
+  Functions.ScratchFrameSpill.compileChecked?_noCallCreate_of_source
+    hProgram
+    (by
+      simpa [compileCheckedWithScratchFrameSpill?] using hCompile)
+
 theorem compileCheckedAssemblyWithScratchFrameSpill?_eq_some
     {maxFrameWords : Nat} {program : Objects.Program}
     {asm : Assembly.Program}
@@ -532,6 +545,19 @@ theorem compileCheckedAssemblyWithScratchFrameSpill?_noCallCreate
     ⟨exprProgram, hExpr, hAsm⟩
   exact Expressions.Program.compileChecked?_noCallCreate
     (hExprNo exprProgram hExpr) hAsm
+
+theorem compileCheckedAssemblyWithScratchFrameSpill?_noCallCreate_of_source
+    {maxFrameWords : Nat} {program : Objects.Program}
+    {asm : Assembly.Program}
+    (hProgram : program.toFunctions.usesCallCreate = false)
+    (hCompile :
+      compileCheckedAssemblyWithScratchFrameSpill? maxFrameWords program =
+        some asm) :
+    Assembly.Program.usesCallCreate asm = false :=
+  Functions.ScratchFrameSpill.compileCheckedAssembly?_noCallCreate_of_source
+    hProgram
+    (by
+      simpa [compileCheckedAssemblyWithScratchFrameSpill?] using hCompile)
 
 theorem compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_noCallCreate
     {maxWords : Nat} {program : Objects.Program}
