@@ -1882,6 +1882,504 @@ mutual
             exact hBound
 end
 
+set_option linter.unusedSimpArgs false in
+mutual
+  theorem compileBlockOpen?_state_eq_of_functions_eq
+      {ctxLeft ctxRight : CompileCtx} {returns : List Name}
+      {state : CompileState} {block : Block}
+      {left right : Plan}
+      (hFunctions : ctxRight.functions = ctxLeft.functions)
+      (hLeft :
+        compileBlockOpen? ctxLeft returns state block = some left)
+      (hRight :
+        compileBlockOpen? ctxRight returns state block = some right) :
+      right.state = left.state := by
+    cases block with
+    | mk stmts =>
+        exact
+          compileStmtList?_state_eq_of_functions_eq
+            hFunctions
+            (by simpa [compileBlockOpen?] using hLeft)
+            (by simpa [compileBlockOpen?] using hRight)
+
+  theorem compileBlockScoped?_state_eq_of_functions_eq
+      {ctxLeft ctxRight : CompileCtx} {returns : List Name}
+      {state : CompileState} {block : Block}
+      {left right : Plan}
+      (hFunctions : ctxRight.functions = ctxLeft.functions)
+      (hLeft :
+        compileBlockScoped? ctxLeft returns state block = some left)
+      (hRight :
+        compileBlockScoped? ctxRight returns state block = some right) :
+      right.state = left.state := by
+    unfold compileBlockScoped? at hLeft hRight
+    cases hOpenLeft : compileBlockOpen? ctxLeft returns state block with
+    | none =>
+        simp [hOpenLeft] at hLeft
+    | some openLeft =>
+        cases hOpenRight : compileBlockOpen? ctxRight returns state block with
+        | none =>
+            simp [hOpenRight] at hRight
+        | some openRight =>
+            simp [hOpenLeft] at hLeft
+            simp [hOpenRight] at hRight
+            cases hLeft
+            cases hRight
+            have hOpenState :
+                openRight.state = openLeft.state :=
+              compileBlockOpen?_state_eq_of_functions_eq
+                hFunctions hOpenLeft hOpenRight
+            simp [hOpenState]
+
+  theorem compileStmtList?_state_eq_of_functions_eq
+      {ctxLeft ctxRight : CompileCtx} {returns : List Name}
+      {state : CompileState} :
+      ∀ {stmts : List Stmt} {left right : Plan},
+        ctxRight.functions = ctxLeft.functions →
+        compileStmtList? ctxLeft returns state stmts = some left →
+        compileStmtList? ctxRight returns state stmts = some right →
+          right.state = left.state
+  | [], left, right, _hFunctions, hLeft, hRight => by
+      simp [compileStmtList?] at hLeft hRight
+      cases hLeft
+      cases hRight
+      rfl
+  | stmt :: rest, left, right, hFunctions, hLeft, hRight => by
+      unfold compileStmtList? at hLeft hRight
+      cases hHeadLeft : compileStmt? ctxLeft returns state stmt with
+      | none =>
+          simp [hHeadLeft] at hLeft
+      | some headLeft =>
+          cases hHeadRight : compileStmt? ctxRight returns state stmt with
+          | none =>
+              simp [hHeadRight] at hRight
+          | some headRight =>
+              cases hTailLeft :
+                  compileStmtList? ctxLeft returns headLeft.state rest with
+              | none =>
+                  simp [hHeadLeft, hTailLeft] at hLeft
+              | some tailLeft =>
+                  cases hTailRight :
+                      compileStmtList? ctxRight returns headRight.state rest with
+                  | none =>
+                      simp [hHeadRight, hTailRight] at hRight
+                  | some tailRight =>
+                        have hHeadState :
+                            headRight.state = headLeft.state :=
+                          compileStmt?_state_eq_of_functions_eq
+                            hFunctions hHeadLeft hHeadRight
+                        have hTailRight' :
+                            compileStmtList? ctxRight returns headLeft.state rest =
+                              some tailRight := by
+                          simpa [hHeadState] using hTailRight
+                        have hTailState :
+                            tailRight.state = tailLeft.state :=
+                          compileStmtList?_state_eq_of_functions_eq
+                            (stmts := rest) (left := tailLeft)
+                            (right := tailRight) hFunctions hTailLeft hTailRight'
+                        simp [hHeadLeft, hTailLeft] at hLeft
+                        simp [hHeadRight, hTailRight] at hRight
+                        cases hLeft
+                        cases hRight
+                        exact hTailState
+
+  theorem compileCases?_state_eq_of_functions_eq
+      {ctxLeft ctxRight : CompileCtx} {returns : List Name}
+      {state : CompileState} :
+      ∀ {cases : List (Word × Block)}
+        {leftCases rightCases : List (Word × Expressions.Block)}
+        {leftState rightState : CompileState},
+        ctxRight.functions = ctxLeft.functions →
+        compileCases? ctxLeft returns state cases =
+          some (leftCases, leftState) →
+        compileCases? ctxRight returns state cases =
+          some (rightCases, rightState) →
+          rightState = leftState
+  | [], leftCases, rightCases, leftState, rightState,
+      _hFunctions, hLeft, hRight => by
+      simp [compileCases?] at hLeft hRight
+      rcases hLeft with ⟨rfl, rfl⟩
+      rcases hRight with ⟨rfl, rfl⟩
+      rfl
+  | (value, body) :: rest, leftCases, rightCases, leftState, rightState,
+      hFunctions, hLeft, hRight => by
+      unfold compileCases? at hLeft hRight
+      cases hBodyLeft :
+          compileBlockScoped? ctxLeft returns state body with
+      | none =>
+          simp [hBodyLeft] at hLeft
+      | some bodyLeft =>
+          cases hBodyRight :
+              compileBlockScoped? ctxRight returns state body with
+          | none =>
+              simp [hBodyRight] at hRight
+          | some bodyRight =>
+              cases hTailLeft :
+                  compileCases? ctxLeft returns bodyLeft.state rest with
+              | none =>
+                  simp [hBodyLeft, hTailLeft] at hLeft
+              | some tailLeft =>
+                  rcases tailLeft with ⟨tailCasesLeft, tailStateLeft⟩
+                  cases hTailRight :
+                      compileCases? ctxRight returns bodyRight.state rest with
+                  | none =>
+                      simp [hBodyRight, hTailRight] at hRight
+                  | some tailRight =>
+                      rcases tailRight with ⟨tailCasesRight, tailStateRight⟩
+                      have hBodyState :
+                          bodyRight.state = bodyLeft.state :=
+                        compileBlockScoped?_state_eq_of_functions_eq
+                          hFunctions hBodyLeft hBodyRight
+                      simp [hBodyLeft, hTailLeft] at hLeft
+                      simp [hBodyRight] at hRight
+                      rw [hBodyState] at hRight
+                      rw [hBodyState] at hTailRight
+                      have hTailState :
+                          tailStateRight = tailStateLeft :=
+                        compileCases?_state_eq_of_functions_eq
+                          (cases := rest) (leftCases := tailCasesLeft)
+                          (rightCases := tailCasesRight)
+                          (leftState := tailStateLeft)
+                          (rightState := tailStateRight) hFunctions
+                          hTailLeft hTailRight
+                      simp [hTailRight] at hRight
+                      rcases hLeft with ⟨rfl, rfl⟩
+                      rcases hRight with ⟨rfl, rfl⟩
+                      exact hTailState
+
+  theorem compileDefault?_state_eq_of_functions_eq
+      {ctxLeft ctxRight : CompileCtx} {returns : List Name}
+      {state : CompileState} :
+      ∀ {defaultBody : Option Block}
+        {leftBody rightBody : Option Expressions.Block}
+        {leftState rightState : CompileState},
+        ctxRight.functions = ctxLeft.functions →
+        compileDefault? ctxLeft returns state defaultBody =
+          some (leftBody, leftState) →
+        compileDefault? ctxRight returns state defaultBody =
+          some (rightBody, rightState) →
+          rightState = leftState
+  | none, leftBody, rightBody, leftState, rightState,
+      _hFunctions, hLeft, hRight => by
+      simp [compileDefault?] at hLeft hRight
+      rcases hLeft with ⟨rfl, rfl⟩
+      rcases hRight with ⟨rfl, rfl⟩
+      rfl
+  | some body, leftBody, rightBody, leftState, rightState,
+      hFunctions, hLeft, hRight => by
+      unfold compileDefault? at hLeft hRight
+      cases hPlanLeft :
+          compileBlockScoped? ctxLeft returns state body with
+      | none =>
+          simp [hPlanLeft] at hLeft
+      | some planLeft =>
+          cases hPlanRight :
+              compileBlockScoped? ctxRight returns state body with
+          | none =>
+              simp [hPlanRight] at hRight
+          | some planRight =>
+              simp [hPlanLeft] at hLeft
+              simp [hPlanRight] at hRight
+              rcases hLeft with ⟨rfl, rfl⟩
+              rcases hRight with ⟨rfl, rfl⟩
+              exact
+                compileBlockScoped?_state_eq_of_functions_eq
+                  hFunctions hPlanLeft hPlanRight
+
+  theorem compileStmt?_state_eq_of_functions_eq
+      {ctxLeft ctxRight : CompileCtx} {returns : List Name}
+      {state : CompileState} {stmt : Stmt}
+      {left right : Plan}
+      (hFunctions : ctxRight.functions = ctxLeft.functions)
+      (hLeft :
+        compileStmt? ctxLeft returns state stmt = some left)
+      (hRight :
+        compileStmt? ctxRight returns state stmt = some right) :
+      right.state = left.state := by
+    cases stmt with
+    | expr expr =>
+        simp [compileStmt?] at hLeft hRight
+        cases hCode : compileExprCode? state.env 0 expr with
+        | none =>
+            simp [hCode] at hLeft
+        | some code =>
+            simp [hCode] at hLeft hRight
+            cases hLeft
+            cases hRight
+            rfl
+    | let_ name value =>
+        simp [compileStmt?] at hLeft hRight
+        cases hCode : compileExprCode? state.env 0 value with
+        | none =>
+            simp [hCode] at hLeft
+        | some code =>
+            cases hAlloc : allocateName name state with
+            | mk slot state' =>
+                cases hStore : storeTopSlotCode? 1 slot with
+                | none =>
+                    simp [hCode, hAlloc, hStore] at hLeft
+                | some store =>
+                    simp [hCode, hAlloc, hStore] at hLeft hRight
+                    cases hLeft
+                    cases hRight
+                    rfl
+    | assign name value =>
+        simp [compileStmt?] at hLeft hRight
+        cases hSlot : lookupSlot? name state.env with
+        | none =>
+            simp [hSlot] at hLeft
+        | some slot =>
+            cases hCode : compileExprCode? state.env 0 value with
+            | none =>
+                simp [hSlot, hCode] at hLeft
+            | some code =>
+                cases hStore : storeTopSlotCode? 1 slot with
+                | none =>
+                    simp [hSlot, hCode, hStore] at hLeft
+                | some store =>
+                    simp [hSlot, hCode, hStore] at hLeft hRight
+                    cases hLeft
+                    cases hRight
+                    rfl
+    | block body =>
+        exact
+          compileBlockScoped?_state_eq_of_functions_eq
+            hFunctions
+            (by simpa [compileStmt?] using hLeft)
+            (by simpa [compileStmt?] using hRight)
+    | if_ cond body =>
+        simp [compileStmt?] at hLeft hRight
+        cases hCond : compileExprCode? state.env 0 cond with
+        | none =>
+            simp [hCond] at hLeft
+        | some condCode =>
+            cases hBodyLeft :
+                compileBlockScoped? ctxLeft returns state body with
+            | none =>
+                simp [hCond, hBodyLeft] at hLeft
+            | some bodyLeft =>
+                cases hBodyRight :
+                    compileBlockScoped? ctxRight returns state body with
+                | none =>
+                    simp [hCond, hBodyRight] at hRight
+                | some bodyRight =>
+                    simp [hCond, hBodyLeft] at hLeft
+                    simp [hCond, hBodyRight] at hRight
+                    have hBodyState :
+                        bodyRight.state = bodyLeft.state :=
+                      compileBlockScoped?_state_eq_of_functions_eq
+                        hFunctions hBodyLeft hBodyRight
+                    cases hLeft
+                    cases hRight
+                    exact hBodyState
+    | switch scrutinee cases defaultBody =>
+        simp [compileStmt?] at hLeft hRight
+        cases hScrutinee :
+            compileExprCode? state.env 0 scrutinee with
+        | none =>
+            simp [hScrutinee] at hLeft
+        | some scrutineeCode =>
+            cases hCasesLeft :
+                compileCases? ctxLeft returns state cases with
+            | none =>
+                simp [hScrutinee, hCasesLeft] at hLeft
+            | some casesLeft =>
+                rcases casesLeft with
+                  ⟨compiledCasesLeft, stateAfterCasesLeft⟩
+                cases hCasesRight :
+                    compileCases? ctxRight returns state cases with
+                | none =>
+                    simp [hScrutinee, hCasesRight] at hRight
+                | some casesRight =>
+                    rcases casesRight with
+                      ⟨compiledCasesRight, stateAfterCasesRight⟩
+                    have hCasesState :
+                        stateAfterCasesRight = stateAfterCasesLeft :=
+                      compileCases?_state_eq_of_functions_eq
+                        hFunctions hCasesLeft hCasesRight
+                    subst stateAfterCasesRight
+                    cases hDefaultLeft :
+                        compileDefault? ctxLeft returns
+                          stateAfterCasesLeft defaultBody with
+                    | none =>
+                        simp [hScrutinee, hCasesLeft, hDefaultLeft] at hLeft
+                    | some defaultLeft =>
+                        rcases defaultLeft with
+                          ⟨compiledDefaultLeft, stateAfterDefaultLeft⟩
+                        cases hDefaultRight :
+                            compileDefault? ctxRight returns
+                              stateAfterCasesLeft defaultBody with
+                        | none =>
+                            simp [hScrutinee, hCasesRight, hDefaultRight]
+                              at hRight
+                        | some defaultRight =>
+                            rcases defaultRight with
+                              ⟨compiledDefaultRight, stateAfterDefaultRight⟩
+                            simp [hScrutinee, hCasesLeft, hDefaultLeft]
+                              at hLeft
+                            simp [hScrutinee, hCasesRight, hDefaultRight]
+                              at hRight
+                            cases hLeft
+                            cases hRight
+                            exact
+                              compileDefault?_state_eq_of_functions_eq
+                                hFunctions hDefaultLeft hDefaultRight
+    | for_ init cond post body =>
+        simp [compileStmt?] at hLeft hRight
+        cases hInitLeft :
+            compileBlockOpen? ctxLeft returns state init with
+        | none =>
+            simp [hInitLeft] at hLeft
+        | some initLeft =>
+            cases hInitRight :
+                compileBlockOpen? ctxRight returns state init with
+            | none =>
+                simp [hInitRight] at hRight
+            | some initRight =>
+                have hInitState :
+                    initRight.state = initLeft.state :=
+                  compileBlockOpen?_state_eq_of_functions_eq
+                    hFunctions hInitLeft hInitRight
+                simp [hInitLeft] at hLeft
+                simp [hInitRight] at hRight
+                rw [hInitState] at hRight
+                cases hCond :
+                    compileExprCode? initLeft.state.env 0 cond with
+                | none =>
+                    simp [hCond] at hLeft
+                | some condCode =>
+                    cases hPostLeft :
+                        compileBlockScoped? ctxLeft returns
+                          initLeft.state post with
+                    | none =>
+                        simp [hCond, hPostLeft] at hLeft
+                    | some postLeft =>
+                        cases hPostRight :
+                            compileBlockScoped? ctxRight returns
+                              initLeft.state post with
+                        | none =>
+                            simp [hCond, hPostRight] at hRight
+                        | some postRight =>
+                            have hPostState :
+                                postRight.state = postLeft.state :=
+                              compileBlockScoped?_state_eq_of_functions_eq
+                                hFunctions hPostLeft hPostRight
+                            simp [hCond, hPostRight] at hRight
+                            rw [hPostState] at hRight
+                            cases hBodyLeft :
+                                compileBlockScoped? ctxLeft returns
+                                  postLeft.state body with
+                            | none =>
+                                simp [hInitLeft, hCond, hPostLeft,
+                                  hBodyLeft] at hLeft
+                            | some bodyLeft =>
+                                cases hBodyRight :
+                                    compileBlockScoped? ctxRight returns
+                                      postLeft.state body with
+                                | none =>
+                                    simp [hBodyRight] at hRight
+                                | some bodyRight =>
+                                    simp [hInitLeft, hCond, hPostLeft,
+                                      hBodyLeft] at hLeft
+                                    simp [hBodyRight] at hRight
+                                    cases hLeft
+                                    cases hRight
+                                    have hBodyState :
+                                        bodyRight.state = bodyLeft.state :=
+                                      compileBlockScoped?_state_eq_of_functions_eq
+                                        hFunctions hBodyLeft hBodyRight
+                                    simp [hBodyState]
+    | brk =>
+        simp [compileStmt?] at hLeft hRight
+        cases hLeft
+        cases hRight
+        rfl
+    | cont =>
+        simp [compileStmt?] at hLeft hRight
+        cases hLeft
+        cases hRight
+        rfl
+    | leave =>
+        simp [compileStmt?] at hLeft hRight
+        cases hCode : compileReturnCode? state.env returns with
+        | none =>
+            simp [hCode] at hLeft
+        | some code =>
+            simp [hCode] at hLeft hRight
+            cases hLeft
+            cases hRight
+            rfl
+    | call targets functionName args =>
+        simp [compileStmt?] at hLeft hRight
+        cases hFnLeft : lookupFun? functionName ctxLeft.functions with
+        | none =>
+            simp [hFnLeft] at hLeft
+        | some fn =>
+            have hFnRight :
+                lookupFun? functionName ctxRight.functions = some fn := by
+              simpa [hFunctions] using hFnLeft
+            by_cases hArgsLen : args.length = fn.params.length
+            · simp [hFnLeft, hArgsLen] at hLeft
+              simp [hFnRight, hArgsLen] at hRight
+              by_cases hTargetsLen : targets.length = fn.returns.length
+              · simp [hTargetsLen] at hLeft hRight
+                by_cases hTargetsNodup : targets.Nodup
+                · simp [hTargetsNodup] at hLeft hRight
+                  cases hCallerBase : swapTopTwoCode? with
+                  | none =>
+                      simp [hCallerBase] at hLeft
+                  | some callerBaseTop =>
+                      cases hArgsCode :
+                          compileCallArgsToSlots? state.env args fn.params with
+                      | none =>
+                          simp [hCallerBase, hArgsCode] at hLeft
+                      | some argCode =>
+                          cases hCalleeBase : swapTopTwoCode? with
+                          | none =>
+                              simp [hCallerBase] at hCalleeBase
+                          | some calleeBaseTop =>
+                              cases hTargetSlots :
+                                  targets.mapM
+                                    (fun name => lookupSlot? name state.env) with
+                              | none =>
+                                  simp [hCallerBase, hArgsCode, hCalleeBase,
+                                    hTargetSlots] at hLeft
+                              | some targetSlots =>
+                                  cases hStoreReturns :
+                                      compileStoreTopSlots? fn.returns.length
+                                        targetSlots.reverse with
+                                  | none =>
+                                      simp [hCallerBase, hArgsCode,
+                                        hCalleeBase, hTargetSlots,
+                                        hStoreReturns] at hLeft
+                                  | some storeReturns =>
+                                      simp [hCallerBase, hArgsCode,
+                                        hCalleeBase, hTargetSlots,
+                                        hStoreReturns] at hLeft hRight
+                                      cases hLeft
+                                      cases hRight
+                                      rfl
+                · simp [hFnLeft, hArgsLen, hTargetsLen, hTargetsNodup]
+                    at hLeft
+              · simp [hFnLeft, hArgsLen, hTargetsLen] at hLeft
+            · simp [hFnLeft, hArgsLen] at hLeft
+    | terminal kind =>
+        simp [compileStmt?] at hLeft hRight
+        cases hLeft
+        cases hRight
+        rfl
+    | terminalArgs kind args =>
+        simp [compileStmt?] at hLeft hRight
+        cases hCode : compileExprSeqCode? state.env 0 args with
+        | none =>
+            simp [hCode] at hLeft
+        | some code =>
+            simp [hCode] at hLeft hRight
+            cases hLeft
+            cases hRight
+            rfl
+end
+
 theorem expressionsStmtList_append_noCallCreate
     {left right : List Expressions.Stmt}
     (hLeft : Expressions.StmtList.usesCallCreate left = false)
@@ -2446,6 +2944,157 @@ def compileExpressionsProgram? (maxFrameWords : Nat)
     some { procs := procs, body := main.block }
   else
     none
+
+theorem compileFunction?_state_eq_of_functions_eq
+    {ctxLeft ctxRight : CompileCtx} {state : CompileState} {fn : FunDef}
+    {leftProc rightProc : Expressions.Proc}
+    {leftState rightState : CompileState}
+    (hFunctions : ctxRight.functions = ctxLeft.functions)
+    (hLeft :
+      compileFunction? ctxLeft state fn = some (leftProc, leftState))
+    (hRight :
+      compileFunction? ctxRight state fn = some (rightProc, rightState)) :
+    rightState = leftState := by
+  unfold compileFunction? at hLeft hRight
+  by_cases hSigNodup : (fn.returns ++ fn.params).Nodup
+  · simp [hSigNodup] at hLeft hRight
+    by_cases hRetBound : fn.returns.length < 16
+    · simp [hRetBound] at hLeft hRight
+      cases hSlotsLeft : lookupFun? fn.name ctxLeft.functions with
+      | none =>
+          simp [hSlotsLeft] at hLeft
+      | some slots =>
+          have hSlotsRight :
+              lookupFun? fn.name ctxRight.functions = some slots := by
+            simpa [hFunctions] using hSlotsLeft
+          simp [hSlotsLeft] at hLeft
+          simp [hSlotsRight] at hRight
+          let bodyStart : CompileState :=
+            { env := functionEnv slots, nextSlot := state.nextSlot }
+          cases hBodyLeft :
+              compileBlockOpen? ctxLeft fn.returns bodyStart fn.body with
+          | none =>
+              simp [bodyStart, hBodyLeft] at hLeft
+          | some bodyLeft =>
+              cases hBodyRight :
+                  compileBlockOpen? ctxRight fn.returns bodyStart fn.body with
+              | none =>
+                  simp [bodyStart, hBodyRight] at hRight
+              | some bodyRight =>
+                  have hBodyState :
+                      bodyRight.state = bodyLeft.state :=
+                    compileBlockOpen?_state_eq_of_functions_eq
+                      hFunctions hBodyLeft hBodyRight
+                  simp [bodyStart, hBodyLeft] at hLeft
+                  simp [bodyStart, hBodyRight] at hRight
+                  rw [hBodyState] at hRight
+                  cases hRetCode :
+                      compileReturnCode? bodyLeft.state.env fn.returns with
+                  | none =>
+                      simp [hRetCode] at hLeft
+                    | some retCode =>
+                        simp [hRetCode] at hLeft hRight
+                        rcases hLeft with ⟨_hLeftProc, hLeftState⟩
+                        rcases hRight with ⟨_hRightProc, hRightState⟩
+                        exact hRightState.symm.trans hLeftState
+    · simp [hRetBound] at hLeft
+  · simp [hSigNodup] at hLeft
+
+theorem compileFunctions?_state_eq_of_functions_eq
+    {ctxLeft ctxRight : CompileCtx} :
+    ∀ {state : CompileState} {fns : List FunDef}
+      {leftProcs rightProcs : List Expressions.Proc}
+      {leftState rightState : CompileState},
+      ctxRight.functions = ctxLeft.functions →
+      compileFunctions? ctxLeft state fns = some (leftProcs, leftState) →
+      compileFunctions? ctxRight state fns = some (rightProcs, rightState) →
+        rightState = leftState
+  | state, [], leftProcs, rightProcs, leftState, rightState,
+      _hFunctions, hLeft, hRight => by
+      simp [compileFunctions?] at hLeft hRight
+      rcases hLeft with ⟨rfl, rfl⟩
+      rcases hRight with ⟨rfl, rfl⟩
+      rfl
+  | state, fn :: rest, leftProcs, rightProcs, leftState, rightState,
+      hFunctions, hLeft, hRight => by
+      unfold compileFunctions? at hLeft hRight
+      cases hHeadLeft : compileFunction? ctxLeft state fn with
+      | none =>
+          simp [hHeadLeft] at hLeft
+      | some headLeft =>
+          rcases headLeft with ⟨procLeft, headStateLeft⟩
+          cases hHeadRight : compileFunction? ctxRight state fn with
+          | none =>
+              simp [hHeadRight] at hRight
+          | some headRight =>
+              rcases headRight with ⟨procRight, headStateRight⟩
+              have hHeadState :
+                  headStateRight = headStateLeft :=
+                compileFunction?_state_eq_of_functions_eq
+                  hFunctions hHeadLeft hHeadRight
+              cases hTailLeft :
+                  compileFunctions? ctxLeft headStateLeft rest with
+              | none =>
+                  simp [hHeadLeft, hTailLeft] at hLeft
+              | some tailLeft =>
+                  rcases tailLeft with ⟨tailProcsLeft, tailStateLeft⟩
+                  cases hTailRight :
+                      compileFunctions? ctxRight headStateRight rest with
+                  | none =>
+                      simp [hHeadRight, hTailRight] at hRight
+                  | some tailRight =>
+                      rcases tailRight with
+                        ⟨tailProcsRight, tailStateRight⟩
+                      have hTailRight' :
+                          compileFunctions? ctxRight headStateLeft rest =
+                            some (tailProcsRight, tailStateRight) := by
+                        simpa [hHeadState] using hTailRight
+                      have hTailState :
+                          tailStateRight = tailStateLeft :=
+                        compileFunctions?_state_eq_of_functions_eq
+                          (fns := rest) hFunctions hTailLeft hTailRight'
+                      simp [hHeadLeft, hTailLeft] at hLeft
+                      simp [hHeadRight, hTailRight] at hRight
+                      rcases hLeft with ⟨_hLeftProcs, hLeftState⟩
+                      rcases hRight with ⟨_hRightProcs, hRightState⟩
+                      exact
+                        hRightState.symm.trans
+                          (hTailState.trans hLeftState)
+
+theorem compileMain?_state_eq_of_functions_eq
+    {ctxLeft ctxRight : CompileCtx} {frameWordsLeft frameWordsRight : Nat}
+    {state : CompileState} {body : Block} {left right : Plan}
+    (hFunctions : ctxRight.functions = ctxLeft.functions)
+    (hLeft :
+      compileMain? ctxLeft frameWordsLeft state body = some left)
+    (hRight :
+      compileMain? ctxRight frameWordsRight state body = some right) :
+    right.state = left.state := by
+  cases body with
+  | mk stmts =>
+      unfold compileMain? at hLeft hRight
+      cases hSplit : splitPrelude stmts with
+      | mk prelude rest =>
+          simp [hSplit] at hLeft hRight
+          cases hPlanLeft :
+              compileStmtList? ctxLeft [] state rest with
+          | none =>
+              simp [hPlanLeft] at hLeft
+          | some planLeft =>
+              cases hPlanRight :
+                  compileStmtList? ctxRight [] state rest with
+              | none =>
+                  simp [hPlanRight] at hRight
+              | some planRight =>
+                  have hPlanState :
+                      planRight.state = planLeft.state :=
+                    compileStmtList?_state_eq_of_functions_eq
+                      hFunctions hPlanLeft hPlanRight
+                  simp [hPlanLeft] at hLeft
+                  simp [hPlanRight] at hRight
+                  cases hLeft
+                  cases hRight
+                  exact hPlanState
 
 theorem compileFunction?_nextSlot_mono {ctx : CompileCtx}
     {state : CompileState} {fn : FunDef}
