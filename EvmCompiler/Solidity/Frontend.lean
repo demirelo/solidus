@@ -50,13 +50,20 @@ inductive Expr where
   | call (kind : CallKind) (callee : Name) (args : List Expr)
   deriving Inhabited, Repr
 
+inductive SwitchCaseValue where
+  | word (value : Word)
+  | stringLit (value : String)
+  | bytesLit (bytes : List UInt8)
+  | boolLit (value : Bool)
+  deriving Inhabited, Repr
+
 inductive Stmt where
   | block (stmts : List Stmt)
   | letDecl (names : List Name) (value : Option Expr)
   | assign (names : List Name) (value : Expr)
   | exprStmt (expr : Expr)
   | functionDef (name : Name) (params returns : List Name) (body : List Stmt)
-  | switch (scrutinee : Expr) (cases : List (Word × List Stmt))
+  | switch (scrutinee : Expr) (cases : List (SwitchCaseValue × List Stmt))
       (default : List Stmt)
   | forLoop (pre : List Stmt) (condition : Expr) (post : List Stmt)
       (body : List Stmt)
@@ -117,6 +124,17 @@ def word? (value : String) : Option Word :=
   wordBytes? value.toUTF8.toList
 
 end StringLiteral
+
+namespace SwitchCaseValue
+
+def toWord? : SwitchCaseValue → Option Word
+  | .word value => some value
+  | .stringLit value => StringLiteral.word? value
+  | .bytesLit bytes => StringLiteral.wordBytes? bytes
+  | .boolLit value =>
+      some (EvmYul.UInt256.ofNat (if value then 1 else 0))
+
+end SwitchCaseValue
 
 namespace Name
 
@@ -368,7 +386,7 @@ mutual
         Stmt.loweringFuel stmt + Stmt.List.loweringFuel rest + 1
 
   def Stmt.CaseList.loweringFuel :
-      List (Word × List Stmt) → Nat
+      List (SwitchCaseValue × List Stmt) → Nat
     | [] => 1
     | (_value, body) :: rest =>
         Stmt.List.loweringFuel body + Stmt.CaseList.loweringFuel rest + 1
@@ -658,7 +676,7 @@ mutual
         Stmt.loadImmutableNames stmt ++ Stmt.List.loadImmutableNames rest
 
   def Stmt.CaseList.loadImmutableNames :
-      List (Word × List Stmt) → List Name
+      List (SwitchCaseValue × List Stmt) → List Name
     | [] => []
     | (_value, body) :: rest =>
         Stmt.List.loadImmutableNames body ++
@@ -895,13 +913,14 @@ mutual
         let tail ← Stmt.List.toYul? rest
         some (head :: tail)
 
-  def Stmt.CaseList.toYul? : List (Word × List Stmt) →
+  def Stmt.CaseList.toYul? : List (SwitchCaseValue × List Stmt) →
       Option (List (Word × List AstStmt))
     | [] => some []
     | (value, body) :: rest => do
+        let value' ← value.toWord?
         let body' ← Stmt.List.toYul? body
         let rest' ← Stmt.CaseList.toYul? rest
-        some ((value, body') :: rest')
+        some ((value', body') :: rest')
 
   def FunctionDef.toYul? (fn : FunctionDef) :
       Option AstFunctionDefinition := do
@@ -1019,8 +1038,9 @@ mutual
         some (head :: tail)
 
   def Stmt.CaseList.resolveObjectBuiltinsIn?
-      (cases : List (Word × List Stmt)) (context : ObjectBuiltinContext) :
-      Option (List (Word × List Stmt)) :=
+      (cases : List (SwitchCaseValue × List Stmt))
+      (context : ObjectBuiltinContext) :
+      Option (List (SwitchCaseValue × List Stmt)) :=
     match cases with
     | [] => some []
     | (value, body) :: rest => do
@@ -1077,9 +1097,9 @@ end List
 
 namespace CaseList
 
-def resolveObjectBuiltins? (cases : List (Word × List Stmt))
+def resolveObjectBuiltins? (cases : List (SwitchCaseValue × List Stmt))
     (layout : ObjectLayout) :
-    Option (List (Word × List Stmt)) :=
+    Option (List (SwitchCaseValue × List Stmt)) :=
   Stmt.CaseList.resolveObjectBuiltinsIn? cases
     (ObjectBuiltinContext.ofLayout layout)
 

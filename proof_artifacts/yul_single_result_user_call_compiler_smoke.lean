@@ -67,7 +67,7 @@ def smokeFrontendControlCallProgram : Solidity.Frontend.Program :=
       { name := "runtime"
         dispatcher :=
           [ .ifThen (.call .user "f" []) []
-          , .switch (.call .user "f" []) [(smokeOne, [])] []
+          , .switch (.call .user "f" []) [(.word smokeOne, [])] []
           , .forLoop [] (.call .user "f" []) [] [] ]
         functions :=
           [("f",
@@ -83,6 +83,9 @@ def smokeBridgeJsonSingleCall : String :=
 
 def smokeBridgeJsonNestedFunctionStmt : String :=
   "{\"schema\":\"evm-compiler.solc-yul-bridge.v3\",\"source\":\"NestedFunctionSmoke.sol\",\"contract\":\"NestedFunctionSmoke\",\"selectedObject\":{\"node\":\"object\",\"name\":\"runtime\",\"dispatcher\":[{\"node\":\"function\",\"name\":\"f\",\"params\":[],\"returns\":[\"r\"],\"body\":[{\"node\":\"assign\",\"names\":[\"r\"],\"value\":{\"node\":\"literal\",\"value\":1}}]},{\"node\":\"let\",\"names\":[\"x\"],\"value\":{\"node\":\"call\",\"calleeKind\":\"user\",\"callee\":\"__yul_gen_0_f\",\"args\":[]}}],\"functions\":[{\"name\":\"__yul_gen_0_f\",\"params\":[],\"returns\":[\"r\"],\"body\":[{\"node\":\"assign\",\"names\":[\"r\"],\"value\":{\"node\":\"literal\",\"value\":1}}]}],\"data\":[],\"subobjects\":[],\"items\":[]}}"
+
+def smokeBridgeJsonSwitchCaseLiterals : String :=
+  "{\"schema\":\"evm-compiler.solc-yul-bridge.v3\",\"source\":\"SwitchSmoke.sol\",\"contract\":\"SwitchSmoke\",\"selectedObject\":{\"node\":\"object\",\"name\":\"runtime\",\"dispatcher\":[{\"node\":\"switch\",\"scrutinee\":{\"node\":\"var\",\"name\":\"x\"},\"cases\":[{\"value\":{\"node\":\"stringLiteral\",\"value\":\"ok\"},\"body\":[]},{\"value\":{\"node\":\"bytesLiteral\",\"bytes\":[255]},\"body\":[]},{\"value\":{\"node\":\"boolLiteral\",\"value\":true},\"body\":[]}],\"default\":[]}],\"functions\":[],\"data\":[],\"subobjects\":[],\"items\":[]}}"
 
 def smokeFrontendForWithInit : Solidity.Frontend.Stmt :=
   .forLoop
@@ -347,6 +350,30 @@ def smokeImmutableContext : Solidity.Frontend.ObjectBuiltinContext :=
           | .Block
               [ .Block []
               , .Let ["x"] (some (.Call (.inr "__yul_gen_0_f") [])) ] => true
+          | _ => false
+      | none => false
+  | .error _ => false) = true
+
+#guard
+  (match Solidity.Frontend.BridgeJson.parseProgram?
+      smokeBridgeJsonSwitchCaseLiterals with
+  | .ok program =>
+      match program.toYulProgram? with
+      | some yul =>
+          match yul.contract.dispatcher with
+          | .Block
+              [ .Switch (.Var "x")
+                  [(okValue, []), (ffValue, []), (boolValue, [])] [] ] =>
+              match
+                Solidity.Frontend.StringLiteral.word? "ok",
+                Solidity.Frontend.StringLiteral.wordBytes?
+                  [(UInt8.ofNat 255)]
+              with
+              | some expectedOk, some expectedFf =>
+                  okValue.toNat == expectedOk.toNat &&
+                    ffValue.toNat == expectedFf.toNat &&
+                    boolValue.toNat == 1
+              | _, _ => false
           | _ => false
       | none => false
   | .error _ => false) = true

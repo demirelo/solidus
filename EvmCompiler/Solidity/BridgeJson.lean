@@ -127,6 +127,24 @@ mutual
         | other =>
             .error s!"unknown expression node: {other}"
 
+  def decodeSwitchCaseValue : Lean.Json → DecodeM SwitchCaseValue
+    | json =>
+        match json.getNat? with
+        | .ok value => .word <$> decodeWordNat value
+        | .error _ => do
+            let node ← stringField json "node"
+            match node with
+            | "literal" =>
+                .word <$> decodeWordField json "value"
+            | "stringLiteral" =>
+                .ok (.stringLit (← stringField json "value"))
+            | "bytesLiteral" =>
+                .ok (.bytesLit (← decodeByteArrayField json "bytes"))
+            | "boolLiteral" =>
+                .ok (.boolLit (← (← field json "value").getBool?))
+            | other =>
+                .error s!"unknown switch case value node: {other}"
+
   def decodeStmt : Nat → Lean.Json → DecodeM Stmt
     | 0, _ => .error "statement JSON decoder ran out of fuel"
     | fuel + 1, json => do
@@ -175,10 +193,11 @@ mutual
         | other =>
             .error s!"unknown statement node: {other}"
 
-  def decodeSwitchCase : Nat → Lean.Json → DecodeM (Word × List Stmt)
+  def decodeSwitchCase : Nat → Lean.Json →
+      DecodeM (SwitchCaseValue × List Stmt)
     | 0, _ => .error "switch-case JSON decoder ran out of fuel"
     | fuel + 1, json => do
-        let value ← decodeWordField json "value"
+        let value ← decodeSwitchCaseValue (← field json "value")
         let body ← decodeArrayField (decodeStmt fuel) json "body"
         .ok (value, body)
 

@@ -1263,6 +1263,9 @@ Current bridge limits are intentionally explicit:
   are used as values, backend conversion encodes their UTF-8 bytes as a
   right-padded EVM word.  Hex string literals are preserved as byte literals
   and use the same right-padding rule.
+- Yul switch case labels preserve number, string, hex-string, and boolean
+  literal syntax in bridge JSON and the Lean frontend before lowering to core
+  word-valued cases.
 - Yul object builtins such as `datasize`, `dataoffset`, `loadimmutable`, and
   `setimmutable` are preserved in bridge JSON and resolved by the computed
   object-image path before conversion to core Yul.  `memoryguard` is normalized

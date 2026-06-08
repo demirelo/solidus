@@ -52,6 +52,15 @@ def hex_string_literal(hex_value, value=None):
     return node
 
 
+def bool_literal(value):
+    return {
+        "nodeType": "YulLiteral",
+        "kind": "bool",
+        "value": value,
+        "nativeSrc": "0:0:0",
+    }
+
+
 def identifier(name):
     return {"nodeType": "YulIdentifier", "name": name, "nativeSrc": "0:0:0"}
 
@@ -417,7 +426,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIsInstance(expr, bridge.BytesLit)
         self.assertEqual(expr.bytes, [0x61, 0x62])
 
-    def test_switch_cases_accept_string_and_hex_string_literals(self):
+    def test_switch_cases_preserve_string_hex_and_bool_literals(self):
         stmt = bridge.parse_stmt(
             {
                 "nodeType": "YulSwitch",
@@ -433,6 +442,11 @@ class SolidityToYulLeanTests(unittest.TestCase):
                         "body": block([]),
                         "nativeSrc": "0:0:0",
                     },
+                    {
+                        "value": bool_literal(True),
+                        "body": block([]),
+                        "nativeSrc": "0:0:0",
+                    },
                 ],
                 "nativeSrc": "0:0:0",
             }
@@ -440,11 +454,28 @@ class SolidityToYulLeanTests(unittest.TestCase):
 
         self.assertIsInstance(stmt, bridge.Switch)
         self.assertEqual(
-            [value for value, _body in stmt.cases],
+            [value.kind for value, _body in stmt.cases],
+            [
+                bridge.SWITCH_CASE_STRING,
+                bridge.SWITCH_CASE_BYTES,
+                bridge.SWITCH_CASE_BOOL,
+            ],
+        )
+        self.assertEqual(
+            [value.word() for value, _body in stmt.cases],
             [
                 bridge.yul_string_literal_word("ok"),
                 bridge.yul_bytes_literal_word([0xFF]),
+                1,
             ],
+        )
+        self.assertEqual(
+            [value.bridge_json()["node"] for value, _body in stmt.cases],
+            ["stringLiteral", "bytesLiteral", "boolLiteral"],
+        )
+        self.assertIsInstance(
+            bridge.decode_bridge_stmt(stmt.bridge_json()).cases[0][0],
+            bridge.SwitchCaseValue,
         )
 
     def test_object_builtin_is_preserved_in_bridge_json_but_rejected_by_lean(self):
@@ -943,7 +974,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
             switch_stmt,
             bridge.Switch(
                 bridge.Call("f", [], bridge.CALL_USER),
-                [(1, [])],
+                [(bridge.SwitchCaseValue(bridge.SWITCH_CASE_WORD, 1), [])],
                 [],
             ),
         )
@@ -3195,7 +3226,12 @@ class SolidityToYulLeanTests(unittest.TestCase):
                 ),
                 bridge.Switch(
                     bridge.Var("x"),
-                    [(3, [bridge.Control("Break")])],
+                    [
+                        (
+                            bridge.SwitchCaseValue(bridge.SWITCH_CASE_WORD, 3),
+                            [bridge.Control("Break")],
+                        )
+                    ],
                     [bridge.Control("Continue")],
                 ),
                 bridge.For(
@@ -3265,7 +3301,12 @@ class SolidityToYulLeanTests(unittest.TestCase):
                 ),
                 bridge.Switch(
                     bridge.Var("x"),
-                    [(0, [bridge.Control("Break")])],
+                    [
+                        (
+                            bridge.SwitchCaseValue(bridge.SWITCH_CASE_WORD, 0),
+                            [bridge.Control("Break")],
+                        )
+                    ],
                     [bridge.Control("Continue")],
                 ),
                 bridge.For(
@@ -10758,7 +10799,7 @@ exit {full_status}
             }
         )
         self.assertIsInstance(stmt, bridge.Switch)
-        self.assertEqual(stmt.cases[0][0], 0x12)
+        self.assertEqual(stmt.cases[0][0].word(), 0x12)
         self.assertEqual(len(stmt.default), 1)
 
 

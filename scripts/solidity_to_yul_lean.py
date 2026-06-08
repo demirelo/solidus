@@ -26,7 +26,7 @@ import tempfile
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 
 Json = Dict[str, Any]
@@ -879,17 +879,88 @@ class ExprStmt(Stmt):
         return {"node": "exprStmt", "expr": self.expr.bridge_json()}
 
 
+SWITCH_CASE_WORD = "word"
+SWITCH_CASE_STRING = "string"
+SWITCH_CASE_BYTES = "bytes"
+SWITCH_CASE_BOOL = "bool"
+
+
+@dataclass(frozen=True)
+class SwitchCaseValue:
+    kind: str
+    value: Union[int, str, Tuple[int, ...], bool]
+
+    def word(self) -> int:
+        if self.kind == SWITCH_CASE_WORD:
+            if not isinstance(self.value, int) or isinstance(self.value, bool):
+                fail(f"Invalid switch word case value: {self.value!r}")
+            return self.value
+        if self.kind == SWITCH_CASE_STRING:
+            if not isinstance(self.value, str):
+                fail(f"Invalid switch string case value: {self.value!r}")
+            return yul_string_literal_word(self.value)
+        if self.kind == SWITCH_CASE_BYTES:
+            if not isinstance(self.value, tuple):
+                fail(f"Invalid switch bytes case value: {self.value!r}")
+            return yul_bytes_literal_word(list(self.value))
+        if self.kind == SWITCH_CASE_BOOL:
+            if not isinstance(self.value, bool):
+                fail(f"Invalid switch bool case value: {self.value!r}")
+            return 1 if self.value else 0
+        fail(f"Unknown switch case value kind: {self.kind!r}")
+
+    def lean(self) -> str:
+        return f"EvmYul.UInt256.ofNat {self.word()}"
+
+    def lean_ir(self) -> str:
+        if self.kind == SWITCH_CASE_WORD:
+            return (
+                f"{LEAN_FRONTEND}.SwitchCaseValue.word "
+                f"(EvmYul.UInt256.ofNat {self.word()})"
+            )
+        if self.kind == SWITCH_CASE_STRING:
+            return (
+                f"{LEAN_FRONTEND}.SwitchCaseValue.stringLit "
+                f"{lean_string(str(self.value))}"
+            )
+        if self.kind == SWITCH_CASE_BYTES:
+            if not isinstance(self.value, tuple):
+                fail(f"Invalid switch bytes case value: {self.value!r}")
+            bytes_ = lean_list([f"UInt8.ofNat {byte}" for byte in self.value], 1)
+            return f"{LEAN_FRONTEND}.SwitchCaseValue.bytesLit {bytes_}"
+        if self.kind == SWITCH_CASE_BOOL:
+            return (
+                f"{LEAN_FRONTEND}.SwitchCaseValue.boolLit "
+                f"{str(bool(self.value)).lower()}"
+            )
+        fail(f"Unknown switch case value kind: {self.kind!r}")
+
+    def bridge_json(self) -> Json:
+        if self.kind == SWITCH_CASE_WORD:
+            return {"node": "literal", "value": self.word()}
+        if self.kind == SWITCH_CASE_STRING:
+            return {"node": "stringLiteral", "value": str(self.value)}
+        if self.kind == SWITCH_CASE_BYTES:
+            if not isinstance(self.value, tuple):
+                fail(f"Invalid switch bytes case value: {self.value!r}")
+            return {"node": "bytesLiteral", "bytes": list(self.value)}
+        if self.kind == SWITCH_CASE_BOOL:
+            return {"node": "boolLiteral", "value": bool(self.value)}
+        fail(f"Unknown switch case value kind: {self.kind!r}")
+
+
 @dataclass(frozen=True)
 class Switch(Stmt):
     scrutinee: Expr
-    cases: List[Tuple[int, List[Stmt]]]
+    cases: List[Tuple[SwitchCaseValue, List[Stmt]]]
     default: List[Stmt]
 
     def lean(self) -> str:
         cases = lean_list(
             [
                 "("
-                + f"EvmYul.UInt256.ofNat {value}, "
+                + value.lean()
+                + ", "
                 + lean_stmt_list(body, 2)
                 + ")"
                 for value, body in self.cases
@@ -903,7 +974,8 @@ class Switch(Stmt):
         cases = lean_list(
             [
                 "("
-                + f"EvmYul.UInt256.ofNat {value}, "
+                + value.lean_ir()
+                + ", "
                 + lean_ir_stmt_list(body, 2)
                 + ")"
                 for value, body in self.cases
@@ -921,7 +993,7 @@ class Switch(Stmt):
             "node": "switch",
             "scrutinee": self.scrutinee.bridge_json(),
             "cases": [
-                {"value": value, "body": [stmt.bridge_json() for stmt in body]}
+                {"value": value.bridge_json(), "body": [stmt.bridge_json() for stmt in body]}
                 for value, body in self.cases
             ],
             "default": [stmt.bridge_json() for stmt in self.default],
@@ -1348,6 +1420,29 @@ def yul_literal_word(expr: Expr, what: str) -> int:
     fail(f"{what} must be a literal")
 
 
+def parse_switch_case_value(node: Any, what: str) -> SwitchCaseValue:
+    if isinstance(node, dict) and node.get("nodeType") == "YulLiteral":
+        kind = node.get("kind")
+        value = node.get("value")
+        if kind == "bool":
+            if isinstance(value, bool):
+                return SwitchCaseValue(SWITCH_CASE_BOOL, value)
+            if value == "true":
+                return SwitchCaseValue(SWITCH_CASE_BOOL, True)
+            if value == "false":
+                return SwitchCaseValue(SWITCH_CASE_BOOL, False)
+        hex_value = node.get("hexValue")
+        if kind == "string" and isinstance(hex_value, str):
+            return SwitchCaseValue(
+                SWITCH_CASE_BYTES,
+                tuple(parse_hex_bytes(hex_value, f"{what} hex string literal")),
+            )
+        if kind == "string" and isinstance(value, str):
+            return SwitchCaseValue(SWITCH_CASE_STRING, value)
+    literal = parse_expr(node)
+    return SwitchCaseValue(SWITCH_CASE_WORD, yul_literal_word(literal, what))
+
+
 def parse_expr(node: Any, ctx: Optional[ParseContext] = None) -> Expr:
     if not isinstance(node, dict):
         fail(f"Expected Yul expression object, got {node!r}")
@@ -1547,7 +1642,7 @@ def parse_stmt(node: Any, ctx: Optional[ParseContext] = None) -> Stmt:
             fail(f"Expected YulIf body at {node_src(node)}")
         return If(parse_expr(node["condition"], ctx), parse_block(body, ctx))
     if node_type == "YulSwitch":
-        cases: List[Tuple[int, List[Stmt]]] = []
+        cases: List[Tuple[SwitchCaseValue, List[Stmt]]] = []
         default: List[Stmt] = []
         for case in node.get("cases", []):
             value = case.get("value")
@@ -1558,10 +1653,12 @@ def parse_stmt(node: Any, ctx: Optional[ParseContext] = None) -> Stmt:
             if value == "default":
                 default = body
             else:
-                literal = parse_expr(value, ctx)
                 cases.append(
                     (
-                        yul_literal_word(literal, f"Yul switch case at {node_src(case)}"),
+                        parse_switch_case_value(
+                            value,
+                            f"Yul switch case at {node_src(case)}",
+                        ),
                         body,
                     )
                 )
@@ -3617,6 +3714,12 @@ def bridge_string(value: Any, what: str) -> str:
     return value
 
 
+def bridge_bool(value: Any, what: str) -> bool:
+    if not isinstance(value, bool):
+        fail(f"Expected bridge JSON {what} to be a boolean")
+    return value
+
+
 def bridge_optional_string(value: Any, what: str) -> Optional[str]:
     if value is None:
         return None
@@ -3635,6 +3738,34 @@ def bridge_uint(value: Any, what: str, bound: Optional[int] = None) -> int:
 
 def bridge_uint256(value: Any, what: str) -> int:
     return bridge_uint(value, what, 2**256)
+
+
+def decode_bridge_switch_case_value(value: Any, what: str) -> SwitchCaseValue:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return SwitchCaseValue(SWITCH_CASE_WORD, bridge_uint256(value, what))
+    case_value = bridge_object(value, what)
+    node = bridge_string(case_value.get("node"), f"{what}.node")
+    if node == "literal":
+        return SwitchCaseValue(
+            SWITCH_CASE_WORD,
+            bridge_uint256(case_value.get("value"), f"{what}.value"),
+        )
+    if node == "stringLiteral":
+        return SwitchCaseValue(
+            SWITCH_CASE_STRING,
+            bridge_string(case_value.get("value"), f"{what}.value"),
+        )
+    if node == "bytesLiteral":
+        return SwitchCaseValue(
+            SWITCH_CASE_BYTES,
+            tuple(bridge_byte_array(case_value.get("bytes"), f"{what}.bytes")),
+        )
+    if node == "boolLiteral":
+        return SwitchCaseValue(
+            SWITCH_CASE_BOOL,
+            bridge_bool(case_value.get("value"), f"{what}.value"),
+        )
+    fail(f"Unsupported bridge JSON switch case value node: {node!r}")
 
 
 def bridge_byte_array(value: Any, what: str) -> List[int]:
@@ -3728,7 +3859,10 @@ def decode_bridge_stmt(data: Any) -> Stmt:
             bridge_array(stmt.get("cases"), "switch.cases")
         ):
             case = bridge_object(raw_case, f"switch.cases[{index}]")
-            value = bridge_uint256(case.get("value"), f"switch.cases[{index}].value")
+            value = decode_bridge_switch_case_value(
+                case.get("value"),
+                f"switch.cases[{index}].value",
+            )
             body = [
                 decode_bridge_stmt(child)
                 for child in bridge_array(
