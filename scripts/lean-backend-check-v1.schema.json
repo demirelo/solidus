@@ -92,6 +92,75 @@
         "$ref": "#/$defs/stageStatus"
       }
     },
+    "timingMap": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/nonnegativeInteger"
+      }
+    },
+    "localsProcs": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/stageStatus"
+      }
+    },
+    "localsStmtTraceEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "index", "kind", "status"],
+      "properties": {
+        "owner": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "index": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "kind": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "status": {
+          "$ref": "#/$defs/stageStatus"
+        }
+      }
+    },
+    "localsLayoutEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "index", "length", "layout"],
+      "properties": {
+        "owner": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "index": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "length": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "layout": {
+          "$ref": "#/$defs/nonemptyString"
+        }
+      }
+    },
+    "localsVarEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "index", "name", "depth"],
+      "properties": {
+        "owner": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "index": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "name": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "depth": {
+          "$ref": "#/$defs/nonemptyString"
+        }
+      }
+    },
     "frontend": {
       "type": "object",
       "additionalProperties": false,
@@ -138,6 +207,30 @@
         },
         "stages": {
           "$ref": "#/$defs/stageMap"
+        },
+        "timingsMs": {
+          "$ref": "#/$defs/timingMap"
+        },
+        "localsProcs": {
+          "$ref": "#/$defs/localsProcs"
+        },
+        "localsStmtTrace": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/localsStmtTraceEntry"
+          }
+        },
+        "localsLayouts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/localsLayoutEntry"
+          }
+        },
+        "localsVars": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/localsVarEntry"
+          }
         },
         "frontend": {
           "$ref": "#/$defs/frontend"

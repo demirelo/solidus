@@ -74,6 +74,7 @@ COMMANDS_BRIDGE="$OUTDIR/UniswapUniversalRouterCommandsFallback.runtime.bridge.j
 COMMANDS_LEAN_CHECK="$OUTDIR/UniswapUniversalRouterCommandsFallback.runtime.lean-json-check.txt"
 COMMANDS_SUMMARY="$OUTDIR/UniswapUniversalRouterCommandsFallback.bridge-json-summary.json"
 COMMANDS_BACKEND_CHECK="$OUTDIR/UniswapUniversalRouterCommandsFallback.lean-backend-check.json"
+COMMANDS_COMPARE="$OUTDIR/UniswapUniversalRouterCommandsFallback.call-compare.txt"
 
 SOLC_VERSION="$UNISWAP_UNIVERSAL_ROUTER_SOLC_VERSION" \
 python3 "$ROOT/scripts/solidity_to_yul_lean.py" "$SOURCE" \
@@ -218,6 +219,23 @@ python3 "$ROOT/scripts/solidity_to_yul_lean.py" "$COMMANDS_BRIDGE_DIR/manifest.j
 
 python3 "$ROOT/scripts/validate_bridge_json.py" --quiet "$COMMANDS_BACKEND_CHECK"
 
+SOLC_VERSION="$UNISWAP_UNIVERSAL_ROUTER_SOLC_VERSION" \
+python3 "$ROOT/scripts/compare_contract_call_bytecode.py" "$COMMANDS_FIXTURE" \
+  --solc "$SOLC_BIN" \
+  --lake "$LAKE_BIN" \
+  --lake-cwd "$ROOT" \
+  --forge "$FORGE_BIN" \
+  --contract UniswapUniversalRouterCommandsFallback \
+  --remapping "universal-router/=$REPO/" \
+  --optimized \
+  --runtime-only \
+  --calldata 0x00 \
+  --calldata 0x01 \
+  --calldata 0x21 \
+  --calldata 0x40 \
+  --calldata 0x80 \
+  --calldata 0xff > "$COMMANDS_COMPARE"
+
 BRIDGE_BYTES="$(wc -c < "$BRIDGE" | tr -d ' ')"
 LEAN_DECODE="$(sed -n 's/^lean_bridge_json_decode=//p' "$LEAN_CHECK")"
 ARTIFACT_RUNTIME_BYTES="$(
@@ -254,6 +272,9 @@ COMMANDS_BACKEND_FIRST_NONE="$(
   python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["firstNoneCounts"])' \
     "$COMMANDS_BACKEND_CHECK"
 )"
+COMMANDS_COMPARE_CALLS="$(
+  sed -n 's/^calls=//p' "$COMMANDS_COMPARE"
+)"
 
 printf 'uniswap_universal_router_smoke=pass\n'
 printf 'repo_ref=%s\n' "$ACTUAL_REF"
@@ -268,6 +289,7 @@ printf 'fallback_compare_calls=%s\n' "$CALLS"
 printf 'universal_router_commands_lean_decode=%s\n' "$COMMANDS_LEAN_DECODE"
 printf 'universal_router_commands_summary_calls=%s\n' "$COMMANDS_CALLS"
 printf 'universal_router_commands_backend_first_none=%s\n' "$COMMANDS_BACKEND_FIRST_NONE"
+printf 'universal_router_commands_compare_calls=%s\n' "$COMMANDS_COMPARE_CALLS"
 python3 - "$PACKAGE_SUMMARY" "$COMMANDS_BRIDGE" "$COMMANDS_SUMMARY" "$COMMANDS_BACKEND_CHECK" "$MANIFEST_CHECK" <<'PY'
 import json
 import sys
@@ -375,10 +397,10 @@ if missing_commands_primitives:
         f"{missing_commands_primitives!r}"
     )
 first_none_counts = commands_backend_check.get("firstNoneCounts", {})
-if first_none_counts.get("functions_compile") != 1:
+if first_none_counts:
     raise SystemExit(
-        "Universal Router Commands backend-check missing runtime "
-        f"functions_compile blocker: {first_none_counts!r}"
+        "Universal Router Commands backend-check unexpectedly blocked: "
+        f"{first_none_counts!r}"
     )
 checked_objects = commands_backend_check.get("checkedObjects", [])
 if len(checked_objects) != 1:
@@ -390,9 +412,17 @@ if backend_frontend != frontend:
     raise SystemExit(
         f"unexpected Commands backend-check frontend metadata: {backend_frontend!r}"
     )
+if checked_objects[0].get("status") != "pass":
+    raise SystemExit(
+        f"Commands backend-check did not pass: {checked_objects[0]!r}"
+    )
+if checked_objects[0].get("firstNone") != "none":
+    raise SystemExit(
+        f"Commands backend-check still has firstNone: {checked_objects[0]!r}"
+    )
 print("universal_router_commands_frontend_metadata=yes")
 print("universal_router_commands_summary_frontend_metadata=yes")
 print("universal_router_commands_backend_frontend_metadata=yes")
 print("universal_router_commands_summary_primitives=yes")
-print("universal_router_commands_backend_check=blocked")
+print("universal_router_commands_backend_check=pass")
 PY

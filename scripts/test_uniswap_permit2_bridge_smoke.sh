@@ -73,6 +73,7 @@ SIGNATURE_BRIDGE_DIR="$OUTDIR/permit2-signature-bridge-json"
 SIGNATURE_CHECK="$OUTDIR/UniswapPermit2SignatureVerificationFallback.lean-json-check.json"
 SIGNATURE_SUMMARY="$OUTDIR/UniswapPermit2SignatureVerificationFallback.bridge-json-summary.json"
 SIGNATURE_BACKEND_CHECK="$OUTDIR/UniswapPermit2SignatureVerificationFallback.lean-backend-check.json"
+SIGNATURE_COMPARE="$OUTDIR/UniswapPermit2SignatureVerificationFallback.call-compare.txt"
 
 cat > "$SAFECAST_FIXTURE" <<'SOL'
 // SPDX-License-Identifier: UNLICENSED
@@ -368,6 +369,21 @@ python3 "$ROOT/scripts/solidity_to_yul_lean.py" \
 
 python3 "$ROOT/scripts/validate_bridge_json.py" --quiet "$SIGNATURE_BACKEND_CHECK"
 
+SOLC_VERSION="$UNISWAP_PERMIT2_SOLC_VERSION" python3 "$ROOT/scripts/compare_contract_call_bytecode.py" \
+  "$SIGNATURE_FIXTURE" \
+  --solc "$SOLC_BIN" \
+  --lake "$LAKE_BIN" \
+  --lake-cwd "$ROOT" \
+  --forge "$FORGE_BIN" \
+  --contract UniswapPermit2SignatureVerificationFallback \
+  --remapping "permit2/=$REPO/src/" \
+  --optimized \
+  --runtime-only \
+  --calldata 0x00 \
+  --calldata 0x010203 \
+  --calldata 0x02ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff \
+  > "$SIGNATURE_COMPARE"
+
 python3 - "$HASH_BATCH_CHECK" "$HASH_MANIFEST_CHECK" "$HASH_SUMMARY" \
   "$HASH_BACKEND_CHECK" "$SIGNATURE_CHECK" "$SIGNATURE_SUMMARY" \
   "$SIGNATURE_BACKEND_CHECK" <<'PY'
@@ -411,6 +427,18 @@ def backend_status(report, expected_count, label, contract):
         raise SystemExit(f"missing {label} runtime backend check: {statuses!r}")
     return counts, runtime
 
+def runtime_backend_object(report, contract):
+    for item in report.get("checkedObjects", []):
+        if item.get("contract") == contract and item.get("selector") == "runtime":
+            return item
+    raise SystemExit(f"missing runtime backend object for {contract}")
+
+def has_depth_seventeen_local(item):
+    for entry in item.get("localsVars", []):
+        if entry.get("depth") == "17":
+            return True
+    return False
+
 batch_count = batch["counts"]["checkedObjects"]
 replay_count = manifest_replay["counts"]["checkedObjects"]
 summary_count = summary["counts"]["objects"]
@@ -444,10 +472,20 @@ hash_backend_counts, hash_runtime_backend = backend_status(
     "PermitHash",
     "UniswapPermit2HashFallback",
 )
-if hash_runtime_backend[0] == "fail" and hash_runtime_backend[1] != "functions_compile":
-    raise SystemExit(
-        f"unexpected PermitHash runtime backend blocker: {hash_runtime_backend!r}"
-    )
+hash_runtime_object = runtime_backend_object(
+    hash_backend_check,
+    "UniswapPermit2HashFallback",
+)
+if hash_runtime_backend[0] == "fail":
+    if hash_runtime_backend[1] != "locals_to_expressions":
+        raise SystemExit(
+            f"unexpected PermitHash runtime backend blocker: {hash_runtime_backend!r}"
+        )
+    if not has_depth_seventeen_local(hash_runtime_object):
+        raise SystemExit(
+            "PermitHash locals_to_expressions blocker did not report a "
+            f"depth-17 local: {hash_runtime_object!r}"
+        )
 
 signature_count = signature_check["counts"]["checkedObjects"]
 signature_summary_count = signature_summary["counts"]["objects"]
@@ -488,7 +526,10 @@ signature_backend_counts, signature_runtime_backend = backend_status(
 )
 if (
     signature_runtime_backend[0] == "fail"
-    and signature_runtime_backend[1] != "lower_code_unchecked"
+    and signature_runtime_backend[1] not in {
+        "lower_code_unchecked",
+        "live_layout_to_locals",
+    }
 ):
     raise SystemExit(
         "unexpected SignatureVerification runtime backend blocker: "
@@ -540,4 +581,7 @@ printf 'permit2_safecast_compare_calls=%s\n' "$(
 )"
 printf 'permit2_nonce_bitmap_compare_calls=%s\n' "$(
   sed -n 's/^calls=//p' "$NONCE_BITMAP_COMPARE"
+)"
+printf 'permit2_signature_compare_calls=%s\n' "$(
+  sed -n 's/^calls=//p' "$SIGNATURE_COMPARE"
 )"

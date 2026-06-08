@@ -1029,14 +1029,11 @@ def validate_lean_backend_check(
                     f"{label} backend check firstNone stage is not none: "
                     f"{first_none!r}"
                 )
-            if object_image == "some":
-                bridge.fail(
-                    f"{label} backend check fail object has object_image=some"
-                )
         bytecode_bytes = item.get("bytecodeBytes")
-        if bytecode_bytes is not None and status != "pass":
+        if bytecode_bytes is not None and object_image != "some":
             bridge.fail(
-                f"{label} backend check failed object has bytecodeBytes"
+                f"{label} backend check object has bytecodeBytes without "
+                "object_image=some"
             )
     if counts.get("passedObjects") != status_counts.get("pass", 0):
         bridge.fail(

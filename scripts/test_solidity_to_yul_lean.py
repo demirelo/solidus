@@ -3082,6 +3082,32 @@ class SolidityToYulLeanTests(unittest.TestCase):
                             "functions_compile": "none",
                             "object_image": "none",
                         },
+                        "timingsMs": {"decode": 3},
+                        "localsProcs": {"main": "none"},
+                        "localsStmtTrace": [
+                            {
+                                "owner": "main",
+                                "index": 2,
+                                "kind": "expr",
+                                "status": "none",
+                            }
+                        ],
+                        "localsLayouts": [
+                            {
+                                "owner": "main",
+                                "index": 2,
+                                "length": 17,
+                                "layout": "[deep]",
+                            }
+                        ],
+                        "localsVars": [
+                            {
+                                "owner": "main",
+                                "index": 2,
+                                "name": "deep",
+                                "depth": "17",
+                            }
+                        ],
                     },
                     frontend={"producer": "solc", "ast": "irAst"},
                 ),
@@ -3115,6 +3141,14 @@ class SolidityToYulLeanTests(unittest.TestCase):
             [item["frontend"]["ast"] for item in parsed["checkedObjects"]],
             ["irAst", "irOptimizedAst"],
         )
+        self.assertEqual(parsed["checkedObjects"][0]["timingsMs"]["decode"], 3)
+        self.assertEqual(parsed["checkedObjects"][0]["localsProcs"], {"main": "none"})
+        self.assertEqual(
+            parsed["checkedObjects"][0]["localsStmtTrace"][0]["kind"], "expr"
+        )
+        self.assertEqual(parsed["checkedObjects"][0]["localsLayouts"][0]["length"], 17)
+        self.assertEqual(parsed["checkedObjects"][0]["localsVars"][0]["depth"], "17")
+        self.assertNotIn("timingsMs", parsed["checkedObjects"][1])
         self.assertEqual(parsed["checkedObjects"][1]["bytecodeBytes"], 12)
 
     def test_auto_object_layout_finds_deployed_bytecode(self):
@@ -3231,6 +3265,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
             def fake_run_lake_object_image(lake, source, cwd):
                 calls.append((lake, source, cwd))
                 self.assertIn("IO.FS.readFile evmCompilerRunnerBridgeJsonPath", source)
+                self.assertIn("evmCompilerRunnerTimedIO", source)
+                self.assertIn("evmCompilerRunnerTimedPure", source)
                 rendered_path = None
                 for line in source.splitlines():
                     stripped = line.strip()
@@ -3365,6 +3401,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
 
     def test_parse_backend_check_output_records_first_none(self):
         parsed = bridge.parse_backend_check_output(
+            "timing\tdecode\t3\n"
             "lean_backend_check=fail\n"
             "source=Simple.sol\n"
             "contract=Simple\n"
@@ -3380,6 +3417,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertEqual(parsed["first_none"], "functions_compile")
         self.assertEqual(parsed["stages"]["functions_compile"], "none")
         self.assertEqual(parsed["stages"]["object_image"], "none")
+        self.assertEqual(parsed["timingsMs"]["decode"], 3)
 
     def test_parse_backend_check_output_accepts_object_image_success(self):
         parsed = bridge.parse_backend_check_output(
@@ -4525,6 +4563,47 @@ class SolidityToYulLeanTests(unittest.TestCase):
 
         self.assertEqual(result, 1)
         self.assertIn("pass object lacks object_image=some", error)
+
+    @unittest.skipIf(jsonschema is None, "jsonschema package is unavailable")
+    def test_validate_bridge_json_cli_accepts_backend_fail_with_object_image(self):
+        report = json.loads(
+            bridge.render_lean_backend_check_outputs(
+                [
+                    bridge.LeanBackendCheckArtifact(
+                        source_name="A.sol",
+                        contract_name="A",
+                        object_selector="runtime",
+                        object_name="A_1_deployed",
+                        summary={
+                            "source": "A.sol",
+                            "contract": "A",
+                            "object": "A_1_deployed",
+                            "status": "fail",
+                            "first_none": "live_layout_to_locals",
+                            "stages": {
+                                "live_layout_to_locals": "none",
+                                "object_image": "some",
+                            },
+                            "bytecode_bytes": 7,
+                        },
+                    )
+                ],
+                [],
+            )
+        )
+        old_stdout = sys.stdout
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "backend-check.json"
+                path.write_text(json.dumps(report))
+                sys.stdout = io.StringIO()
+                result = validate_bridge_json.main([str(path)])
+                output = sys.stdout.getvalue()
+        finally:
+            sys.stdout = old_stdout
+
+        self.assertEqual(result, 0)
+        self.assertIn("ok backend-check", output)
 
     @unittest.skipIf(jsonschema is None, "jsonschema package is unavailable")
     def test_validate_bridge_json_cli_rejects_lean_backend_check_duplicate_object(self):
@@ -8100,6 +8179,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
 
     def test_parse_object_image_output_records_immutable_references(self):
         image = bridge.parse_object_image_output(
+            "timing\tdecode\t3\n"
+            "timing\tobject_image\t7\n"
             "bytecode=0x6000\n"
             "immutable\t3\t12\t32\n"
             "immutable\t3\t44\t32\n"
@@ -9021,7 +9102,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
             "Commands.EXECUTE_SUB_PLAN",
             "Commands.ACROSS_V4_DEPOSIT_V3",
             "universal_router_commands_summary_calls=",
-            "universal_router_commands_backend_check=blocked",
+            "universal_router_commands_backend_check=pass",
             "unsupported_manifest_report_frontend_metadata=yes",
             "universal_router_commands_backend_frontend_metadata=yes",
         ]:
@@ -9039,7 +9120,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
             "permit2_hash_backend_check_objects=",
             "permit2_hash_runtime_backend_check=",
             "permit2_hash_runtime_backend_first_none=",
-            "functions_compile",
+            "locals_to_expressions",
+            "has_depth_seventeen_local",
             "permit2_signature_backend_check_objects=",
             "permit2_signature_runtime_backend_check=",
             "permit2_signature_runtime_backend_first_none=",
@@ -9065,12 +9147,11 @@ class SolidityToYulLeanTests(unittest.TestCase):
             'assembly ("memory-safe")',
             "byte(0, calldataload(0))",
             "lean-backend-check",
-            "functions_compile",
             "universal_router_commands_frontend_metadata=yes",
             "universal_router_commands_summary_frontend_metadata=yes",
             "universal_router_commands_backend_frontend_metadata=yes",
             "universal_router_commands_summary_calls=",
-            "universal_router_commands_backend_check=blocked",
+            "universal_router_commands_backend_check=pass",
         ]:
             self.assertIn(behavior, universal_router_smoke)
 
@@ -9164,7 +9245,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
             "aave_v3_math_summary_primitives=yes",
             "aave_v3_math_runtime_backend_check=",
             "aave_v3_math_runtime_backend_first_none=",
-            "functions_compile",
+            "locals_to_expressions",
+            "has_deep_local",
             "aave_v3_interest_summary_primitives=yes",
             "aave_v3_interest_runtime_backend_check=",
             "aave_v3_interest_runtime_backend_first_none=",
@@ -9287,7 +9369,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
             "chainlink_cbor_runtime_compare_calls=",
             "runtime_compare = \"yes\"",
             "runtime_compare = \"blocked\"",
-            "functions_compile",
+            "locals_to_expressions",
+            "has_deep_local",
             "contract_call_compare",
             "full_runtime_bytes",
             "lean_runtime_bytes",

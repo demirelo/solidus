@@ -5195,6 +5195,22 @@ def evmCompilerRunnerByteHex (byte : UInt8) : String :=
 def evmCompilerRunnerBytesHex (bytes : ByteArray) : String :=
   String.join (bytes.toList.map evmCompilerRunnerByteHex)
 
+def evmCompilerRunnerTimedIO {{α : Type}} (name : String) (action : IO α) :
+    IO α := do
+  let start ← IO.monoMsNow
+  let value ← action
+  let finish ← IO.monoMsNow
+  IO.println ("timing\t" ++ name ++ "\t" ++ toString (finish - start))
+  pure value
+
+def evmCompilerRunnerTimedPure {{α : Type}} (name : String)
+    (thunk : Unit → α) : IO α := do
+  let start ← IO.monoMsNow
+  let value := thunk ()
+  let finish ← IO.monoMsNow
+  IO.println ("timing\t" ++ name ++ "\t" ++ toString (finish - start))
+  pure value
+
 def evmCompilerRunnerDecodeProgram :
     IO EvmCompiler.Solidity.Frontend.Program := do
   let input ← IO.FS.readFile evmCompilerRunnerBridgeJsonPath
@@ -5203,10 +5219,13 @@ def evmCompilerRunnerDecodeProgram :
   | .error err => throw (IO.userError ("bridge JSON decode failed: " ++ err))
 
 def main : IO Unit := do
-  let program ← evmCompilerRunnerDecodeProgram
-  match
+  let program ←
+    evmCompilerRunnerTimedIO "decode" evmCompilerRunnerDecodeProgram
+  let image? ←
+    evmCompilerRunnerTimedPure "object_image" (fun _ =>
       program.object.bytecodeImageUncheckedWithLinkerSymbols?
-        evmCompilerRunnerLinkerSymbols with
+        evmCompilerRunnerLinkerSymbols)
+  match image? with
   | some image =>
       IO.println
         ("bytecode=0x" ++
@@ -5409,6 +5428,22 @@ def evmCompilerRunnerByteHex (byte : UInt8) : String :=
 def evmCompilerRunnerBytesHex (bytes : ByteArray) : String :=
   String.join (bytes.toList.map evmCompilerRunnerByteHex)
 
+def evmCompilerRunnerTimedIO {{α : Type}} (name : String) (action : IO α) :
+    IO α := do
+  let start ← IO.monoMsNow
+  let value ← action
+  let finish ← IO.monoMsNow
+  IO.println ("timing\t" ++ name ++ "\t" ++ toString (finish - start))
+  pure value
+
+def evmCompilerRunnerTimedPure {{α : Type}} (name : String)
+    (thunk : Unit → α) : IO α := do
+  let start ← IO.monoMsNow
+  let value := thunk ()
+  let finish ← IO.monoMsNow
+  IO.println ("timing\t" ++ name ++ "\t" ++ toString (finish - start))
+  pure value
+
 def evmCompilerRunnerDecodeProgram :
     IO EvmCompiler.Solidity.Frontend.Program := do
   let input ← IO.FS.readFile evmCompilerRunnerBridgeJsonPath
@@ -5417,78 +5452,99 @@ def evmCompilerRunnerDecodeProgram :
   | .error err => throw (IO.userError ("bridge JSON decode failed: " ++ err))
 
 def main : IO Unit := do
-  let program ← evmCompilerRunnerDecodeProgram
+  let program ←
+    evmCompilerRunnerTimedIO "decode" evmCompilerRunnerDecodeProgram
   let object := program.object
-  let toYulContract? := object.toYulContract?
-  let lowerCodeUnchecked? := object.lowerCodeUnchecked?
-  let functionsCompile? := do
+  let toYulContract? ←
+    evmCompilerRunnerTimedPure "to_yul_contract" (fun _ =>
+      object.toYulContract?)
+  let lowerCodeUnchecked? ←
+    evmCompilerRunnerTimedPure "lower_code_unchecked" (fun _ =>
+      object.lowerCodeUnchecked?)
+  let functionsCompile? ←
+    evmCompilerRunnerTimedPure "functions_compile" (fun _ => do
     let lower ← lowerCodeUnchecked?
-    EvmCompiler.Functions.Program.compile? lower
-  let functionsSourceAccepted? := do
+    EvmCompiler.Functions.Program.compile? lower)
+  let functionsSourceAccepted? ←
+    evmCompilerRunnerTimedPure "functions_source_accepted" (fun _ => do
     let lower ← lowerCodeUnchecked?
     if EvmCompiler.Functions.SourceAcceptedCheck.Program.sourceAccepted? lower then
       some ()
     else
-      none
-  let functionsToLocals? := do
+      none)
+  let functionsToLocals? ←
+    evmCompilerRunnerTimedPure "functions_to_locals" (fun _ => do
     let lower ← lowerCodeUnchecked?
-    EvmCompiler.Functions.Program.toLocals? lower
-  let localsToExpressions? := do
+    EvmCompiler.Functions.Program.toLocals? lower)
+  let localsToExpressions? ←
+    evmCompilerRunnerTimedPure "locals_to_expressions" (fun _ => do
     let locals ← functionsToLocals?
-    locals.toExpressions?
-  let localsCompile? := do
+    locals.toExpressions?)
+  let localsCompile? ←
+    evmCompilerRunnerTimedPure "locals_compile" (fun _ => do
     let locals ← functionsToLocals?
-    locals.compile?
-  let expressionsCompile? := do
+    locals.compile?)
+  let expressionsCompile? ←
+    evmCompilerRunnerTimedPure "expressions_compile" (fun _ => do
     let expressions ← localsToExpressions?
-    expressions.compile?
-  let liveLayoutToLocals? := do
+    expressions.compile?)
+  let liveLayoutToLocals? ←
+    evmCompilerRunnerTimedPure "live_layout_to_locals" (fun _ => do
     let lower ← lowerCodeUnchecked?
-    EvmCompiler.Functions.LiveLayout.Lower.Program.toLocals? lower
-  let liveLayoutToExpressions? := do
+    EvmCompiler.Functions.LiveLayout.Lower.Program.toLocals? lower)
+  let liveLayoutToExpressions? ←
+    evmCompilerRunnerTimedPure "live_layout_to_expressions" (fun _ => do
     let lower ← lowerCodeUnchecked?
-    EvmCompiler.Functions.LiveLayout.Lower.Program.toExpressions? lower
-  let liveLayoutCompile? := do
+    EvmCompiler.Functions.LiveLayout.Lower.Program.toExpressions? lower)
+  let liveLayoutCompile? ←
+    evmCompilerRunnerTimedPure "live_layout_compile" (fun _ => do
     let lower ← lowerCodeUnchecked?
-    EvmCompiler.Functions.LiveLayout.Lower.Program.compile? lower
-  let childImages? :=
+    EvmCompiler.Functions.LiveLayout.Lower.Program.compile? lower)
+  let childImages? ←
+    evmCompilerRunnerTimedPure "child_images" (fun _ =>
     EvmCompiler.Solidity.Frontend.Object.List.bytecodeImagesUncheckedWithLinkerSymbols?
-      object.objects evmCompilerRunnerLinkerSymbols
+      object.objects evmCompilerRunnerLinkerSymbols)
   let immutableNames := object.loadImmutableNames
   let zeroImmutableValues :=
     EvmCompiler.Solidity.Frontend.ImmutableReference.zeroEntries immutableNames
   let markerImmutableValues :=
     EvmCompiler.Solidity.Frontend.ImmutableReference.markerEntriesFromNat
       0 immutableNames
-  let items? := do
+  let items? ←
+    evmCompilerRunnerTimedPure "payload_items" (fun _ => do
     let childImages ← childImages?
-    object.payloadItems? childImages
+    object.payloadItems? childImages)
   let childImmutableReferences? := do
     let childImages ← childImages?
     some
       (EvmCompiler.Solidity.Frontend.ObjectImage.immutableReferenceEntries
         childImages)
-  let dataSizes? := do
+  let dataSizes? ←
+    evmCompilerRunnerTimedPure "data_sizes" (fun _ => do
     let childImages ← childImages?
     let items ← items?
     EvmCompiler.Solidity.Frontend.ObjectItemRef.List.dataSizeEntries?
-      object.data childImages items
-  let layout0? := do
+      object.data childImages items)
+  let layout0? ←
+    evmCompilerRunnerTimedPure "layout0" (fun _ => do
     let childImages ← childImages?
     let items ← items?
     EvmCompiler.Solidity.Frontend.ObjectItemRef.List.objectLayoutEntriesFromNat?
-      object.data childImages 0 items
-  let dataOffsets0? := do
+      object.data childImages 0 items)
+  let dataOffsets0? ←
+    evmCompilerRunnerTimedPure "data_offsets0" (fun _ => do
     let childImages ← childImages?
     let items ← items?
     EvmCompiler.Solidity.Frontend.ObjectItemRef.List.dataOffsetEntriesFromNat?
-      object.data childImages 0 items
-  let payload? := do
+      object.data childImages 0 items)
+  let payload? ←
+    evmCompilerRunnerTimedPure "payload" (fun _ => do
     let childImages ← childImages?
     let items ← items?
     EvmCompiler.Solidity.Frontend.ObjectItemRef.List.payloadBytes?
-      object.data childImages items
-  let placeholderCode? := do
+      object.data childImages items)
+  let placeholderCode? ←
+    evmCompilerRunnerTimedPure "placeholder_code" (fun _ => do
     let layout0 ← layout0?
     let dataSizes ← dataSizes?
     let dataOffsets0 ← dataOffsets0?
@@ -5503,23 +5559,26 @@ def main : IO Unit := do
         immutableValues := zeroImmutableValues
         immutableReferences := childImmutableReferences
         selfSize? := some (object.name, EvmYul.UInt256.ofNat 0) }}
-    object.codeBytesUncheckedIn? placeholderContext
+    object.codeBytesUncheckedIn? placeholderContext)
   let codeBase? := do
     let placeholderCode ← placeholderCode?
     some placeholderCode.length
-  let layout? := do
+  let layout? ←
+    evmCompilerRunnerTimedPure "layout" (fun _ => do
     let childImages ← childImages?
     let items ← items?
     let codeBase ← codeBase?
     EvmCompiler.Solidity.Frontend.ObjectItemRef.List.objectLayoutEntriesFromNat?
-      object.data childImages codeBase items
-  let dataOffsets? := do
+      object.data childImages codeBase items)
+  let dataOffsets? ←
+    evmCompilerRunnerTimedPure "data_offsets" (fun _ => do
     let childImages ← childImages?
     let items ← items?
     let codeBase ← codeBase?
     EvmCompiler.Solidity.Frontend.ObjectItemRef.List.dataOffsetEntriesFromNat?
-      object.data childImages codeBase items
-  let code? := do
+      object.data childImages codeBase items)
+  let code? ←
+    evmCompilerRunnerTimedPure "code" (fun _ => do
     let codeBase ← codeBase?
     let payload ← payload?
     let dataSizes ← dataSizes?
@@ -5535,8 +5594,9 @@ def main : IO Unit := do
         immutableValues := zeroImmutableValues
         immutableReferences := childImmutableReferences
         selfSize? := some (object.name, selfSize) }}
-    object.codeBytesUncheckedIn? context
-  let markerCode? := do
+    object.codeBytesUncheckedIn? context)
+  let markerCode? ←
+    evmCompilerRunnerTimedPure "marker_code" (fun _ => do
     let codeBase ← codeBase?
     let payload ← payload?
     let dataSizes ← dataSizes?
@@ -5552,19 +5612,23 @@ def main : IO Unit := do
         immutableValues := markerImmutableValues
         immutableReferences := childImmutableReferences
         selfSize? := some (object.name, selfSize) }}
-    object.codeBytesUncheckedIn? context
-  let objectImage? :=
+    object.codeBytesUncheckedIn? context)
+  let objectImage? ←
+    evmCompilerRunnerTimedPure "object_image" (fun _ =>
     object.bytecodeImageUncheckedWithLinkerSymbols?
-      evmCompilerRunnerLinkerSymbols
-  let computedObjectData? :=
+      evmCompilerRunnerLinkerSymbols)
+  let computedObjectData? ←
+    evmCompilerRunnerTimedPure "computed_object_data" (fun _ =>
     object.computedObjectDataWithLinkerSymbols?
-      evmCompilerRunnerLinkerSymbols
-  let resolvedObjectData? :=
+      evmCompilerRunnerLinkerSymbols)
+  let resolvedObjectData? ←
+    evmCompilerRunnerTimedPure "resolved_object_data" (fun _ =>
     program.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
-      evmCompilerRunnerLinkerSymbols
-  let solcValidatedObjectData? := do
+      evmCompilerRunnerLinkerSymbols)
+  let solcValidatedObjectData? ←
+    evmCompilerRunnerTimedPure "solc_validation" (fun _ => do
     let resolved ← resolvedObjectData?
-    resolved.object.toSolcYulProgram?
+    resolved.object.toSolcYulProgram?)
   let stages :=
     [ ("to_yul_contract", evmCompilerRunnerStageSome toYulContract?)
     , ("lower_code_unchecked", evmCompilerRunnerStageSome lowerCodeUnchecked?)
@@ -5791,21 +5855,41 @@ def parse_bridge_json_decode_output(output: str) -> Json:
 
 def parse_backend_check_output(output: str) -> Json:
     lines = [line.strip() for line in output.splitlines() if line.strip()]
-    if not lines or not lines[0].startswith("lean_backend_check="):
+    status_lines = [
+        line.removeprefix("lean_backend_check=")
+        for line in lines
+        if line.startswith("lean_backend_check=")
+    ]
+    if len(status_lines) != 1:
         fail("Lean backend check runner did not report status")
-    status = lines[0].removeprefix("lean_backend_check=")
+    status = status_lines[0]
     if status not in {"pass", "fail"}:
         fail(f"Lean backend check runner produced invalid status: {status!r}")
     summary: Json = {
         "status": status,
         "stages": {},
+        "timingsMs": {},
         "localsProcs": {},
         "localsStmtTrace": [],
         "localsLayouts": [],
         "localsVars": [],
     }
     numeric_fields = {"bytecode_bytes"}
-    for line in lines[1:]:
+    for line in lines:
+        if line.startswith("lean_backend_check="):
+            continue
+        if line.startswith("timing\t"):
+            parts = line.split("\t")
+            if len(parts) != 3 or not parts[1]:
+                fail(f"Lean backend check runner produced malformed timing: {line!r}")
+            try:
+                summary["timingsMs"][parts[1]] = int(parts[2])
+            except ValueError:
+                fail(
+                    "Lean backend check runner produced malformed timing "
+                    f"duration: {line!r}"
+                )
+            continue
         if line.startswith("stage\t"):
             parts = line.split("\t")
             if len(parts) != 3 or not parts[1] or parts[2] not in {"some", "none"}:
@@ -5951,6 +6035,8 @@ def parse_object_image_output(output: str) -> CompiledObjectImage:
     bytecode: Optional[str] = None
     immutable_references: Dict[str, List[Dict[str, int]]] = {}
     for line in lines:
+        if line.startswith("timing\t"):
+            continue
         if line.startswith("bytecode="):
             bytecode = line.removeprefix("bytecode=")
             continue
@@ -6006,7 +6092,11 @@ def run_lake_object_image(lake: str, lean_source: str, cwd: Path) -> CompiledObj
         if completed.returncode != 0:
             output = "\n".join(
                 part
-                for part in [completed.stdout.strip(), completed.stderr.strip()]
+                for part in [
+                    f"returncode={completed.returncode}",
+                    completed.stdout.strip(),
+                    completed.stderr.strip(),
+                ]
                 if part
             )
             fail(f"`{lake} env lean --run {temp_path}` failed:\n{output}")
@@ -6042,7 +6132,11 @@ def run_lake_backend_check(lake: str, lean_source: str, cwd: Path) -> str:
         if completed.returncode != 0:
             output = "\n".join(
                 part
-                for part in [completed.stdout.strip(), completed.stderr.strip()]
+                for part in [
+                    f"returncode={completed.returncode}",
+                    completed.stdout.strip(),
+                    completed.stderr.strip(),
+                ]
                 if part
             )
             fail(f"`{lake} env lean --run {temp_path}` failed:\n{output}")
@@ -6671,6 +6765,16 @@ def render_lean_backend_check_outputs(
             "firstNone": artifact.summary.get("first_none", "missing"),
             "stages": artifact.summary.get("stages", {}),
         }
+        for key in [
+            "timingsMs",
+            "localsProcs",
+            "localsStmtTrace",
+            "localsLayouts",
+            "localsVars",
+        ]:
+            value = artifact.summary.get(key)
+            if value:
+                entry[key] = value
         frontend = normalize_bridge_json_frontend_metadata(
             artifact.frontend,
             "lean-backend-check artifact frontend",

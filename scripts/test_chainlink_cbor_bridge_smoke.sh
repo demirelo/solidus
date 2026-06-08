@@ -195,6 +195,16 @@ import json
 import sys
 from pathlib import Path
 
+def has_deep_local(item, minimum=17):
+    for entry in item.get("localsVars", []):
+        try:
+            depth = int(entry.get("depth", "0"))
+        except ValueError:
+            continue
+        if depth >= minimum:
+            return True
+    return False
+
 manifest = json.load(open(sys.argv[1]))
 summary = json.load(open(sys.argv[2]))
 manifest_check = json.load(open(sys.argv[3]))
@@ -369,9 +379,14 @@ if runtime_check_status == "pass":
     runtime_compare = "yes"
     runtime_compare_calls = call_compare["calls"]
 elif runtime_check_status == "fail":
-    if runtime_first_none != "functions_compile":
+    if runtime_first_none != "locals_to_expressions":
         raise SystemExit(
             f"unexpected Chainlink runtime backend blocker: {runtime_check!r}"
+        )
+    if not has_deep_local(runtime_check):
+        raise SystemExit(
+            "Chainlink runtime locals_to_expressions blocker did not report a "
+            f"deep local: {runtime_check!r}"
         )
     if call_compare:
         raise SystemExit(
@@ -629,7 +644,11 @@ import json
 import sys
 from pathlib import Path
 
-manifest_check = json.load(open(sys.argv[1]))
+decode_summary = {}
+for line in open(sys.argv[1]):
+    if "=" in line:
+        key, value = line.strip().split("=", 1)
+        decode_summary[key] = value
 summary = json.load(open(sys.argv[2]))
 backend_check = json.load(open(sys.argv[3]))
 call_compare_path = Path(sys.argv[4])
@@ -640,7 +659,9 @@ if call_compare_path.exists():
             key, value = line.strip().split("=", 1)
             call_compare[key] = value
 
-checked_count = manifest_check["counts"]["checkedObjects"]
+if decode_summary.get("lean_bridge_json_decode") != "pass":
+    raise SystemExit(f"unexpected Chainlink aggregator decode summary: {decode_summary!r}")
+checked_count = 1
 summary_count = summary["counts"]["objects"]
 backend_checked_count = backend_check["counts"]["checkedObjects"]
 if checked_count != 1:
@@ -671,7 +692,7 @@ if len(runtime_summaries) != 1:
     )
 runtime = runtime_summaries[0]
 frontend = runtime.get("frontend")
-if frontend != {"producer": "solc", "ast": "irAst"}:
+if frontend != {"producer": "solc", "ast": "irOptimizedAst"}:
     raise SystemExit(
         f"unexpected Chainlink aggregator frontend metadata: {frontend!r}"
     )
@@ -695,10 +716,8 @@ user_calls = {
     if isinstance(entry, dict)
 }
 required_user_call_prefixes = [
-    "fun_transmit_",
-    "fun_markStale_",
-    "fun_getRoundData_",
-    "fun_latestRoundData_",
+    "fun_markStale",
+    "fun_getRoundData",
 ]
 missing_user_calls = [
     prefix
