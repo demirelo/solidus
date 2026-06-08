@@ -28,6 +28,15 @@ EvmCompiler.Functions.CallAwareSpill`;
 EvmCompiler.Solidity.BridgeJson`; the single-result user-call compiler smoke;
 scoped proof-hole scan; and `git diff --check`.
 
+## 2026-06-08 17:06 PDT - proof/scratch-frame-variable-expression-load
+Lifted the scratch-frame generated slot-load proof to the first
+expression-level preservation brick: a successful `compileExprCode?` for a
+variable expression, under compiler-state boundedness and frame-store relation,
+runs the emitted code to push the source-store value and preserve the hidden
+frame relation. Verification passed: focused `ScratchFrameMemory` Lean check,
+scratch-frame/object proof build, frontend/bridge build, single-result
+user-call compiler smoke, scoped proof-hole scan, and `git diff --check`.
+
 ## 2026-06-08 16:58 PDT - proof/scratch-frame-state-invariant-memory-wrappers
 Added compiler-state invariant wrappers for scratch-frame generated load/store
 memory execution: state boundedness plus a frame-word bound now discharges the

@@ -841,6 +841,38 @@ theorem run_loadSlotCode?_frameStore_lookup_of_stateSlots
       (lookupSlot?_lt_of_bounded hEnvBound hLookup)
       state values rest hMachine hValues
 
+theorem run_compileExprCode?_var_frameStore_lookup_of_stateSlots
+    {compileState : CompileState} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {name : Name} {valuesAboveBase : Nat} {code : Structured.Code}
+    (hCompile :
+      compileExprCode? compileState.env valuesAboveBase (.var name) =
+        some code)
+    (hStateBound : StateSlotsBounded compileState)
+    (hFrameWords : compileState.nextSlot ≤ words)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (hRel : FrameStoreRel compileState.env store machine base)
+    (state : EVMState) (values rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (hValues : values.length = valuesAboveBase) :
+    ∃ value final,
+      store name = some value ∧
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.toMachineState = machine ∧
+      final.stack = value :: values ++ base :: rest ∧
+      FrameStoreRel compileState.env store final.toMachineState base := by
+  have hEnvBound : EnvSlotsBounded compileState.env words :=
+    envSlotsBounded_of_stateSlotsBounded_le hStateBound hFrameWords
+  rcases
+      compileExprCode?_var_load_slot_bounded hEnvBound hCompile with
+    ⟨slot, hLookup, _hSlot, hLoadCode⟩
+  exact
+    run_loadSlotCode?_frameStore_lookup_of_stateSlots
+      hLoadCode hStateBound hFrameWords hReady hRel hLookup
+      state values rest hMachine hValues
+
 theorem run_storeTopSlotCode?_frameStore_assign
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
