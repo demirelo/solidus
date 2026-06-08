@@ -736,12 +736,13 @@ Another front-half decode smoke covers low-level external-call lowering.  It
 packages `ExternalCallBox`, validates/replays the manifest through Lean, runs
 the Lean backend-check preflight, and asserts that the runtime bridge summary
 preserves `call`, `staticcall`, `delegatecall`, `returndatasize`, and
-`returndatacopy`, while reporting `gas()` as the current resource-observer
-blocker when solc emits it.  The summary compatibility classifier now treats
-the CALL-family primitives as supported open-boundary operations, separate from
-that `gas()` theorem-boundary exclusion.  Backend-check output may still report
-a later first failing stage for a concrete executable artifact, but the
-CALL-family primitive surface itself is no longer classified as unsupported:
+`returndatacopy`.  Solc-emitted `gas()` is executable through the unchecked
+bytecode lowering path and remains a theorem-boundary observer rather than a
+summary blocker.  The summary compatibility classifier treats the CALL-family
+primitives as supported open-boundary operations, separate from exact
+resource-observer preservation.  Backend-check output may still report a later
+first failing stage for a concrete executable artifact, but the CALL-family
+primitive surface itself is no longer classified as unsupported:
 
 ```sh
 SOLC=/Users/dan/.local/bin/solc LAKE=/Users/dan/.elan/bin/lake \
@@ -1262,6 +1263,8 @@ custom-error reverts, and `require` string reverts. It also replays an
 `EnumBytesBox` sequence over enum ABI decoding and bounds rejection, fixed
 `bytes4` constructor/runtime ABI values, fixed-bytes storage/returns, indexed
 byte reads, bitwise fixed-bytes operations, event logs, and revert rollback.
+It also replays `ResourceObserverBox.observe()` to pin executable lowering for
+inline-assembly `gas()` and `msize()` observer opcodes.
 
 ```sh
 SOLC=/Users/dan/.local/bin/solc LAKE=/Users/dan/.elan/bin/lake \
@@ -1350,8 +1353,12 @@ Current bridge limits are intentionally explicit:
   `extcodehash`) are recognized by the frontend and covered through
   state/query plus code-image preservation, not by adding new suspending
   external-boundary events.
-- Direct resource/position observer primitives `gas()`, `msize()`, and `pc()`
-  remain explicit backend exclusions in the current theorem boundary.
+- Direct resource observer primitives `gas()` and `msize()` are executable in
+  unchecked bytecode/object-image lowering through their EVM opcodes.  Exact
+  preservation of those observer values is not part of the current verified
+  theorem boundary.
+- The position observer primitive `pc()` remains an explicit dialect/raw-EVM
+  exclusion before executable core-Yul lowering.
 - Raw EVM opcode-style calls such as `jump`, `jumpi`, `jumpdest`, `push*`,
   `dup*`, and `swap*`, plus verbatim/EOF dialect builtins, are preserved in
   bridge JSON for diagnostics but rejected before checked executable core-Yul

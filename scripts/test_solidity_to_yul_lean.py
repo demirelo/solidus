@@ -1967,7 +1967,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
         ]
         self.assertEqual(user_like_reserved_names, [])
 
-    def test_bridge_json_summary_marks_resource_observers_blocked(self):
+    def test_bridge_json_summary_marks_gas_and_msize_executable_ready(self):
         obj = bridge.YulObject(
             name="runtime",
             dispatcher=[
@@ -1993,9 +1993,40 @@ class SolidityToYulLeanTests(unittest.TestCase):
         )
 
         compatibility = summary["backendCompatibility"]
-        self.assertEqual(compatibility["status"], "blocked")
-        self.assertEqual(compatibility["unsupportedPrimitiveNames"], ["gas", "msize"])
+        self.assertEqual(compatibility["status"], "ready")
+        self.assertEqual(compatibility["unsupportedPrimitiveNames"], [])
         self.assertEqual(compatibility["dialectBuiltinNames"], [])
+        self.assertTrue(
+            any("gas() and msize() are executable" in note for note in compatibility["notes"])
+        )
+
+    def test_bridge_json_summary_marks_gas_only_executable_ready(self):
+        obj = bridge.YulObject(
+            name="runtime",
+            dispatcher=[
+                bridge.Let(
+                    ["g"],
+                    bridge.Call("gas", [], bridge.CALL_PRIMITIVE),
+                ),
+            ],
+            functions=[],
+            data=[],
+            subobjects=[],
+        )
+
+        summary = bridge.bridge_json_summary_artifact(
+            obj,
+            "GasObserver.sol",
+            "GasObserver",
+            "runtime",
+        )
+
+        compatibility = summary["backendCompatibility"]
+        self.assertEqual(compatibility["status"], "ready")
+        self.assertEqual(compatibility["unsupportedPrimitiveNames"], [])
+        self.assertTrue(
+            any("gas() and msize() are executable" in note for note in compatibility["notes"])
+        )
 
     def test_bridge_json_summary_marks_local_effects_and_code_image_ready(self):
         obj = bridge.YulObject(
@@ -4759,7 +4790,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
                     "Calls",
                     "runtime",
                 )
-                summary["backendCompatibility"]["status"] = "ready"
+                summary["backendCompatibility"]["status"] = "blocked"
                 path.write_text(json.dumps(summary))
                 sys.stderr = io.StringIO()
                 result = validate_bridge_json.main([str(path)])
@@ -4803,7 +4834,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
                         [],
                     )
                 )
-                summary["backendCompatibility"]["status"] = "ready"
+                summary["backendCompatibility"]["status"] = "blocked"
                 path.write_text(json.dumps(summary))
                 sys.stderr = io.StringIO()
                 result = validate_bridge_json.main([str(path)])
@@ -9820,6 +9851,21 @@ class SolidityToYulLeanTests(unittest.TestCase):
         ]:
             self.assertIn(calldata, call_compare_smoke)
 
+    def test_contract_call_compare_covers_resource_observer_opcodes(self):
+        scripts_dir = Path(__file__).resolve().parent
+        call_compare_smoke = (
+            scripts_dir / "test_solidity_contract_call_compare.sh"
+        ).read_text()
+        fixture = (
+            scripts_dir.parent / "examples" / "ResourceObserverBox.sol"
+        ).read_text()
+
+        self.assertIn("ResourceObserverBox.sol", call_compare_smoke)
+        self.assertIn("--contract ResourceObserverBox", call_compare_smoke)
+        self.assertIn("--calldata 0x14fc78fc", call_compare_smoke)
+        self.assertIn("pop(gas())", fixture)
+        self.assertIn("pop(msize())", fixture)
+
     def test_frontend_decode_smoke_runner_covers_external_call_preflight(self):
         scripts_dir = Path(__file__).resolve().parent
         examples_dir = scripts_dir.parent / "examples"
@@ -10463,8 +10509,8 @@ class SolidityToYulLeanTests(unittest.TestCase):
                             }
                         ],
                         "backendCompatibility": {
-                            "status": "blocked",
-                            "unsupportedPrimitiveNames": ["gas", "msize"],
+                            "status": "ready",
+                            "unsupportedPrimitiveNames": [],
                             "objectBuiltinNames": ["datasize"],
                             "dialectBuiltinNames": [],
                         },
@@ -10477,12 +10523,12 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertEqual(
             lines,
             [
-                "bridge_summary_2_backend_compatibility=blocked",
+                "bridge_summary_2_backend_compatibility=ready",
                 "bridge_summary_2_objects=1",
                 "bridge_summary_2_object_selectors=Box:runtime",
                 "bridge_summary_2_frontends=solc:irOptimizedAst",
                 "bridge_summary_2_skipped_contracts=0",
-                "bridge_summary_2_unsupported_primitives=gas,msize",
+                "bridge_summary_2_unsupported_primitives=none",
                 "bridge_summary_2_object_builtins=datasize",
                 "bridge_summary_2_dialect_builtins=none",
             ],

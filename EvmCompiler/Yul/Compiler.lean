@@ -100,6 +100,7 @@ def toBasicOp? : EvmYul.Operation .Yul → Option Structured.BasicOp
 def toUncheckedBasicOp? (prim : EvmYul.Operation .Yul) :
     Option Structured.BasicOp :=
   match prim with
+  | .StackMemFlow .MSIZE => some .msize
   | .StackMemFlow .GAS => some .gas
   | _ => toBasicOp? prim
 

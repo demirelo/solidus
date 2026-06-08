@@ -556,10 +556,11 @@ BACKEND_OBJECT_BUILTINS_COMPUTED = {
     "setimmutable",
     "memoryguard",
 }
-BACKEND_BLOCKING_PRIMITIVES: Set[str] = {
+BACKEND_EXECUTABLE_OBSERVER_PRIMITIVES: Set[str] = {
     "gas",
     "msize",
 }
+BACKEND_BLOCKING_PRIMITIVES: Set[str] = set()
 
 BRIDGE_JSON_SCHEMA = "evm-compiler.solc-yul-bridge.v3"
 BRIDGE_JSON_PROVENANCE_SCHEMA = "evm-compiler.bridge-json-provenance.v1"
@@ -3151,6 +3152,10 @@ def bridge_summary_backend_compatibility(
         name for name in primitive_calls
         if name in BACKEND_EXTERNAL_ACCOUNT_QUERY_PRIMITIVES
     )
+    executable_observer_primitives = sorted(
+        name for name in primitive_calls
+        if name in BACKEND_EXECUTABLE_OBSERVER_PRIMITIVES
+    )
     if external_primitives:
         notes.append(
             "CALL/CALLCODE/DELEGATECALL/STATICCALL and CREATE/CREATE2 are "
@@ -3160,6 +3165,12 @@ def bridge_summary_backend_compatibility(
         notes.append(
             "BALANCE and external account-code inspection are covered by "
             "state/query and code-image preservation"
+        )
+    if executable_observer_primitives:
+        notes.append(
+            "gas() and msize() are executable in unchecked bytecode lowering "
+            "via their EVM opcodes; exact observer preservation remains "
+            "outside the current verified theorem boundary"
         )
     if dialect_builtin_names:
         notes.append(

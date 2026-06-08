@@ -79,6 +79,14 @@ FORGE_BIN="${FORGE:-forge}"
   --contract EventMatrix \
   --calldata 0x00
 
+"$ROOT/scripts/compare_contract_call_bytecode.py" "$ROOT/examples/ResourceObserverBox.sol" \
+  --solc "$SOLC_BIN" \
+  --lake "$LAKE_BIN" \
+  --forge "$FORGE_BIN" \
+  --lake-cwd "$ROOT" \
+  --contract ResourceObserverBox \
+  --calldata 0x14fc78fc
+
 "$ROOT/scripts/compare_contract_call_bytecode.py" "$ROOT/examples/PayableVault.sol" \
   --solc "$SOLC_BIN" \
   --lake "$LAKE_BIN" \
