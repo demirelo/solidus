@@ -659,6 +659,19 @@ theorem FrameStoreRel.load_lookup
         (machine.mload (base + slotOffset slot)).1 = value := by
   exact hRel hLookup
 
+theorem envSlotsBounded_of_stateSlotsBounded_le
+    {compileState : CompileState} {words : Nat}
+    (hBound : StateSlotsBounded compileState)
+    (hLe : compileState.nextSlot ≤ words) :
+    EnvSlotsBounded compileState.env words := by
+  intro entry hMem
+  exact Nat.lt_of_lt_of_le (hBound entry hMem) hLe
+
+theorem slotList_nodup_of_stateSlotsNodup
+    {compileState : CompileState}
+    (hNodup : StateSlotsNodup compileState) :
+    (slotList compileState.env).Nodup := hNodup
+
 theorem slotList_mem_of_mem
     {env : SlotEnv} {name : Name} {slot : Nat}
     (hMem : (name, slot) ∈ env) :
@@ -799,6 +812,35 @@ theorem run_loadSlotCode?_frameStore_lookup
   · rw [hFinalMachine, hMloadMachine]
     exact hRel
 
+theorem run_loadSlotCode?_frameStore_lookup_of_stateSlots
+    {compileState : CompileState} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {name : Name} {valuesAboveBase slot : Nat} {code : Structured.Code}
+    (hCode : loadSlotCode? valuesAboveBase slot = some code)
+    (hStateBound : StateSlotsBounded compileState)
+    (hFrameWords : compileState.nextSlot ≤ words)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (hRel : FrameStoreRel compileState.env store machine base)
+    (hLookup : lookupSlot? name compileState.env = some slot)
+    (state : EVMState) (values rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (hValues : values.length = valuesAboveBase) :
+    ∃ value final,
+      store name = some value ∧
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.toMachineState = machine ∧
+      final.stack = value :: values ++ base :: rest ∧
+      FrameStoreRel compileState.env store final.toMachineState base := by
+  have hEnvBound : EnvSlotsBounded compileState.env words :=
+    envSlotsBounded_of_stateSlotsBounded_le hStateBound hFrameWords
+  exact
+    run_loadSlotCode?_frameStore_lookup
+      hCode hReady hRel hLookup
+      (lookupSlot?_lt_of_bounded hEnvBound hLookup)
+      state values rest hMachine hValues
+
 theorem run_storeTopSlotCode?_frameStore_assign
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
@@ -901,6 +943,41 @@ theorem run_storeTopSlotCode?_frameStore_assign_of_slotList_nodup
       (fun hOtherLookup =>
         lookupSlot?_noAlias_of_slotList_nodup hNoDup hLookup hOtherLookup)
       state tail rest hMachine hValues
+
+theorem run_storeTopSlotCode?_frameStore_assign_of_stateSlots
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {compileState : CompileState} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {name : Name} {slot valuesAboveBase : Nat}
+    {code : Structured.Code} {value : Word}
+    (hCode : storeTopSlotCode? valuesAboveBase slot = some code)
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hFrameWords : compileState.nextSlot ≤ words)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (hRel : FrameStoreRel compileState.env store machine base)
+    (hLookup : lookupSlot? name compileState.env = some slot)
+    (state : EVMState) (tail rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (hValues : (value :: tail).length = valuesAboveBase) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := (value :: tail) ++ base :: rest } =
+        .ok final ∧
+      final.stack = tail ++ base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      FrameStoreRel compileState.env
+        (Locals.Source.Store.insert store name value)
+        final.toMachineState base := by
+  exact
+    run_storeTopSlotCode?_frameStore_assign_of_slotList_nodup
+      hSpec hWordBytes hCode
+      (envSlotsBounded_of_stateSlotsBounded_le hStateBound hFrameWords)
+      (slotList_nodup_of_stateSlotsNodup hStateNodup)
+      hReady hRel hLookup state tail rest hMachine hValues
 
 end FrameMemory
 

@@ -28,6 +28,18 @@ EvmCompiler.Functions.CallAwareSpill`;
 EvmCompiler.Solidity.BridgeJson`; the single-result user-call compiler smoke;
 scoped proof-hole scan; and `git diff --check`.
 
+## 2026-06-08 16:58 PDT - proof/scratch-frame-state-invariant-memory-wrappers
+Added compiler-state invariant wrappers for scratch-frame generated load/store
+memory execution: state boundedness plus a frame-word bound now discharges the
+slot bound for generated `MLOAD`, and state boundedness plus slot-list nodup
+discharges generated assignment `MSTORE` preservation. Verification passed:
+`lake build EvmCompiler.Functions.ScratchFrameMemory
+EvmCompiler.Functions.ScratchFrameSpill EvmCompiler.Objects.Preservation
+EvmCompiler.Functions.CallAwareSpill`;
+`lake build EvmCompiler.Yul.Compiler EvmCompiler.Solidity.Frontend
+EvmCompiler.Solidity.BridgeJson`; the single-result user-call compiler smoke;
+scoped proof-hole scan; and `git diff --check`.
+
 ## 2026-06-08 16:00 PDT - compaction-resume/scratch-frame-sizing-question
 Resumed after context compaction to answer whether exact scratch-frame sizing
 by dry-run analysis is already reflected in the compiler/proofs and whether it
