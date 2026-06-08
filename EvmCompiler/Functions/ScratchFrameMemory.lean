@@ -1080,6 +1080,65 @@ theorem run_storeTopSlotCode?_frameStore_assign_of_stateSlots
       (slotList_nodup_of_stateSlotsNodup hStateNodup)
       hReady hRel hLookup state tail rest hMachine hValues
 
+theorem run_compileStmt?_assign_frameStore_of_value_code
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {name : Name} {valueExpr : Expr 1}
+    {plan : Plan} {store : Locals.Source.Store}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmt? ctx returns compileState (.assign name valueExpr) =
+        some plan)
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hFrameWords : compileState.nextSlot ≤ words)
+    (rest : EvmYul.Stack Word)
+    (hValueRun :
+      ∀ {valueCode : Structured.Code},
+        compileExprCode? compileState.env 0 valueExpr = some valueCode →
+          ∃ value mid,
+            Structured.Code.run valueCode
+                { evmState with stack := base :: rest } = .ok mid ∧
+            mid.stack = value :: base :: rest ∧
+            ScratchRegionReady mid.toMachineState
+              (range base words).base (range base words).words ∧
+            FrameStoreRel compileState.env store mid.toMachineState base) :
+    ∃ value final code,
+      plan.block = Block.ofCode code ∧
+      Structured.Code.run code { evmState with stack := base :: rest } =
+        .ok final ∧
+      final.stack = base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      FrameStoreRel compileState.env
+        (Locals.Source.Store.insert store name value)
+        final.toMachineState base := by
+  rcases
+      compileStmt?_assign_target_slot_bounded hStateBound hCompile with
+    ⟨slot, valueCode, storeCode, hLookup, _hSlot, hValueCode,
+      hStoreCode, _hPlanState, hPlanBlock⟩
+  rcases hValueRun hValueCode with
+    ⟨value, mid, hRunValue, hMidStack, hReadyMid, hRelMid⟩
+  rcases
+      run_storeTopSlotCode?_frameStore_assign_of_stateSlots
+        hSpec hWordBytes hStoreCode hStateBound hStateNodup hFrameWords
+        hReadyMid hRelMid hLookup mid [] rest rfl (by simp)
+        (value := value) with
+    ⟨final, hRunStore, hFinalStack, hReadyFinal, hRelFinal⟩
+  have hMidStart :
+      ({ mid with stack := value :: base :: rest } : EVMState) = mid := by
+    cases mid
+    simp at hMidStack ⊢
+    exact hMidStack.symm
+  refine ⟨value, final, valueCode ++ storeCode, ?_, ?_, ?_, ?_, ?_⟩
+  · exact hPlanBlock
+  · rw [Structured.Preservation.Code.run_append, hRunValue]
+    simpa [hMidStart] using hRunStore
+  · simpa using hFinalStack
+  · exact hReadyFinal
+  · exact hRelFinal
+
 end FrameMemory
 
 end ScratchFrameSpill
