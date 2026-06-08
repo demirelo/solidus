@@ -673,6 +673,68 @@ def compileReturnCode? (env : SlotEnv) (returns : List Name) :
   let removeBase ← removeBaseUnderCode? returns.length
   some (loads ++ removeBase)
 
+theorem dupCode?_eq_some_inv {depth : Nat} {code : Structured.Code}
+    (hCode : dupCode? depth = some code) :
+    ∃ op,
+      Locals.StackOp.dup? depth = some op ∧
+        code = [Structured.BasicInstr.op op] := by
+  unfold dupCode? at hCode
+  cases hOp : Locals.StackOp.dup? depth with
+  | none =>
+      simp [hOp] at hCode
+  | some op =>
+      simp [hOp] at hCode
+      cases hCode
+      exact ⟨op, rfl, rfl⟩
+
+theorem slotAddressCode?_eq_some_inv
+    {valuesAboveBase slot : Nat} {code : Structured.Code}
+    (hCode : slotAddressCode? valuesAboveBase slot = some code) :
+    ∃ dup,
+      dupCode? (valuesAboveBase + 1) = some dup ∧
+        code =
+          dup ++
+            [ Structured.BasicInstr.push (slotOffset slot),
+              Structured.BasicInstr.op .add ] := by
+  unfold slotAddressCode? at hCode
+  cases hDup : dupCode? (valuesAboveBase + 1) with
+  | none =>
+      simp [hDup] at hCode
+  | some dup =>
+      simp [hDup] at hCode
+      cases hCode
+      exact ⟨dup, rfl, rfl⟩
+
+theorem loadSlotCode?_eq_some_inv
+    {valuesAboveBase slot : Nat} {code : Structured.Code}
+    (hCode : loadSlotCode? valuesAboveBase slot = some code) :
+    ∃ addr,
+      slotAddressCode? valuesAboveBase slot = some addr ∧
+        code = addr ++ [Structured.BasicInstr.op .mload] := by
+  unfold loadSlotCode? at hCode
+  cases hAddr : slotAddressCode? valuesAboveBase slot with
+  | none =>
+      simp [hAddr] at hCode
+  | some addr =>
+      simp [hAddr] at hCode
+      cases hCode
+      exact ⟨addr, rfl, rfl⟩
+
+theorem storeTopSlotCode?_eq_some_inv
+    {valuesAboveBase slot : Nat} {code : Structured.Code}
+    (hCode : storeTopSlotCode? valuesAboveBase slot = some code) :
+    ∃ addr,
+      slotAddressCode? valuesAboveBase slot = some addr ∧
+        code = addr ++ [Structured.BasicInstr.op .mstore] := by
+  unfold storeTopSlotCode? at hCode
+  cases hAddr : slotAddressCode? valuesAboveBase slot with
+  | none =>
+      simp [hAddr] at hCode
+  | some addr =>
+      simp [hAddr] at hCode
+      cases hCode
+      exact ⟨addr, rfl, rfl⟩
+
 theorem structuredCode_append_noCallCreate
     {left right : Structured.Code}
     (hLeft : left.usesCallCreate = false)
