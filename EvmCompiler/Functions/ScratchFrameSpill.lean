@@ -454,6 +454,17 @@ theorem compileChecked?_eq_some
           rcases hCompile with ⟨rfl, rfl⟩
           exact ⟨rfl, hAsm⟩
 
+theorem compileChecked?_noCallCreate
+    {maxFrameWords : Nat} {program : Program}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hExprNo : exprProgram.usesCallCreate = false)
+    (hCompile :
+      compileChecked? maxFrameWords program = some (exprProgram, asm)) :
+    Assembly.Program.usesCallCreate asm = false := by
+  exact
+    Expressions.Program.compileChecked?_noCallCreate hExprNo
+      (compileChecked?_eq_some hCompile).2
+
 noncomputable def compileCheckedAssembly? (maxFrameWords : Nat)
     (program : Program) : Option Assembly.Program := do
   let (_exprProgram, asm) ← compileChecked? maxFrameWords program
@@ -475,6 +486,20 @@ theorem compileCheckedAssembly?_eq_some
       simp [hChecked] at hCompile
       cases hCompile
       exact ⟨exprProgram, compileChecked?_eq_some hChecked⟩
+
+theorem compileCheckedAssembly?_noCallCreate
+    {maxFrameWords : Nat} {program : Program} {asm : Assembly.Program}
+    (hExprNo :
+      ∀ exprProgram : Expressions.Program,
+        compileExpressionsProgram? maxFrameWords program = some exprProgram →
+          exprProgram.usesCallCreate = false)
+    (hCompile :
+      compileCheckedAssembly? maxFrameWords program = some asm) :
+    Assembly.Program.usesCallCreate asm = false := by
+  rcases compileCheckedAssembly?_eq_some hCompile with
+    ⟨exprProgram, hExpr, hAsm⟩
+  exact Expressions.Program.compileChecked?_noCallCreate
+    (hExprNo exprProgram hExpr) hAsm
 
 def compileTarget? (maxFrameWords : Nat)
     (program : Program) : Option Assembly.TargetProgram := do
