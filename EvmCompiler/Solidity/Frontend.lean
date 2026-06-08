@@ -752,6 +752,128 @@ mutual
           Stmt.CaseList.usesCodeLayoutBuiltinFor? objectName rest
 end
 
+namespace SwitchCaseValue
+
+def literalValues : SwitchCaseValue → List Word
+  | .word value => [value]
+  | .stringLit value =>
+      match StringLiteral.word? value with
+      | some literal => [literal]
+      | none => []
+  | .bytesLit bytes =>
+      match StringLiteral.wordBytes? bytes with
+      | some literal => [literal]
+      | none => []
+  | .boolLit value => [EvmYul.UInt256.ofNat (if value then 1 else 0)]
+
+end SwitchCaseValue
+
+mutual
+  def Expr.literalValues : Expr → List Word
+    | .lit value => [value]
+    | .stringLit _ => []
+    | .bytesLit _ => []
+    | .var _ => []
+    | .call _ _ args => Expr.List.literalValues args
+
+  def Expr.List.literalValues : List Expr → List Word
+    | [] => []
+    | expr :: rest => Expr.literalValues expr ++ Expr.List.literalValues rest
+end
+
+mutual
+  def Stmt.literalValues : Stmt → List Word
+    | .block stmts => Stmt.List.literalValues stmts
+    | .letDecl _ none => []
+    | .letDecl _ (some value) => Expr.literalValues value
+    | .assign _ value => Expr.literalValues value
+    | .exprStmt expr => Expr.literalValues expr
+    | .functionDef _ _ _ body => Stmt.List.literalValues body
+    | .switch scrutinee cases default =>
+        Expr.literalValues scrutinee ++
+          Stmt.CaseList.literalValues cases ++
+            Stmt.List.literalValues default
+    | .forLoop pre condition post body =>
+        Stmt.List.literalValues pre ++
+          Expr.literalValues condition ++
+            Stmt.List.literalValues post ++ Stmt.List.literalValues body
+    | .ifThen condition body =>
+        Expr.literalValues condition ++ Stmt.List.literalValues body
+    | .break => []
+    | .continue => []
+    | .leave => []
+
+  def Stmt.List.literalValues : List Stmt → List Word
+    | [] => []
+    | stmt :: rest => Stmt.literalValues stmt ++ Stmt.List.literalValues rest
+
+  def Stmt.CaseList.literalValues :
+      List (SwitchCaseValue × List Stmt) → List Word
+    | [] => []
+    | (value, body) :: rest =>
+        SwitchCaseValue.literalValues value ++
+          Stmt.List.literalValues body ++ Stmt.CaseList.literalValues rest
+end
+
+mutual
+  def Expr.usesObjectBuiltinOtherThanLoadImmutable? : Expr → Bool
+    | .lit _ => false
+    | .stringLit _ => false
+    | .bytesLit _ => false
+    | .var _ => false
+    | .call .objectBuiltin "loadimmutable" _ => false
+    | .call .objectBuiltin _ _ => true
+    | .call _ _ args => Expr.List.usesObjectBuiltinOtherThanLoadImmutable? args
+
+  def Expr.List.usesObjectBuiltinOtherThanLoadImmutable? :
+      List Expr → Bool
+    | [] => false
+    | expr :: rest =>
+        Expr.usesObjectBuiltinOtherThanLoadImmutable? expr ||
+          Expr.List.usesObjectBuiltinOtherThanLoadImmutable? rest
+end
+
+mutual
+  def Stmt.usesObjectBuiltinOtherThanLoadImmutable? : Stmt → Bool
+    | .block stmts => Stmt.List.usesObjectBuiltinOtherThanLoadImmutable? stmts
+    | .letDecl _ none => false
+    | .letDecl _ (some value) =>
+        Expr.usesObjectBuiltinOtherThanLoadImmutable? value
+    | .assign _ value => Expr.usesObjectBuiltinOtherThanLoadImmutable? value
+    | .exprStmt expr => Expr.usesObjectBuiltinOtherThanLoadImmutable? expr
+    | .functionDef _ _ _ body =>
+        Stmt.List.usesObjectBuiltinOtherThanLoadImmutable? body
+    | .switch scrutinee cases default =>
+        Expr.usesObjectBuiltinOtherThanLoadImmutable? scrutinee ||
+          Stmt.CaseList.usesObjectBuiltinOtherThanLoadImmutable? cases ||
+            Stmt.List.usesObjectBuiltinOtherThanLoadImmutable? default
+    | .forLoop pre condition post body =>
+        Stmt.List.usesObjectBuiltinOtherThanLoadImmutable? pre ||
+          Expr.usesObjectBuiltinOtherThanLoadImmutable? condition ||
+            Stmt.List.usesObjectBuiltinOtherThanLoadImmutable? post ||
+              Stmt.List.usesObjectBuiltinOtherThanLoadImmutable? body
+    | .ifThen condition body =>
+        Expr.usesObjectBuiltinOtherThanLoadImmutable? condition ||
+          Stmt.List.usesObjectBuiltinOtherThanLoadImmutable? body
+    | .break => false
+    | .continue => false
+    | .leave => false
+
+  def Stmt.List.usesObjectBuiltinOtherThanLoadImmutable? :
+      List Stmt → Bool
+    | [] => false
+    | stmt :: rest =>
+        Stmt.usesObjectBuiltinOtherThanLoadImmutable? stmt ||
+          Stmt.List.usesObjectBuiltinOtherThanLoadImmutable? rest
+
+  def Stmt.CaseList.usesObjectBuiltinOtherThanLoadImmutable? :
+      List (SwitchCaseValue × List Stmt) → Bool
+    | [] => false
+    | (_value, body) :: rest =>
+        Stmt.List.usesObjectBuiltinOtherThanLoadImmutable? body ||
+          Stmt.CaseList.usesObjectBuiltinOtherThanLoadImmutable? rest
+end
+
 namespace NameList
 
 def insertUnique (name : Name) : List Name → List Name
@@ -796,6 +918,18 @@ def codeUsesCodeLayoutBuiltin? (object : Object) : Bool :=
       (fun entry =>
         Stmt.List.usesCodeLayoutBuiltinFor? object.name entry.snd.body)
 
+def literalValues (object : Object) : List Word :=
+  Stmt.List.literalValues object.dispatcher ++
+    object.functions.foldr
+      (fun entry acc => Stmt.List.literalValues entry.snd.body ++ acc)
+      []
+
+def usesObjectBuiltinOtherThanLoadImmutable? (object : Object) : Bool :=
+  Stmt.List.usesObjectBuiltinOtherThanLoadImmutable? object.dispatcher ||
+    object.functions.any
+      (fun entry =>
+        Stmt.List.usesObjectBuiltinOtherThanLoadImmutable? entry.snd.body)
+
 end Object
 
 namespace ImmutableReference
@@ -836,6 +970,11 @@ def markerEntriesFromNat : Nat → List Name → List (Name × Word)
   | _, [] => []
   | index, name :: rest =>
       (name, markerValue index) :: markerEntriesFromNat (index + 1) rest
+
+def entriesDisjointFromValues? (entries : List (Name × Word))
+    (values : List Word) : Bool :=
+  entries.all
+    (fun entry => !values.any (fun value => value == entry.snd))
 
 def zeroEntries : List Name → List (Name × Word)
   | [] => []
@@ -885,6 +1024,23 @@ def findOccurrences (needle bytes : List UInt8) : List Nat :=
 def zeroWord32 : List UInt8 :=
   Assembly.Bytecode.encodeWord32 (EvmYul.UInt256.ofNat 0)
 
+def patchBytesAt (start : Nat) (replacement bytes : List UInt8) :
+    List UInt8 :=
+  bytes.take start ++ replacement ++ bytes.drop (start + replacement.length)
+
+def zeroImmutableReferences : List UInt8 → List ImmutableReference → List UInt8
+  | bytes, [] => bytes
+  | bytes, reference :: rest =>
+      zeroImmutableReferences
+        (patchBytesAt reference.start zeroWord32 bytes) rest
+
+def zeroImmutableReferenceEntries : List UInt8 →
+    List (Name × List ImmutableReference) → List UInt8
+  | bytes, [] => bytes
+  | bytes, (_name, references) :: rest =>
+      zeroImmutableReferenceEntries
+        (zeroImmutableReferences bytes references) rest
+
 def immutableReferencesForMarker (bytes : List UInt8) (value : Word) :
     List ImmutableReference :=
   (findOccurrences (Assembly.Bytecode.encodeWord32 value) bytes).map
@@ -914,6 +1070,17 @@ def immutableReferenceEntriesFromCodes
         immutableReferenceEntriesFromCodes zeroBytes markerBytes rest
 
 end Bytecode
+
+namespace Object
+
+def canUseSingleImmutableMarkerPass? (object : Object)
+    (markerImmutableValues : List (Name × Word)) : Bool :=
+  !object.codeUsesCodeLayoutBuiltin? &&
+    !object.usesObjectBuiltinOtherThanLoadImmutable? &&
+      ImmutableReference.entriesDisjointFromValues?
+        markerImmutableValues object.literalValues
+
+end Object
 
 mutual
   def Expr.toYul? : Expr → Option AstExpr
@@ -2234,13 +2401,35 @@ mutual
     if !placeholderContext.objectDataNamesUnique? then
       none
     else
-    let (codeBase, code?) ←
-      if object.codeUsesCodeLayoutBuiltin? then
+    let (codeBase, code?, markerCode?, ownImmutableReferences?) ←
+      if object.canUseSingleImmutableMarkerPass? markerImmutableValues then
+        let markerContext : ObjectBuiltinContext :=
+          { placeholderContext with immutableValues := markerImmutableValues }
+        let markerCode ← object.codeBytesUncheckedIn? markerContext
+        let ownImmutableReferences :=
+          Bytecode.immutableReferenceEntries markerCode markerImmutableValues
+        let code :=
+          Bytecode.zeroImmutableReferenceEntries
+            markerCode ownImmutableReferences
+        some
+          ( markerCode.length
+          , some code
+          , some markerCode
+          , some ownImmutableReferences )
+      else if object.codeUsesCodeLayoutBuiltin? then
         let placeholderCode ← object.codeBytesUncheckedIn? placeholderContext
-        some (placeholderCode.length, (none : Option (List UInt8)))
+        some
+          ( placeholderCode.length
+          , (none : Option (List UInt8))
+          , (none : Option (List UInt8))
+          , (none : Option (List (Name × List ImmutableReference))) )
       else
         let code ← object.codeBytesUncheckedIn? placeholderContext
-        some (code.length, some code)
+        some
+          ( code.length
+          , some code
+          , (none : Option (List UInt8))
+          , (none : Option (List (Name × List ImmutableReference))) )
     let selfSize := EvmYul.UInt256.ofNat (codeBase + payload.length)
     let layout ←
       ObjectItemRef.List.objectLayoutEntriesFromNat?
@@ -2265,16 +2454,22 @@ mutual
       | none => object.codeBytesUncheckedIn? context
     if code.length == codeBase then
     let markerCode ←
-      match immutableNames with
-      | [] => some code
-      | _ :: _ =>
-          let markerContext : ObjectBuiltinContext :=
-            { context with immutableValues := markerImmutableValues }
-          object.codeBytesUncheckedIn? markerContext
+      match markerCode? with
+      | some markerCode => some markerCode
+      | none =>
+          match immutableNames with
+          | [] => some code
+          | _ :: _ =>
+              let markerContext : ObjectBuiltinContext :=
+                { context with immutableValues := markerImmutableValues }
+              object.codeBytesUncheckedIn? markerContext
     if markerCode.length == codeBase then
     let ownImmutableReferences :=
-      Bytecode.immutableReferenceEntriesFromCodes
-        code markerCode markerImmutableValues
+      match ownImmutableReferences? with
+      | some ownImmutableReferences => ownImmutableReferences
+      | none =>
+          Bytecode.immutableReferenceEntriesFromCodes
+            code markerCode markerImmutableValues
     let payloadImmutableReferences ←
       ObjectItemRef.List.immutableReferenceEntriesFromNat?
         object.data childImages codeBase items

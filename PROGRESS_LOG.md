@@ -1,5 +1,21 @@
 # Progress Log
 
+## 2026-06-08 10:05 PDT - support/single-pass-immutable-marker-image
+Added a conservative unchecked object-image path for layout-independent
+`loadimmutable`-only objects: if the marker constants are absent from ordinary
+source and switch literals, the builder compiles once with marker immutable
+values, records marker occurrences as immutable references, and patches those
+marker words back to zero for deployable bytes. A collision guard falls back to
+the old two-pass route. Lean smoke now checks eligibility, collision fallback,
+non-layout `datasize`, and nonempty immutable references. Verification passed:
+`lake build EvmCompiler.Solidity.Frontend`,
+`lake build EvmCompiler.Solidity.BridgeJson`, the
+single-result/object-builtin smoke artifact, focused Python bridge tests, and
+`git diff --check`. The saved Uniswap v4 `PoolManager` creation retry still
+remained CPU-active for about four minutes before being stopped; no leftover
+Lean process remained. The next bottleneck is likely large-runtime Yul lowering
+or functions/locals compilation itself.
+
 ## 2026-06-08 09:57 PDT - support/object-image-layout-independent-fast-path
 Added a conservative Solidity frontend object-image fast path: code that does
 not use final code-layout-dependent object builtins (`dataoffset` or

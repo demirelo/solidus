@@ -331,6 +331,21 @@ def smokeImmutableOnlyObject : Solidity.Frontend.Object :=
     objects := []
     items := [] }
 
+def smokeMarkerCollisionObject : Solidity.Frontend.Object :=
+  { smokeImmutableOnlyObject with
+    dispatcher :=
+      [ .exprStmt
+          (.call .primitive "mstore"
+            [ .lit (EvmYul.UInt256.ofNat 0)
+            , .lit
+                (Solidity.Frontend.ImmutableReference.markerValue 0) ])
+      , .exprStmt
+          (.call .primitive "mstore"
+            [ .lit (EvmYul.UInt256.ofNat 32)
+            , .call .objectBuiltin "loadimmutable"
+                [.stringLit "IMM"] ])
+      , .exprStmt (.call .primitive "stop" []) ] }
+
 def smokeObjectContext : Solidity.Frontend.ObjectBuiltinContext :=
   { layout := smokeObjectLayout
     dataSizes := [("blob", EvmYul.UInt256.ofNat smokeObjectDataBytes.length)]
@@ -365,6 +380,16 @@ def smokeSetImmutableNoReferenceContext :
 #guard smokeImmutableOnlyObject.codeUsesCodeLayoutBuiltin? = false
 
 #guard
+  smokeImmutableOnlyObject.canUseSingleImmutableMarkerPass?
+    (Solidity.Frontend.ImmutableReference.markerEntriesFromNat 0 ["IMM"]) =
+      true
+
+#guard
+  smokeMarkerCollisionObject.canUseSingleImmutableMarkerPass?
+    (Solidity.Frontend.ImmutableReference.markerEntriesFromNat 0 ["IMM"]) =
+      false
+
+#guard
   (match
       smokeDataSizeOnlyObject.computedImageUncheckedWithLinkerSymbols? [] with
   | some (computed, image) =>
@@ -379,8 +404,9 @@ def smokeSetImmutableNoReferenceContext :
   | some (computed, image) =>
       computed.codeBase == computed.code.length &&
         computed.markerCode.length == computed.codeBase &&
-          image.bytes.length == computed.codeBase &&
-            match image.immutableReferences with
+          !(computed.markerCode == computed.code) &&
+            image.bytes.length == computed.codeBase &&
+              match image.immutableReferences with
             | [("IMM", refs)] => !refs.isEmpty
             | _ => false
   | none => false) = true
