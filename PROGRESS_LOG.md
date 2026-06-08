@@ -37,6 +37,14 @@ frame relation. Verification passed: focused `ScratchFrameMemory` Lean check,
 scratch-frame/object proof build, frontend/bridge build, single-result
 user-call compiler smoke, scoped proof-hole scan, and `git diff --check`.
 
+## 2026-06-08 17:17 PDT - proof/scratch-frame-empty-expression-sequence
+Added the empty expression-sequence execution base case for scratch-frame
+preservation: successful `compileExprSeqCode?` for `.nil` runs as no-op,
+preserves the stack shape with the hidden base, and carries the frame-store
+relation unchanged. Verification passed: focused `ScratchFrameMemory` Lean
+check, scratch-frame/object proof build, frontend/bridge build, single-result
+user-call compiler smoke, scoped proof-hole scan, and `git diff --check`.
+
 ## 2026-06-08 17:12 PDT - proof/scratch-frame-literal-expression-load
 Added the companion literal-expression execution theorem for scratch-frame
 expression preservation: successful `compileExprCode?` for a literal runs the

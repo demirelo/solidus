@@ -911,6 +911,37 @@ theorem run_compileExprCode?_lit_frameStore
     intro query slot hLookup
     exact hRel hLookup
 
+theorem run_compileExprSeqCode?_nil_frameStore
+    {compileState : CompileState} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word}
+    {valuesAboveBase : Nat} {code : Structured.Code}
+    (hCompile :
+      compileExprSeqCode? compileState.env valuesAboveBase
+          (Locals.ExprSeq.nil : Locals.ExprSeq 0) =
+        some code)
+    (hRel : FrameStoreRel compileState.env store machine base)
+    (state : EVMState) (values rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (_hValues : values.length = valuesAboveBase) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.toMachineState = machine ∧
+      final.stack = values ++ base :: rest ∧
+      FrameStoreRel compileState.env store final.toMachineState base := by
+  simp [compileExprSeqCode?] at hCompile
+  cases hCompile
+  let final : EVMState := { state with stack := values ++ base :: rest }
+  refine ⟨final, ?_, ?_, ?_, ?_⟩
+  · simp [Structured.Code.run, final]
+  · simpa [final] using hMachine
+  · simp [final]
+  · have hFinalMachine : final.toMachineState = machine := by
+      simpa [final] using hMachine
+    rw [hFinalMachine]
+    intro query slot hLookup
+    exact hRel hLookup
+
 theorem run_storeTopSlotCode?_frameStore_assign
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
