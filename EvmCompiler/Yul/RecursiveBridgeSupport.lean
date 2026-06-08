@@ -356904,8 +356904,10 @@ theorem compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStatic?_c
 /--
 CALL-family-admitting checked compiler/source boundary.
 
-This admits `CALL`, `CALLCODE`, `DELEGATECALL`, and `STATICCALL`, while still
-checking out CREATE/CREATE2 and other imported-semantics gaps.
+This admits `CALL`, `CALLCODE`, `DELEGATECALL`, `STATICCALL`, `CREATE`, and
+`CREATE2` through the open external boundary, while keeping code-image and
+object-builtin coverage checked before the recursive bridge consumes the
+program.
 -/
 noncomputable def compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeatures?
     (program : Program) :

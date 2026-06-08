@@ -81,10 +81,10 @@ noncomputable section
 Checked imported-Yul open CALL/CREATE boundary.
 
 The public audit surface here pins the source-facing open-trace contract,
-the shared external-world readiness predicate, the RETURNDATACOPY-owned
-current-bounds accessor, and the canonical final endpoints. Lower checked-target
-decomposition facts stay inside their proof modules instead of being exported as
-public audit roots.
+the shared external-world readiness predicate, the checked current-bounds
+wrapper, and the canonical final endpoints. Lower checked-target decomposition
+facts stay inside their proof modules instead of being exported as public audit
+roots.
 -/
 
 abbrev sourceOpenDispatcherTraceAccepted :=
@@ -96,11 +96,6 @@ abbrev sourceOpenTraceExternalResponsesAdmissible :=
 abbrev openXBoundaryFamilySharedResponseExternalWorldReadyFor :=
   Yul.Program.OpenXBoundaryFamilySharedResponseExternalWorldReadyFor
 
--- The public CALL-family route generates the current no-CALL
--- `RETURNDATACOPY` bounds certificate from its checked compiler result.
-abbrev checkedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeReturnDataCopyBoundsTargetCurrentNoCallReturnDataCopyBoundsReady :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafe?_currentNoCallReturnDataCopyBoundsReady
-
 theorem checkedImportedYulCallCreateCurrentNoCallReturnDataCopyBoundsReady
     {program : Yul.Program} {functionProgram : Functions.Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -110,7 +105,7 @@ theorem checkedImportedYulCallCreateCurrentNoCallReturnDataCopyBoundsReady
         some (functionProgram, asm, target)) :
     Yul.OpenGasAware.OpenXBlockTraceRelReady.CurrentNoCallReturnDataCopyBoundsReady
       asm target :=
-  checkedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeReturnDataCopyBoundsTargetCurrentNoCallReturnDataCopyBoundsReady
+  Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafe?_currentNoCallReturnDataCopyBoundsReady
     hChecked
 
 theorem checkedImportedYulCallCreateFinalObservation
