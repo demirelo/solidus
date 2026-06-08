@@ -192,6 +192,57 @@ def smokeExternalDelegateCallExpr : AstExpr :=
 def smokeGasExpr : AstExpr :=
   .Call (.inl ((.StackMemFlow .GAS : EvmYul.Operation .Yul))) []
 
+def smokeWideUncheckedAbiCallExpr : AstExpr :=
+  .Call (.inl ((.System .CALL : EvmYul.Operation .Yul)))
+    [ smokeGasExpr
+    , .Call (.inl ((.CompBit .AND : EvmYul.Operation .Yul)))
+        [ .Var "value1_1"
+        , .Lit (EvmYul.UInt256.ofNat
+            1461501637330902918203684832716283019655932542975) ]
+    , .Lit (EvmYul.UInt256.ofNat 0)
+    , .Var "_14"
+    , .Call (.inl ((.StopArith .SUB : EvmYul.Operation .Yul)))
+        [ .Call (.inr "abi_encode_string")
+            [ .Var "array"
+            , .Call (.inl ((.StopArith .ADD : EvmYul.Operation .Yul)))
+                [ .Var "_14", .Lit (EvmYul.UInt256.ofNat 132) ] ]
+        , .Var "_14" ]
+    , .Var "_14"
+    , .Lit (EvmYul.UInt256.ofNat 32) ]
+
+def smokeWideUncheckedCallStmt : AstStmt :=
+  .Block
+    [ .Let ["value1_1"] (some (.Lit smokeOne))
+    , .Let ["value0_3"] (some (.Lit smokeOne))
+    , .Let ["offset_2"] (some (.Lit smokeOne))
+    , .Let ["value_6"] (some (.Lit smokeOne))
+    , .Let ["dummy_0"] (some (.Lit smokeOne))
+    , .Let ["dummy_1"] (some (.Lit smokeOne))
+    , .Let ["dummy_2"] (some (.Lit smokeOne))
+    , .Let ["dummy_3"] (some (.Lit smokeOne))
+    , .Let ["array"] (some (.Lit smokeOne))
+    , .Let ["_14"] (some (.Lit smokeOne))
+    , .Let ["_15"] (some smokeWideUncheckedAbiCallExpr) ]
+
+def smokeWideUncheckedAbiEncodeStringFn : Functions.FunDef :=
+  { name := "abi_encode_string"
+    params := ["array", "ptr"]
+    returns := ["r"]
+    body := { stmts := [.assign "r" (.var "ptr")] } }
+
+def smokeWideUncheckedFreshNames : List Name :=
+  [ "value1_1", "value0_3", "offset_2", "value_6", "dummy_0"
+  , "dummy_1", "dummy_2", "dummy_3", "array", "_14", "_15"
+  , "abi_encode_string" ]
+
+def smokeWideUncheckedFunctionsProgram? : Option Functions.Program := do
+  let initial := Fresh.initial smokeWideUncheckedFreshNames
+  let (bodyStmts, _state) ←
+    Stmt.toFunctionsListUncheckedFuel? 128 initial smokeWideUncheckedCallStmt
+  some
+    { functions := [smokeWideUncheckedAbiEncodeStringFn]
+      body := { stmts := bodyStmts } }
+
 def smokeCreateExpr : AstExpr :=
   .Call (.inl ((.System .CREATE : EvmYul.Operation .Yul)))
     [.Lit smokeOne, .Lit smokeOne, .Lit smokeOne]
@@ -578,6 +629,25 @@ def smokeSetImmutableNoReferenceContext :
   smokeSome
     (Expr.lower1Unchecked? (Fresh.initial (Expr.names smokeGasExpr))
       smokeGasExpr) = true
+
+#guard
+  smokeSome
+    smokeWideUncheckedFunctionsProgram? = true
+
+#guard
+  smokeSome
+    (smokeWideUncheckedFunctionsProgram? >>=
+      Functions.Program.toLocals?) = true
+
+#guard
+  smokeSome
+    (smokeWideUncheckedFunctionsProgram? >>=
+      Functions.Program.toExpressions?) = true
+
+#guard
+  smokeSome
+    (smokeWideUncheckedFunctionsProgram? >>=
+      Functions.Program.compile?) = true
 
 #guard
   smokeSome

@@ -428,10 +428,15 @@ mutual
     | expr :: rest => do
         let (preRest, lowerRest, state') ← List.lowerBound1Unchecked? state rest
         let (preHead, lowerHead, state'') ← lowerUnchecked? 1 state' expr
-        let (tmp, state''') ← Fresh.fresh? state''
-        some
-          (preRest ++ preHead ++ [Functions.Stmt.let_ tmp lowerHead],
-            .var tmp :: lowerRest, state''')
+        -- Wide EVM calls add stack offset to every direct argument lookup.
+        -- Materialize pure left-side arguments before they can require DUP17+.
+        if pureAliasArgSafe? expr && lowerRest.length < 4 then
+          some (preRest ++ preHead, lowerHead :: lowerRest, state'')
+        else
+          let (tmp, state''') ← Fresh.fresh? state''
+          some
+            (preRest ++ preHead ++ [Functions.Stmt.let_ tmp lowerHead],
+              .var tmp :: lowerRest, state''')
 end
 
 def lower1Unchecked? (state : Fresh.State) (expr : AstExpr) :

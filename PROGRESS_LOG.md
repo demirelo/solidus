@@ -1,5 +1,29 @@
 # Progress Log
 
+## 2026-06-08 09:03 PDT - compaction-resume/forge-locals-blocker
+Resumed after compaction with object-builtin support reverified; current work is
+reviewing the pending backend-check nested-statement diagnostic and continuing
+the Uniswap/forge-std runtime blocker where object builtins are resolved but
+locals-to-expressions lowering fails on a deep dispatcher stack.
+
+## 2026-06-08 09:35 PDT - support/unchecked-wide-call-argument-lowering
+Fixed the next Uniswap/forge-std executable backend blocker by changing only the
+unchecked Yul expression lowerer: pure wide-call arguments now stay direct for
+small stack offsets but are materialized when left-side EVM argument offsets
+would otherwise force `DUP17+`. Backend-check diagnostics now recurse through
+switch/for bodies and print failing-layout variable depths. The focused
+MockERC721 runtime bridge moved from `locals_to_expressions=none` to
+`locals_to_expressions/functions_compile/object_image=some` and emits 38292
+runtime bytes; the remaining backend-check failure is the expected checked
+`gas`/solc-validation boundary. Added a small Lean smoke regression for the
+wide `CALL(gas(), ..., sub(userCall(...), ...), ...)` shape. Verification
+passed: `lake build EvmCompiler.Yul.Compiler EvmCompiler.Solidity.Frontend
+EvmCompiler.Solidity.BridgeJson`, the single-result/object-builtin smoke
+artifact, Python `py_compile`, focused MockERC721 backend check, and
+`git diff --check`. Real Uniswap v4 `test_mostSignificantBit_one` now reaches
+28 bridge objects and fails next on the very large PoolManager creation
+object-image Lean run exiting without diagnostic output.
+
 ## 2026-06-08 00:21 PDT - compaction-resume/object-builtin-audit
 Resumed after compaction to check the current `datasize`/`dataoffset`/`setimmutable`
 support boundary: object semantics and frontend resolution appear present, while

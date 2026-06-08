@@ -5277,6 +5277,58 @@ def evmCompilerRunnerLocalsStmtKind :
   | .terminal _ => "terminal"
   | .terminalArgs _ _ => "terminalArgs"
 
+mutual
+  partial def evmCompilerRunnerLocalsExprVars {{results : Nat}} :
+      EvmCompiler.Locals.Expr results → List EvmCompiler.Locals.Name
+    | .lit _ => []
+    | .var name => [name]
+    | .code _ => []
+    | .prim _ args => evmCompilerRunnerLocalsExprSeqVars args
+
+  partial def evmCompilerRunnerLocalsExprSeqVars {{results : Nat}} :
+      EvmCompiler.Locals.ExprSeq results → List EvmCompiler.Locals.Name
+    | .nil => []
+    | .cons head tail =>
+        evmCompilerRunnerLocalsExprVars head ++
+          evmCompilerRunnerLocalsExprSeqVars tail
+end
+
+def evmCompilerRunnerPrintLocalsVarDepths
+    (owner : String) (idx : Nat) (ctx : EvmCompiler.Locals.Ctx)
+    (names : List EvmCompiler.Locals.Name) : IO Unit := do
+  for name in names do
+    let depth :=
+      match EvmCompiler.Locals.Layout.lookupDepth? name ctx.layout with
+      | some value => toString value
+      | none => "missing"
+    IO.println
+      ("locals_var\\t" ++ owner ++ "\\t" ++ toString idx ++ "\\t" ++
+        name ++ "\\t" ++ depth)
+
+def evmCompilerRunnerPrintLocalsStmtFailureDetail
+    (owner : String) (idx : Nat) (ctx : EvmCompiler.Locals.Ctx)
+    (stmt : EvmCompiler.Locals.Stmt) : IO Unit := do
+  IO.println
+    ("locals_layout\\t" ++ owner ++ "\\t" ++ toString idx ++ "\\t" ++
+      toString ctx.layout.length ++ "\\t" ++ toString ctx.layout)
+  match stmt with
+  | .expr expr =>
+      evmCompilerRunnerPrintLocalsVarDepths owner idx ctx
+        (evmCompilerRunnerLocalsExprVars expr)
+  | .exprs exprs =>
+      evmCompilerRunnerPrintLocalsVarDepths owner idx ctx
+        (evmCompilerRunnerLocalsExprSeqVars exprs)
+  | .let_ _ value =>
+      evmCompilerRunnerPrintLocalsVarDepths owner idx ctx
+        (evmCompilerRunnerLocalsExprVars value)
+  | .assign _ value =>
+      evmCompilerRunnerPrintLocalsVarDepths owner idx ctx
+        (evmCompilerRunnerLocalsExprVars value)
+  | .terminalArgs _ args =>
+      evmCompilerRunnerPrintLocalsVarDepths owner idx ctx
+        (evmCompilerRunnerLocalsExprSeqVars args)
+  | _ => pure ()
+
 partial def evmCompilerRunnerPrintLocalsStmtTrace
     (owner : String) (idx : Nat) (ctx : EvmCompiler.Locals.Ctx)
     (stmts : List EvmCompiler.Locals.Stmt) : IO Unit := do
@@ -5292,6 +5344,7 @@ partial def evmCompilerRunnerPrintLocalsStmtTrace
       | some (_code, nextCtx) =>
           evmCompilerRunnerPrintLocalsStmtTrace owner (idx + 1) nextCtx rest
       | none =>
+          evmCompilerRunnerPrintLocalsStmtFailureDetail owner idx ctx stmt
           match stmt with
           | .block body =>
               evmCompilerRunnerPrintLocalsStmtTrace
@@ -5299,6 +5352,29 @@ partial def evmCompilerRunnerPrintLocalsStmtTrace
           | .if_ _ body =>
               evmCompilerRunnerPrintLocalsStmtTrace
                 (owner ++ "/" ++ toString idx ++ ".if") 0 ctx body.stmts
+          | .switch _ cases defaultBody =>
+              for pair in cases do
+                evmCompilerRunnerPrintLocalsStmtTrace
+                  (owner ++ "/" ++ toString idx ++ ".switch") 0 ctx pair.snd.stmts
+              match defaultBody with
+              | some body =>
+                  evmCompilerRunnerPrintLocalsStmtTrace
+                    (owner ++ "/" ++ toString idx ++ ".default") 0 ctx body.stmts
+              | none => pure ()
+          | .for_ init _ post body =>
+              let initBase := ctx.withoutLoopControl
+              evmCompilerRunnerPrintLocalsStmtTrace
+                (owner ++ "/" ++ toString idx ++ ".for.init") 0 initBase
+                init.stmts
+              match EvmCompiler.Locals.Block.compileOpen initBase init with
+              | some (_initCode, initCtx) =>
+                  evmCompilerRunnerPrintLocalsStmtTrace
+                    (owner ++ "/" ++ toString idx ++ ".for.post") 0
+                    initCtx.withoutLoopControl post.stmts
+                  evmCompilerRunnerPrintLocalsStmtTrace
+                    (owner ++ "/" ++ toString idx ++ ".for.body") 0
+                    (initCtx.withLoopControl initCtx.layout.length) body.stmts
+              | none => pure ()
           | _ => pure ()
 
 def evmCompilerRunnerFirstNone :
@@ -5542,6 +5618,8 @@ def main : IO Unit := do
             "some"
           else
             "none")
+      evmCompilerRunnerPrintLocalsStmtTrace
+        "main" 0 EvmCompiler.Locals.Ctx.initial locals.body.stmts
       for proc in locals.procs do
         evmCompilerRunnerPrintLocalsProc proc
         evmCompilerRunnerPrintLocalsStmtTrace
@@ -5715,6 +5793,8 @@ def parse_backend_check_output(output: str) -> Json:
         "stages": {},
         "localsProcs": {},
         "localsStmtTrace": [],
+        "localsLayouts": [],
+        "localsVars": [],
     }
     numeric_fields = {"bytecode_bytes"}
     for line in lines[1:]:
@@ -5767,6 +5847,53 @@ def parse_backend_check_output(output: str) -> Json:
                     "index": index,
                     "kind": parts[3],
                     "status": parts[4],
+                }
+            )
+            continue
+        if line.startswith("locals_layout\t"):
+            parts = line.split("\t", 4)
+            if len(parts) != 5 or not parts[1]:
+                fail(
+                    "Lean backend check runner produced malformed locals layout: "
+                    f"{line!r}"
+                )
+            try:
+                index = int(parts[2])
+                length = int(parts[3])
+            except ValueError:
+                fail(
+                    "Lean backend check runner produced malformed locals layout "
+                    f"index/length: {line!r}"
+                )
+            summary["localsLayouts"].append(
+                {
+                    "owner": parts[1],
+                    "index": index,
+                    "length": length,
+                    "layout": parts[4],
+                }
+            )
+            continue
+        if line.startswith("locals_var\t"):
+            parts = line.split("\t")
+            if len(parts) != 5 or not parts[1] or not parts[3] or not parts[4]:
+                fail(
+                    "Lean backend check runner produced malformed locals var: "
+                    f"{line!r}"
+                )
+            try:
+                index = int(parts[2])
+            except ValueError:
+                fail(
+                    "Lean backend check runner produced malformed locals var "
+                    f"index: {line!r}"
+                )
+            summary["localsVars"].append(
+                {
+                    "owner": parts[1],
+                    "index": index,
+                    "name": parts[3],
+                    "depth": parts[4],
                 }
             )
             continue
