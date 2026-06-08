@@ -505,6 +505,25 @@ theorem compileCheckedWithScratchFrameSpill?_noCallCreate_of_source
     (by
       simpa [compileCheckedWithScratchFrameSpill?] using hCompile)
 
+theorem compileCheckedWithScratchFrameSpill?_lookup_of_find?
+    {maxFrameWords : Nat} {program : Objects.Program}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    {name : Name} {fn : Functions.FunDef}
+    (hCompile :
+      compileCheckedWithScratchFrameSpill? maxFrameWords program =
+        some (exprProgram, asm))
+    (hFind :
+      Functions.FunList.find? name program.toFunctions.functions =
+        some fn) :
+    ∃ proc,
+      Expressions.ProcList.lookup? name exprProgram.procs = some proc ∧
+        proc.name = fn.name ∧ proc.argc = 1 ∧
+          proc.retc = fn.returns.length :=
+  Functions.ScratchFrameSpill.compileChecked?_lookup_of_find?
+    (by
+      simpa [compileCheckedWithScratchFrameSpill?] using hCompile)
+    hFind
+
 theorem compileCheckedAssemblyWithScratchFrameSpill?_eq_some
     {maxFrameWords : Nat} {program : Objects.Program}
     {asm : Assembly.Program}

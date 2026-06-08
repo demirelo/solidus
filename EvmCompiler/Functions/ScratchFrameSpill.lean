@@ -1650,6 +1650,278 @@ theorem compileExpressionsProgram?_noCallCreate
                     hBound] at hCompile
   · simp [hNames] at hCompile
 
+theorem compileFunction?_eq_some_header {ctx : CompileCtx}
+    {state : CompileState} {fn : FunDef}
+    {proc : Expressions.Proc} {state' : CompileState}
+    (hCompile : compileFunction? ctx state fn = some (proc, state')) :
+    proc.name = fn.name ∧ proc.argc = 1 ∧
+      proc.retc = fn.returns.length := by
+  unfold compileFunction? at hCompile
+  by_cases hSigNodup : (fn.returns ++ fn.params).Nodup
+  · simp [hSigNodup] at hCompile
+    by_cases hRetBound : fn.returns.length < 16
+    · simp [hRetBound] at hCompile
+      cases hSlots : lookupFun? fn.name ctx.functions with
+      | none =>
+          simp [hSlots] at hCompile
+      | some slots =>
+          simp [hSlots] at hCompile
+          let bodyStart : CompileState :=
+            { env := functionEnv slots, nextSlot := state.nextSlot }
+          cases hBodyPlan :
+              compileBlockOpen? ctx fn.returns bodyStart fn.body with
+          | none =>
+              simp [bodyStart, hBodyPlan] at hCompile
+          | some bodyPlan =>
+              cases hRetCode :
+                  compileReturnCode? bodyPlan.state.env fn.returns with
+              | none =>
+                  simp [bodyStart, hBodyPlan, hRetCode] at hCompile
+              | some retCode =>
+                  simp [bodyStart, hBodyPlan, hRetCode] at hCompile
+                  rcases hCompile with ⟨rfl, rfl⟩
+                  simp
+    · simp [hRetBound] at hCompile
+  · simp [hSigNodup] at hCompile
+
+theorem compileFunctions?_eq_some_headers {ctx : CompileCtx} :
+    ∀ {state : CompileState} {fns : List FunDef}
+      {procs : List Expressions.Proc} {state' : CompileState},
+      compileFunctions? ctx state fns = some (procs, state') →
+        procs.map (fun proc => proc.name) =
+            fns.map (fun fn => fn.name) ∧
+          procs.map (fun proc => proc.argc) =
+            fns.map (fun _fn => 1) ∧
+          procs.map (fun proc => proc.retc) =
+            fns.map (fun fn => fn.returns.length)
+  | state, [], procs, state', hCompile => by
+      simp [compileFunctions?] at hCompile
+      rcases hCompile with ⟨rfl, rfl⟩
+      simp
+  | state, fn :: rest, procs, state', hCompile => by
+      unfold compileFunctions? at hCompile
+      cases hHead : compileFunction? ctx state fn with
+      | none =>
+          simp [hHead] at hCompile
+      | some headResult =>
+          rcases headResult with ⟨proc, stateAfterHead⟩
+          cases hTail :
+              compileFunctions? ctx stateAfterHead rest with
+          | none =>
+              simp [hHead, hTail] at hCompile
+          | some tailResult =>
+              rcases tailResult with ⟨tailProcs, tailState⟩
+              simp [hHead, hTail] at hCompile
+              rcases hCompile with ⟨rfl, rfl⟩
+              rcases compileFunction?_eq_some_header hHead with
+                ⟨hName, hArgc, hRetc⟩
+              rcases compileFunctions?_eq_some_headers hTail with
+                ⟨hNames, hArgcs, hRetcs⟩
+              simp [hName, hArgc, hRetc, hNames, hArgcs, hRetcs]
+
+theorem compileFunctions?_lookup_of_find? {ctx : CompileCtx} :
+    ∀ {state : CompileState} {fns : List FunDef}
+      {procs : List Expressions.Proc} {state' : CompileState}
+      {name : Name} {fn : FunDef},
+      compileFunctions? ctx state fns = some (procs, state') →
+      FunList.find? name fns = some fn →
+        ∃ proc,
+          Expressions.ProcList.lookup? name procs = some proc ∧
+            proc.name = fn.name ∧ proc.argc = 1 ∧
+              proc.retc = fn.returns.length
+  | state, [], procs, state', name, fn, hCompile, hFind => by
+      simp [FunList.find?] at hFind
+  | state, head :: rest, procs, state', name, fn, hCompile, hFind => by
+      unfold compileFunctions? at hCompile
+      cases hHeadCompile : compileFunction? ctx state head with
+      | none =>
+          simp [hHeadCompile] at hCompile
+      | some headResult =>
+          rcases headResult with ⟨headProc, stateAfterHead⟩
+          cases hTailCompile :
+              compileFunctions? ctx stateAfterHead rest with
+          | none =>
+              simp [hHeadCompile, hTailCompile] at hCompile
+          | some tailResult =>
+              rcases tailResult with ⟨tailProcs, tailState⟩
+              simp [hHeadCompile, hTailCompile] at hCompile
+              rcases hCompile with ⟨rfl, rfl⟩
+              rcases compileFunction?_eq_some_header hHeadCompile with
+                ⟨hHeadName, hHeadArgc, hHeadRetc⟩
+              by_cases hName : head.name = name
+              · simp [FunList.find?, hName] at hFind
+                cases hFind
+                have hLookupName : headProc.name = name := by
+                  simpa [hName] using hHeadName
+                exact
+                  ⟨headProc,
+                    by simp [Expressions.ProcList.lookup?, hLookupName],
+                    hHeadName, hHeadArgc, hHeadRetc⟩
+              · have hTailFind : FunList.find? name rest = some fn := by
+                  simpa [FunList.find?, hName] using hFind
+                rcases compileFunctions?_lookup_of_find?
+                    hTailCompile hTailFind with
+                  ⟨proc, hLookup, hProcName, hArgc, hRetc⟩
+                have hHeadProcNameNe : headProc.name ≠ name := by
+                  intro hEq
+                  exact hName (by simpa [hHeadName] using hEq)
+                exact
+                  ⟨proc,
+                    by
+                      simp [Expressions.ProcList.lookup?,
+                        hHeadProcNameNe, hLookup],
+                    hProcName, hArgc, hRetc⟩
+
+theorem compileFunctions?_lookup_of_find?_with_compile
+    {ctx : CompileCtx} :
+    ∀ {state : CompileState} {fns : List FunDef}
+      {procs : List Expressions.Proc} {state' : CompileState}
+      {name : Name} {fn : FunDef},
+      compileFunctions? ctx state fns = some (procs, state') →
+      FunList.find? name fns = some fn →
+        ∃ proc fnState fnState',
+          Expressions.ProcList.lookup? name procs = some proc ∧
+            compileFunction? ctx fnState fn = some (proc, fnState') ∧
+            proc.name = fn.name ∧ proc.argc = 1 ∧
+              proc.retc = fn.returns.length
+  | state, [], procs, state', name, fn, hCompile, hFind => by
+      simp [FunList.find?] at hFind
+  | state, head :: rest, procs, state', name, fn, hCompile, hFind => by
+      unfold compileFunctions? at hCompile
+      cases hHeadCompile : compileFunction? ctx state head with
+      | none =>
+          simp [hHeadCompile] at hCompile
+      | some headResult =>
+          rcases headResult with ⟨headProc, stateAfterHead⟩
+          cases hTailCompile :
+              compileFunctions? ctx stateAfterHead rest with
+          | none =>
+              simp [hHeadCompile, hTailCompile] at hCompile
+          | some tailResult =>
+              rcases tailResult with ⟨tailProcs, tailState⟩
+              simp [hHeadCompile, hTailCompile] at hCompile
+              rcases hCompile with ⟨rfl, rfl⟩
+              rcases compileFunction?_eq_some_header hHeadCompile with
+                ⟨hHeadName, hHeadArgc, hHeadRetc⟩
+              by_cases hName : head.name = name
+              · simp [FunList.find?, hName] at hFind
+                cases hFind
+                have hLookupName : headProc.name = name := by
+                  simpa [hName] using hHeadName
+                exact
+                  ⟨headProc, state, stateAfterHead,
+                    by simp [Expressions.ProcList.lookup?, hLookupName],
+                    hHeadCompile, hHeadName, hHeadArgc, hHeadRetc⟩
+              · have hTailFind : FunList.find? name rest = some fn := by
+                  simpa [FunList.find?, hName] using hFind
+                rcases compileFunctions?_lookup_of_find?_with_compile
+                    hTailCompile hTailFind with
+                  ⟨proc, fnState, fnState', hLookup, hProcCompile,
+                    hProcName, hArgc, hRetc⟩
+                have hHeadProcNameNe : headProc.name ≠ name := by
+                  intro hEq
+                  exact hName (by simpa [hHeadName] using hEq)
+                exact
+                  ⟨proc, fnState, fnState',
+                    by
+                      simp [Expressions.ProcList.lookup?,
+                        hHeadProcNameNe, hLookup],
+                    hProcCompile, hProcName, hArgc, hRetc⟩
+
+theorem compileExpressionsProgram?_lookup_of_find?
+    {maxFrameWords : Nat} {program : Program}
+    {exprProgram : Expressions.Program} {name : Name} {fn : FunDef}
+    (hCompile :
+      compileExpressionsProgram? maxFrameWords program = some exprProgram)
+    (hFind : FunList.find? name program.functions = some fn) :
+    ∃ proc,
+      Expressions.ProcList.lookup? name exprProgram.procs = some proc ∧
+        proc.name = fn.name ∧ proc.argc = 1 ∧
+          proc.retc = fn.returns.length := by
+  unfold compileExpressionsProgram? at hCompile
+  by_cases hNames : (program.functions.map FunDef.name).Nodup
+  · simp [hNames] at hCompile
+    let initial : CompileState := { env := [], nextSlot := 0 }
+    cases hSignatures :
+        allocateFunctionSignatures program.functions initial with
+    | mk functionSlots stateAfterSignatures =>
+        simp [initial, hSignatures] at hCompile
+        let ctx0 : CompileCtx := { functions := functionSlots, frameWords := 0 }
+        cases hProbeFunctions :
+            compileFunctions? ctx0 stateAfterSignatures program.functions with
+        | none =>
+            simp [ctx0, hProbeFunctions] at hCompile
+        | some probeResult =>
+            rcases probeResult with ⟨_probeProcs, stateAfterFunctions⟩
+            let mainStart : CompileState :=
+              { env := [], nextSlot := stateAfterFunctions.nextSlot }
+            cases hMainProbe :
+                compileMain? ctx0 0 mainStart program.body with
+            | none =>
+                simp [ctx0, mainStart, hProbeFunctions, hMainProbe]
+                  at hCompile
+            | some mainProbe =>
+                by_cases hBound : mainProbe.state.nextSlot ≤ maxFrameWords
+                · simp [ctx0, mainStart, hProbeFunctions, hMainProbe,
+                    hBound] at hCompile
+                  let frameWords := mainProbe.state.nextSlot
+                  let ctxFinal : CompileCtx :=
+                    { functions := functionSlots, frameWords := frameWords }
+                  cases hFinalFunctions :
+                      compileFunctions? ctxFinal stateAfterSignatures
+                        program.functions with
+                  | none =>
+                      have hFinalFunctions' :
+                          compileFunctions?
+                              { functions := functionSlots,
+                                frameWords := mainProbe.state.nextSlot }
+                              stateAfterSignatures program.functions =
+                            none := by
+                        simpa [frameWords, ctxFinal] using hFinalFunctions
+                      simp [hFinalFunctions'] at hCompile
+                  | some finalResult =>
+                      rcases finalResult with
+                        ⟨procs, stateAfterFunctionsFinal⟩
+                      have hFinalFunctions' :
+                          compileFunctions?
+                              { functions := functionSlots,
+                                frameWords := mainProbe.state.nextSlot }
+                              stateAfterSignatures program.functions =
+                            some (procs, stateAfterFunctionsFinal) := by
+                        simpa [frameWords, ctxFinal] using hFinalFunctions
+                      cases hMain :
+                          compileMain? ctxFinal frameWords mainStart
+                            program.body with
+                      | none =>
+                          have hMain' :
+                              compileMain?
+                                  { functions := functionSlots,
+                                    frameWords := mainProbe.state.nextSlot }
+                                  mainProbe.state.nextSlot
+                                  { env := [],
+                                    nextSlot := stateAfterFunctions.nextSlot }
+                                  program.body = none := by
+                            simpa [frameWords, ctxFinal, mainStart] using hMain
+                          simp [hFinalFunctions', hMain'] at hCompile
+                      | some main =>
+                          have hMain' :
+                              compileMain?
+                                  { functions := functionSlots,
+                                    frameWords := mainProbe.state.nextSlot }
+                                  mainProbe.state.nextSlot
+                                  { env := [],
+                                    nextSlot := stateAfterFunctions.nextSlot }
+                                  program.body = some main := by
+                            simpa [frameWords, ctxFinal, mainStart] using hMain
+                          simp [hFinalFunctions', hMain'] at hCompile
+                          cases hCompile
+                          exact
+                            compileFunctions?_lookup_of_find?
+                              hFinalFunctions hFind
+                · simp [ctx0, mainStart, hProbeFunctions, hMainProbe,
+                    hBound] at hCompile
+  · simp [hNames] at hCompile
+
 noncomputable def compileChecked? (maxFrameWords : Nat)
     (program : Program) : Option (Expressions.Program × Assembly.Program) := do
   let exprProgram ← compileExpressionsProgram? maxFrameWords program
@@ -1699,6 +1971,20 @@ theorem compileChecked?_noCallCreate_of_source
     (compileExpressionsProgram?_noCallCreate hProgram
       (compileChecked?_eq_some hCompile).1)
     hCompile
+
+theorem compileChecked?_lookup_of_find?
+    {maxFrameWords : Nat} {program : Program}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    {name : Name} {fn : FunDef}
+    (hCompile :
+      compileChecked? maxFrameWords program = some (exprProgram, asm))
+    (hFind : FunList.find? name program.functions = some fn) :
+    ∃ proc,
+      Expressions.ProcList.lookup? name exprProgram.procs = some proc ∧
+        proc.name = fn.name ∧ proc.argc = 1 ∧
+          proc.retc = fn.returns.length :=
+  compileExpressionsProgram?_lookup_of_find?
+    (compileChecked?_eq_some hCompile).1 hFind
 
 noncomputable def compileCheckedAssembly? (maxFrameWords : Nat)
     (program : Program) : Option Assembly.Program := do
