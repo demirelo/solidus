@@ -624,6 +624,180 @@ theorem mload_mstore_generated_slot_value
       hSpec hWordBytes hReady
         (by simpa [range] using hSlot)
 
+def FrameStoreRel (env : SlotEnv) (store : Locals.Source.Store)
+    (machine : EvmYul.MachineState) (base : Word) : Prop :=
+  ∀ {name slot},
+    lookupSlot? name env = some slot →
+      ∃ value,
+        store name = some value ∧
+          (machine.mload (base + slotOffset slot)).1 = value
+
+theorem mload_generated_slot_machine_eq
+    {machine : EvmYul.MachineState} {base : Word} {words slot : Nat}
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (hSlot : slot < words) :
+    (machine.mload (base + slotOffset slot)).2 = machine := by
+  have hReserved :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchWordReserved
+        machine (base + slotOffset slot) := by
+    rw [generatedAddress_eq_range_word base words slot]
+    exact
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchRegionReady.scratchWordReserved
+        hReady (by simpa [range] using hSlot)
+  exact
+    Locals.SourceLowering.StateRel.SpillScratch.mload_machine_eq hReserved
+
+theorem FrameStoreRel.load_lookup
+    {env : SlotEnv} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word}
+    (hRel : FrameStoreRel env store machine base)
+    {name : Name} {slot : Nat}
+    (hLookup : lookupSlot? name env = some slot) :
+    ∃ value,
+      store name = some value ∧
+        (machine.mload (base + slotOffset slot)).1 = value := by
+  exact hRel hLookup
+
+theorem FrameStoreRel.mstore_insert
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {env : SlotEnv} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {name : Name} {slot : Nat} {value : Word}
+    (hBound : EnvSlotsBounded env words)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (hRel : FrameStoreRel env store machine base)
+    (hLookup : lookupSlot? name env = some slot)
+    (hNoAlias :
+      ∀ {other : Name},
+        lookupSlot? other env = some slot → other = name) :
+    FrameStoreRel env
+      (Locals.Source.Store.insert store name value)
+      (machine.mstore (base + slotOffset slot) value) base := by
+  intro other readSlot hReadLookup
+  have hWriteSlot : slot < words :=
+    lookupSlot?_lt_of_bounded hBound hLookup
+  have hReadSlot : readSlot < words :=
+    lookupSlot?_lt_of_bounded hBound hReadLookup
+  by_cases hSlotEq : readSlot = slot
+  · subst readSlot
+    have hOther : other = name := hNoAlias hReadLookup
+    subst other
+    refine ⟨value, ?_, ?_⟩
+    · exact Locals.Source.Store.insert_self store name value
+    · exact mload_mstore_generated_slot_value hSpec hWordBytes hReady
+        hWriteSlot
+  · rcases hRel hReadLookup with ⟨storedValue, hStore, hLoad⟩
+    have hOtherNe : other ≠ name := by
+      intro hOther
+      subst other
+      rw [hLookup] at hReadLookup
+      cases hReadLookup
+      exact hSlotEq rfl
+    refine ⟨storedValue, ?_, ?_⟩
+    · simpa [Locals.Source.Store.insert_of_ne hOtherNe] using hStore
+    · rw [generatedAddress_eq_range_word base words slot]
+      rw [generatedAddress_eq_range_word base words readSlot]
+      rw [
+        Locals.SourceLowering.StateRel.SpillScratch.ScratchRegionReady.mload_mstore_range_other_slot_value
+          hSpec hWordBytes hReady
+          (by simpa [range] using hWriteSlot)
+          (by simpa [range] using hReadSlot)
+          (by
+            intro hEq
+            exact hSlotEq (by
+              simpa [range,
+                Locals.SourceLowering.StateRel.SpillScratch.ScratchRange.word,
+                Locals.SourceLowering.StateRel.SpillScratch.ScratchRange.slot]
+                using hEq))]
+      simpa [generatedAddress_eq_range_word base words readSlot] using hLoad
+
+theorem run_loadSlotCode?_frameStore_lookup
+    {env : SlotEnv} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {name : Name} {valuesAboveBase slot : Nat} {code : Structured.Code}
+    (hCode : loadSlotCode? valuesAboveBase slot = some code)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (hRel : FrameStoreRel env store machine base)
+    (hLookup : lookupSlot? name env = some slot)
+    (hSlot : slot < words)
+    (state : EVMState) (values rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (hValues : values.length = valuesAboveBase) :
+    ∃ value final,
+      store name = some value ∧
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.toMachineState = machine ∧
+      final.stack = value :: values ++ base :: rest ∧
+      FrameStoreRel env store final.toMachineState base := by
+  rcases hRel hLookup with ⟨value, hStore, hLoad⟩
+  rcases run_loadSlotCode? hCode state values rest base hValues with
+    ⟨final, hRun, hStack, hFinalMachine⟩
+  have hMloadMachine :
+      (state.toMachineState.mload (base + slotOffset slot)).2 =
+        machine := by
+    rw [hMachine]
+    exact mload_generated_slot_machine_eq hReady hSlot
+  refine ⟨value, final, hStore, hRun, ?_, ?_, ?_⟩
+  · simpa [hFinalMachine] using hMloadMachine
+  · rw [hStack, hMachine, hLoad]
+  · rw [hFinalMachine, hMloadMachine]
+    exact hRel
+
+theorem run_storeTopSlotCode?_frameStore_assign
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {env : SlotEnv} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {name : Name} {slot valuesAboveBase : Nat}
+    {code : Structured.Code} {value : Word}
+    (hCode : storeTopSlotCode? valuesAboveBase slot = some code)
+    (hBound : EnvSlotsBounded env words)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (hRel : FrameStoreRel env store machine base)
+    (hLookup : lookupSlot? name env = some slot)
+    (hNoAlias :
+      ∀ {other : Name},
+        lookupSlot? other env = some slot → other = name)
+    (state : EVMState) (tail rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (hValues : (value :: tail).length = valuesAboveBase) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := (value :: tail) ++ base :: rest } =
+        .ok final ∧
+      final.stack = tail ++ base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      FrameStoreRel env
+        (Locals.Source.Store.insert store name value)
+        final.toMachineState base := by
+  rcases run_storeTopSlotCode? hCode state value tail rest base hValues with
+    ⟨final, hRun, hStack, hFinalMachine⟩
+  have hSlot : slot < words :=
+    lookupSlot?_lt_of_bounded hBound hLookup
+  have hReadyStored :
+      ScratchRegionReady
+        (machine.mstore (base + slotOffset slot) value)
+        (range base words).base (range base words).words :=
+    mstore_generated_slot_ready hSpec hWordBytes hReady hSlot
+  have hRelStored :
+      FrameStoreRel env
+        (Locals.Source.Store.insert store name value)
+        (machine.mstore (base + slotOffset slot) value) base :=
+    FrameStoreRel.mstore_insert hSpec hWordBytes hBound hReady hRel
+      hLookup hNoAlias
+  refine ⟨final, hRun, hStack, ?_, ?_⟩
+  · rw [hFinalMachine, hMachine]
+    exact hReadyStored
+  · rw [hFinalMachine, hMachine]
+    exact hRelStored
+
 end FrameMemory
 
 end ScratchFrameSpill
