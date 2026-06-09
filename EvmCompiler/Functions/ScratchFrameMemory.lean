@@ -2595,6 +2595,67 @@ theorem run_blockOfCode_regular_of_code_run
   simp [Block.ofCode, Expressions.Block.run, Expressions.Stmt.run,
     Structured.Code.runState, hRun, Expressions.Outcome.regular]
 
+theorem run_blockAppend_ofCode_regular_of_code_run
+    {program : Expressions.Program} {fuel : Nat}
+    {code : Structured.Code} {tail : Expressions.Block}
+    {state : Expressions.RunState} {final : EVMState}
+    (hRun : Structured.Code.run code state.evm = .ok final) :
+    Expressions.Block.run program (fuel + 2)
+        (Block.append (Block.ofCode code) tail) state =
+      Expressions.Block.run program (fuel + 1) tail (state.withEVM final) := by
+  cases tail
+  simp [Block.append, Block.ofCode, Expressions.Block.run,
+    Expressions.Stmt.run, Structured.Code.runState, hRun,
+    Expressions.Outcome.regular]
+
+theorem run_compileStmtList?_nil_block_frameStore_of_source_run_open_regular
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {plan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source source' : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel blockFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmtList? ctx returns compileState [] = some plan)
+    (hRun :
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtx sourceFuel { stmts := [] } source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx'))
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (rest : EvmYul.Stack Word) :
+    plan.state = compileState ∧
+      Expressions.Block.run compiledProgram (blockFuel + 1) plan.block
+          { runState with evm := { evmState with stack := base :: rest } } =
+        .ok (Expressions.Outcome.regular
+          ({ runState with evm := { evmState with stack := base :: rest } })) ∧
+      ScratchRegionReady evmState.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) source'.shared
+        evmState.toSharedState ∧
+      FrameStoreRel compileState.env source'.vars evmState.toMachineState base := by
+  simp [compileStmtList?] at hCompile
+  cases hCompile
+  cases sourceFuel with
+  | zero =>
+      simp [EvmCompiler.Functions.Source.Block.runOpen,
+        EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+  | succ fuel =>
+      simp [EvmCompiler.Functions.Source.Block.runOpen,
+        EvmCompiler.Functions.Source.Outcome.regular] at hRun
+      rcases hRun with ⟨hOutcome, _hCtx⟩
+      cases hOutcome
+      exact ⟨rfl, by simp [Expressions.Block.run,
+        Expressions.Outcome.regular], hReady, hShared, hRel⟩
+
 theorem run_compileStmt?_expr_block_frameStore_of_source_run_regular
     {ctx : CompileCtx} {returns : List Name}
     {compileState : CompileState} {expr : Expr 0} {plan : Plan}
