@@ -3428,6 +3428,270 @@ theorem source_stmt_run_block_atomic_privateScratchInvariant
       Locals.SourceLowering.StateRel.SpillScratch.SourceStatePrivateScratchInvariant.restrictTo
         hInnerRel sourceCtx.scope
 
+theorem source_stmt_run_atomicOrBlock_privateScratchInvariant
+    {stmt : Stmt} {program : Program}
+    {source source' target : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat}
+    (hSafe : AtomicOrBlockStmtSafe stmt)
+    (hRel : SourceStatePrivateScratchInvariant source target)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel stmt source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx')) :
+    ∃ target',
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel stmt target =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular target',
+          sourceCtx') ∧
+      SourceStatePrivateScratchInvariant source' target' := by
+  cases stmt with
+  | expr expr =>
+      exact
+        source_stmt_run_atomic_privateScratchInvariant
+          (stmt := .expr expr)
+          (program := program)
+          (source := source)
+          (source' := source')
+          (target := target)
+          (sourceCtx := sourceCtx)
+          (sourceCtx' := sourceCtx')
+          (fuel := fuel)
+          (by simpa [AtomicStmtSafe, AtomicOrBlockStmtSafe] using hSafe)
+          hRel hRun
+  | let_ name value =>
+      exact
+        source_stmt_run_atomic_privateScratchInvariant
+          (stmt := .let_ name value)
+          (program := program)
+          (source := source)
+          (source' := source')
+          (target := target)
+          (sourceCtx := sourceCtx)
+          (sourceCtx' := sourceCtx')
+          (fuel := fuel)
+          (by simpa [AtomicStmtSafe, AtomicOrBlockStmtSafe] using hSafe)
+          hRel hRun
+  | assign name value =>
+      exact
+        source_stmt_run_atomic_privateScratchInvariant
+          (stmt := .assign name value)
+          (program := program)
+          (source := source)
+          (source' := source')
+          (target := target)
+          (sourceCtx := sourceCtx)
+          (sourceCtx' := sourceCtx')
+          (fuel := fuel)
+          (by simpa [AtomicStmtSafe, AtomicOrBlockStmtSafe] using hSafe)
+          hRel hRun
+  | block body =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+      have hScopedSource :
+          EvmCompiler.Functions.Source.Block.runScoped
+              Locals.Source.PrimitiveSemantics.structured
+              program sourceCtx body fuel source =
+            .ok (EvmCompiler.Functions.Source.Outcome.regular source') := by
+        unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+        cases hScoped :
+            EvmCompiler.Functions.Source.Block.runScoped
+                Locals.Source.PrimitiveSemantics.structured
+                program sourceCtx body fuel source with
+        | error err =>
+            simp [hScoped] at hRun
+        | ok outcome =>
+            cases outcome with
+            | mk scopedState scopedMode =>
+                cases scopedMode
+                · simp [hScoped, EvmCompiler.Functions.Source.Outcome.regular]
+                    at hRun
+                  rcases hRun with ⟨hOutcome, _hCtx⟩
+                  cases hOutcome
+                  rfl
+                · simp [hScoped, EvmCompiler.Functions.Source.Outcome.regular]
+                    at hRun
+                  rcases hRun with ⟨hOutcome, _hCtx⟩
+                  cases hOutcome
+                · simp [hScoped, EvmCompiler.Functions.Source.Outcome.regular]
+                    at hRun
+                  rcases hRun with ⟨hOutcome, _hCtx⟩
+                  cases hOutcome
+                · simp [hScoped, EvmCompiler.Functions.Source.Outcome.regular]
+                    at hRun
+                  rcases hRun with ⟨hOutcome, _hCtx⟩
+                  cases hOutcome
+                · simp [hScoped, EvmCompiler.Functions.Source.Outcome.regular]
+                    at hRun
+                  rcases hRun with ⟨hOutcome, _hCtx⟩
+                  cases hOutcome
+      have hCtxEq : sourceCtx' = sourceCtx := by
+        unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+        simp [hScopedSource, EvmCompiler.Functions.Source.Outcome.regular]
+          at hRun
+        exact hRun.symm
+      have hRunBlock :
+          EvmCompiler.Functions.Source.Stmt.run
+              Locals.Source.PrimitiveSemantics.structured
+              program sourceCtx fuel (.block body) source =
+            .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+              sourceCtx) := by
+        unfold EvmCompiler.Functions.Source.Stmt.run
+        simp [hScopedSource, EvmCompiler.Functions.Source.Outcome.regular,
+          Locals.Source.Outcome.regular]
+      rcases
+          source_stmt_run_block_atomic_privateScratchInvariant
+            (body := body)
+            (program := program)
+            (source := source)
+            (source' := source')
+            (target := target)
+            (sourceCtx := sourceCtx)
+            (fuel := fuel)
+            hSafe hRel hRunBlock with
+        ⟨target', hTargetRun, hTargetRel⟩
+      cases hCtxEq
+      exact ⟨target', hTargetRun, hTargetRel⟩
+  | if_ cond body =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | switch scrutinee cases defaultBody =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | for_ init cond post body =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | brk =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | cont =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | leave =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | call targets functionName args =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | terminal kind =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | terminalArgs kind args =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+
+theorem source_block_run_open_atomicOrBlock_privateScratchInvariant
+    {stmts : List Stmt} {program : Program}
+    {source source' target : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat}
+    (hSafe : AtomicOrBlockStmtListSafe stmts)
+    (hRel : SourceStatePrivateScratchInvariant source target)
+    (hRun :
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel { stmts := stmts } source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx')) :
+    ∃ target',
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel { stmts := stmts } target =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular target',
+          sourceCtx') ∧
+      SourceStatePrivateScratchInvariant source' target' := by
+  induction stmts generalizing source target sourceCtx fuel with
+  | nil =>
+      cases fuel with
+      | zero =>
+          simp [EvmCompiler.Functions.Source.Block.runOpen,
+            EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+      | succ fuel' =>
+          simp [EvmCompiler.Functions.Source.Block.runOpen,
+            EvmCompiler.Functions.Source.Outcome.regular] at hRun
+          rcases hRun with ⟨hOutcome, hCtx⟩
+          cases hOutcome
+          cases hCtx
+          exact
+            ⟨target,
+              by
+                simp [EvmCompiler.Functions.Source.Block.runOpen,
+                  EvmCompiler.Functions.Source.Outcome.regular],
+              hRel⟩
+  | cons stmt tail ih =>
+      rcases hSafe with ⟨hHeadSafe, hTailSafe⟩
+      cases fuel with
+      | zero =>
+          simp [EvmCompiler.Functions.Source.Block.runOpen,
+            EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+      | succ fuel' =>
+          cases hStmtRun :
+              EvmCompiler.Functions.Source.Stmt.run
+                  Locals.Source.PrimitiveSemantics.structured
+                  program sourceCtx fuel' stmt source with
+          | error err =>
+              simp [EvmCompiler.Functions.Source.Block.runOpen, hStmtRun]
+                at hRun
+          | ok stmtResult =>
+              rcases stmtResult with ⟨stmtOutcome, headCtx⟩
+              cases stmtOutcome with
+              | mk sourceAfterHead mode =>
+                  cases mode with
+                  | regular =>
+                      have hStmtRunRegular :
+                          EvmCompiler.Functions.Source.Stmt.run
+                              Locals.Source.PrimitiveSemantics.structured
+                              program sourceCtx fuel' stmt source =
+                            .ok
+                              (EvmCompiler.Functions.Source.Outcome.regular
+                                sourceAfterHead, headCtx) := by
+                        simpa [EvmCompiler.Functions.Source.Outcome.regular]
+                          using hStmtRun
+                      have hTailRun :
+                          EvmCompiler.Functions.Source.Block.runOpen
+                              Locals.Source.PrimitiveSemantics.structured
+                              program headCtx fuel' { stmts := tail }
+                              sourceAfterHead =
+                            .ok
+                              (EvmCompiler.Functions.Source.Outcome.regular
+                                source', sourceCtx') := by
+                        simpa [EvmCompiler.Functions.Source.Block.runOpen,
+                          hStmtRun,
+                          EvmCompiler.Functions.Source.Outcome.regular]
+                          using hRun
+                      rcases
+                        source_stmt_run_atomicOrBlock_privateScratchInvariant
+                          hHeadSafe hRel hStmtRunRegular with
+                      ⟨targetAfterHead, hTargetStmtRun, hHeadRel⟩
+                      rcases
+                        ih hTailSafe hHeadRel hTailRun with
+                      ⟨target', hTargetTailRun, hTargetRel⟩
+                      refine ⟨target', ?_, hTargetRel⟩
+                      simpa [EvmCompiler.Functions.Source.Block.runOpen,
+                        hTargetStmtRun, Locals.Source.Outcome.regular]
+                        using hTargetTailRun
+                  | brk =>
+                      simp [EvmCompiler.Functions.Source.Block.runOpen,
+                        hStmtRun,
+                        EvmCompiler.Functions.Source.Outcome.regular]
+                        at hRun
+                      rcases hRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | cont =>
+                      simp [EvmCompiler.Functions.Source.Block.runOpen,
+                        hStmtRun,
+                        EvmCompiler.Functions.Source.Outcome.regular]
+                        at hRun
+                      rcases hRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | leave =>
+                      simp [EvmCompiler.Functions.Source.Block.runOpen,
+                        hStmtRun,
+                        EvmCompiler.Functions.Source.Outcome.regular]
+                        at hRun
+                      rcases hRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+                  | halt kind =>
+                      simp [EvmCompiler.Functions.Source.Block.runOpen,
+                        hStmtRun,
+                        EvmCompiler.Functions.Source.Outcome.regular]
+                        at hRun
+                      rcases hRun with ⟨hOutcome, _hCtx⟩
+                      cases hOutcome
+
 theorem run_compileStmt?_assign_frameStore_of_value_code
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
@@ -8757,6 +9021,107 @@ theorem run_frameInitCode_append_compileStmtList?_atomicOrBlock_block_frameStore
         .ok (Expressions.Outcome.regular ({ runState with evm := final })) := by
     simpa [hStartTail] using hBodyRun
   simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hBodyRun'
+
+theorem run_frameInitCode_append_compileStmtList?_atomicOrBlock_block_frameStore_of_source_run_open_regular_privateScratch
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {stmts : List Stmt} {plan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source source' : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel blockFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState initState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmtList? ctx returns compileState stmts = some plan)
+    (hScoped :
+      EvmCompiler.Functions.Scope.StmtList.Scoped sourceCtx.scope stmts)
+    (hSafe : AtomicOrBlockStmtListSafe stmts)
+    (hRun :
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtx sourceFuel { stmts := stmts } source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx'))
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hNames : EnvNamesInScope compileState.env sourceCtx.scope)
+    (hFrameWords : plan.state.nextSlot ≤ words)
+    (hInitRun :
+      Structured.Code.run (frameInitCode words) evmState = .ok initState)
+    (hInitStack : initState.stack = base :: evmState.stack)
+    (hReady : ScratchRegionReady initState.toMachineState
+      (range base words).base (range base words).words)
+    (hInitInvariant :
+      SharedStatePrivateScratchInvariant source.shared
+        initState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      initState.toMachineState base) :
+    ∃ final,
+      Expressions.Block.run compiledProgram
+          (blockFuel + atomicOrBlockStmtListFuel stmts + 2)
+          (Block.append (Block.ofCode (frameInitCode words)) plan.block)
+          { runState with evm := evmState } =
+        .ok (Expressions.Outcome.regular ({ runState with evm := final })) ∧
+      final.stack = base :: evmState.stack ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStatePrivateScratchObservable source'.shared final.toSharedState ∧
+      FrameStoreRel plan.state.env source'.vars final.toMachineState base := by
+  let ghostSource : Locals.Source.State :=
+    source.withShared initState.toSharedState
+  have hSourceGhostRel :
+      SourceStatePrivateScratchInvariant source ghostSource := by
+    refine
+      { shared := hInitInvariant
+        vars_eq := ?_ }
+    simp [ghostSource, Locals.Source.State.withShared]
+  rcases
+      source_block_run_open_atomicOrBlock_privateScratchInvariant
+        (stmts := stmts)
+        (program := sourceProgram)
+        (source := source)
+        (source' := source')
+        (target := ghostSource)
+        (sourceCtx := sourceCtx)
+        (sourceCtx' := sourceCtx')
+        (fuel := sourceFuel)
+        hSafe hSourceGhostRel hRun with
+    ⟨ghostFinal, hGhostRun, hGhostRel⟩
+  have hGhostFrameRel :
+      FrameStoreRel compileState.env ghostSource.vars
+        initState.toMachineState base := by
+    intro name slot hLookup
+    simpa [ghostSource, Locals.Source.State.withShared] using hRel hLookup
+  have hGhostShared :
+      SharedStateEqOutsideScratch (range base words) ghostSource.shared
+        initState.toSharedState := by
+    simpa [ghostSource, Locals.Source.State.withShared] using
+      Locals.SourceLowering.StateRel.SpillScratch.SharedStateEqOutsideScratch.refl
+        (range base words) initState.toSharedState
+  rcases
+      run_frameInitCode_append_compileStmtList?_atomicOrBlock_block_frameStore_of_source_run_open_regular
+        hSpec hWordBytes
+        (compiledProgram := compiledProgram)
+        (sourceFuel := sourceFuel)
+        (blockFuel := blockFuel)
+        (runState := runState)
+        (evmState := evmState)
+        (initState := initState)
+        (base := base)
+        (words := words)
+        hCompile hScoped hSafe hGhostRun hStateBound hStateNodup hNames
+        hFrameWords hInitRun hInitStack hReady hGhostShared hGhostFrameRel with
+    ⟨final, hBlockRun, hStack, hReadyFinal, hSharedOutside, hRelFinal⟩
+  refine ⟨final, hBlockRun, hStack, hReadyFinal, ?_, ?_⟩
+  · exact
+      sharedStatePrivateScratchObservable_of_invariant_outsideScratch
+        hGhostRel.shared hSharedOutside
+  · intro name slot hLookup
+    rcases hRelFinal hLookup with ⟨value, hStore, hLoad⟩
+    refine ⟨value, ?_, hLoad⟩
+    simpa [hGhostRel.vars_eq] using hStore
 
 theorem run_compileMain?_atomicOrBlock_noPrelude_block_frameStore_of_source_run_open_regular
     (hSpec : ZeroPaddingSpec)
