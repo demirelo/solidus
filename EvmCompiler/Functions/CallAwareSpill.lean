@@ -5484,7 +5484,11 @@ theorem compileStmtListWithConservativeScopedSpill?_regular_sound_exact_length
     (sizeOf stmts, 0)
   decreasing_by
     all_goals simp_wf
-    all_goals omega
+    all_goals
+      first
+      | omega
+      | exact Prod.Lex.right _
+          (Prod.Lex.left _ _ (by omega))
 
 theorem compileBlockOpenWithConservativeScopedSpill?_regular_sound_exact_length
     (hSpec : ZeroPaddingSpec)
@@ -8135,7 +8139,11 @@ mutual
     (fuel, 0, sizeOf block)
   decreasing_by
     all_goals simp_wf
-    all_goals omega
+    all_goals
+      first
+      | omega
+      | exact Prod.Lex.right _
+          (Prod.Lex.left _ _ (by omega))
 
   theorem sourceBlockRunScoped_privateScratchInvariant
       {program : Program} (hProgramSafe : ProgramSafe program) :
@@ -8376,7 +8384,11 @@ mutual
     (fuel, 2, sizeOf fn.body)
   decreasing_by
     all_goals simp_wf
-    all_goals omega
+    all_goals
+      first
+      | omega
+      | exact Prod.Lex.right _
+          (Prod.Lex.left _ _ (by omega))
 
   theorem sourceRunForLoop_privateScratchInvariant
       {program : Program} (hProgramSafe : ProgramSafe program) :
@@ -8593,7 +8605,11 @@ mutual
     (fuel, 3, 0)
   decreasing_by
     all_goals simp_wf
-    all_goals omega
+    all_goals
+      first
+      | omega
+      | exact Prod.Lex.right _
+          (Prod.Lex.left _ _ (by omega))
 
   theorem sourceStmtRun_privateScratchInvariant
       {program : Program} (hProgramSafe : ProgramSafe program) :
@@ -16900,6 +16916,764 @@ def SourceOutcomeRegularOrHalt (outcome : Source.Outcome) : Prop :=
   (∃ sourceAfter, outcome = Source.Outcome.regular sourceAfter) ∨
     (∃ kind sourceAfter, outcome = Source.Outcome.halt kind sourceAfter)
 
+def SourceModeAllowedByWF
+    (canBreak canContinue inFunction : Bool) : Source.Mode → Prop
+  | .regular => True
+  | .brk => canBreak = true
+  | .cont => canContinue = true
+  | .leave => inFunction = true
+  | .halt _kind => True
+
+namespace SourceModeAllowedByWF
+
+theorem weaken_loopless {canBreak canContinue inFunction : Bool}
+    {mode : Source.Mode}
+    (hAllowed : SourceModeAllowedByWF false false inFunction mode) :
+    SourceModeAllowedByWF canBreak canContinue inFunction mode := by
+  cases mode <;> simp [SourceModeAllowedByWF] at hAllowed ⊢
+  exact hAllowed
+
+theorem regular_or_halt_of_top {mode : Source.Mode}
+    (hAllowed : SourceModeAllowedByWF false false false mode) :
+    mode = .regular ∨ ∃ kind, mode = .halt kind := by
+  cases mode <;> simp [SourceModeAllowedByWF] at hAllowed ⊢
+
+theorem of_outcome_eq {canBreak canContinue inFunction : Bool}
+    {left right : Source.Outcome}
+    (hEq : left = right)
+    (hAllowed :
+      SourceModeAllowedByWF canBreak canContinue inFunction left.mode) :
+    SourceModeAllowedByWF canBreak canContinue inFunction right.mode := by
+  cases hEq
+  exact hAllowed
+
+theorem regular {canBreak canContinue inFunction : Bool}
+    (state : Source.State) :
+    SourceModeAllowedByWF canBreak canContinue inFunction
+      (Source.Outcome.regular state).mode := by
+  simp [SourceModeAllowedByWF, Source.Outcome.regular,
+    Locals.Source.Outcome.regular]
+
+theorem halt {canBreak canContinue inFunction : Bool}
+    (kind : Assembly.HaltKind) (state : Source.State) :
+    SourceModeAllowedByWF canBreak canContinue inFunction
+      (Source.Outcome.halt kind state).mode := by
+  simp [SourceModeAllowedByWF, Source.Outcome.halt,
+    Locals.Source.Outcome.halt]
+
+end SourceModeAllowedByWF
+
+theorem sourceSwitch_select_wf {canBreak canContinue inFunction : Bool}
+    {scrutinee : Word} {cases : List (Word × Block)}
+    {defaultBody : Option Block} {selected : Block}
+    (hCases : CaseList.WF canBreak canContinue inFunction cases)
+    (hDefault : Default.WF canBreak canContinue inFunction defaultBody)
+    (hSelect : Source.Switch.select scrutinee cases defaultBody =
+      some selected) :
+    Block.WF canBreak canContinue inFunction selected := by
+  induction cases generalizing defaultBody selected with
+  | nil =>
+      cases hDefault with
+      | none =>
+          simp [Source.Switch.select] at hSelect
+      | some hBody =>
+          simp [Source.Switch.select] at hSelect
+          cases hSelect
+          exact hBody
+  | cons head rest ih =>
+      rcases head with ⟨value, body⟩
+      cases hCases with
+      | cons hBody hRest =>
+          by_cases hEq : value = scrutinee
+          · simp [Source.Switch.select, hEq] at hSelect
+            cases hSelect
+            exact hBody
+          · simp [Source.Switch.select, hEq] at hSelect
+            exact ih hRest hDefault hSelect
+
+mutual
+
+theorem sourceBlockRunOpen_mode_allowed_of_wf
+    (prim : Source.PrimitiveSemantics) (program : Program) :
+    ∀ {canBreak canContinue inFunction : Bool}
+      {ctx : Source.Ctx} {fuel : Nat} {block : Block}
+      {state : Source.State} {outcome : Source.Outcome}
+      {runCtx : Source.Ctx},
+      Block.WF canBreak canContinue inFunction block →
+      Source.Block.runOpen prim program ctx fuel block state =
+        .ok (outcome, runCtx) →
+      SourceModeAllowedByWF canBreak canContinue inFunction outcome.mode := by
+  intro canBreak canContinue inFunction ctx fuel block state outcome runCtx
+    hWF hRun
+  cases hWF with
+  | nil =>
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hRun
+      | succ fuel =>
+          simp [Source.Block.runOpen] at hRun
+          rcases hRun with ⟨hOutcome, _hCtx⟩
+          exact
+            SourceModeAllowedByWF.of_outcome_eq hOutcome
+              (SourceModeAllowedByWF.regular state)
+  | cons hStmtWF hRestWF =>
+      rename_i stmt rest
+      cases fuel with
+      | zero =>
+          simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
+            at hRun
+      | succ fuel =>
+          cases hStmt :
+              Source.Stmt.run prim program ctx fuel stmt state with
+          | error err =>
+              simp [Source.Block.runOpen, hStmt] at hRun
+          | ok stmtResult =>
+              rcases stmtResult with ⟨stmtOutcome, stmtCtx⟩
+              have hStmtAllowed :
+                  SourceModeAllowedByWF canBreak canContinue inFunction
+                    stmtOutcome.mode :=
+                sourceStmtRun_mode_allowed_of_wf prim program hStmtWF hStmt
+              cases hMode : stmtOutcome.mode with
+              | regular =>
+                  simp [Source.Block.runOpen, hStmt, hMode] at hRun
+                  exact
+                    sourceBlockRunOpen_mode_allowed_of_wf prim program
+                      hRestWF hRun
+              | brk =>
+                  simp [Source.Block.runOpen, hStmt, hMode] at hRun
+                  rcases hRun with ⟨hOutcome, _hCtx⟩
+                  exact
+                    SourceModeAllowedByWF.of_outcome_eq hOutcome
+                      (by simpa [hMode] using hStmtAllowed)
+              | cont =>
+                  simp [Source.Block.runOpen, hStmt, hMode] at hRun
+                  rcases hRun with ⟨hOutcome, _hCtx⟩
+                  exact
+                    SourceModeAllowedByWF.of_outcome_eq hOutcome
+                      (by simpa [hMode] using hStmtAllowed)
+              | leave =>
+                  simp [Source.Block.runOpen, hStmt, hMode] at hRun
+                  rcases hRun with ⟨hOutcome, _hCtx⟩
+                  exact
+                    SourceModeAllowedByWF.of_outcome_eq hOutcome
+                      (by simpa [hMode] using hStmtAllowed)
+              | halt kind =>
+                  simp [Source.Block.runOpen, hStmt, hMode] at hRun
+                  rcases hRun with ⟨hOutcome, _hCtx⟩
+                  exact
+                    SourceModeAllowedByWF.of_outcome_eq hOutcome
+                      (by simpa [hMode] using hStmtAllowed)
+  termination_by
+    canBreak canContinue inFunction ctx fuel block state outcome runCtx hWF
+      hRun =>
+      (fuel, 0, sizeOf block)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+theorem sourceBlockRunScoped_mode_allowed_of_wf
+    (prim : Source.PrimitiveSemantics) (program : Program) :
+    ∀ {canBreak canContinue inFunction : Bool}
+      {ctx : Source.Ctx} {fuel : Nat} {block : Block}
+      {state : Source.State} {outcome : Source.Outcome},
+      Block.WF canBreak canContinue inFunction block →
+      Source.Block.runScoped prim program ctx block fuel state =
+        .ok outcome →
+      SourceModeAllowedByWF canBreak canContinue inFunction outcome.mode := by
+  intro canBreak canContinue inFunction ctx fuel block state outcome hWF hRun
+  unfold Source.Block.runScoped at hRun
+  cases hOpen : Source.Block.runOpen prim program ctx fuel block state with
+  | error err =>
+      simp [hOpen] at hRun
+  | ok result =>
+      rcases result with ⟨openOutcome, openCtx⟩
+      have hOpenAllowed :
+          SourceModeAllowedByWF canBreak canContinue inFunction
+            openOutcome.mode :=
+        sourceBlockRunOpen_mode_allowed_of_wf prim program hWF hOpen
+      cases hMode : openOutcome.mode with
+      | regular =>
+          simp [hOpen, hMode, Source.Outcome.regular] at hRun
+          exact
+            SourceModeAllowedByWF.of_outcome_eq hRun
+              (SourceModeAllowedByWF.regular
+                (openOutcome.state.restrictTo ctx.scope))
+      | brk =>
+          simp [hOpen, hMode] at hRun
+          exact
+            SourceModeAllowedByWF.of_outcome_eq hRun
+              (by simpa [hMode] using hOpenAllowed)
+      | cont =>
+          simp [hOpen, hMode] at hRun
+          exact
+            SourceModeAllowedByWF.of_outcome_eq hRun
+              (by simpa [hMode] using hOpenAllowed)
+      | leave =>
+          simp [hOpen, hMode] at hRun
+          exact
+            SourceModeAllowedByWF.of_outcome_eq hRun
+              (by simpa [hMode] using hOpenAllowed)
+      | halt kind =>
+          simp [hOpen, hMode] at hRun
+          exact
+            SourceModeAllowedByWF.of_outcome_eq hRun
+              (by simpa [hMode] using hOpenAllowed)
+  termination_by
+    canBreak canContinue inFunction ctx fuel block state outcome hWF hRun =>
+      (fuel, 1, sizeOf block)
+  decreasing_by
+    all_goals simp_wf
+    all_goals
+      first
+      | omega
+      | exact Prod.Lex.right _
+          (Prod.Lex.left _ _ (by omega))
+
+theorem sourceRunForLoop_mode_allowed_of_wf
+    (prim : Source.PrimitiveSemantics) (program : Program) :
+    ∀ {inFunction : Bool}
+      {loopCtx postBase bodyBase : Source.Ctx}
+      {cond : Expr 1} {post body : Block}
+      {fuel : Nat} {state : Source.State}
+      {outcome : Source.Outcome},
+      Block.WF false false inFunction post →
+      Block.WF true true inFunction body →
+      Source.Stmt.runForLoop prim program loopCtx cond postBase post
+          bodyBase body fuel state =
+        .ok outcome →
+      SourceModeAllowedByWF false false inFunction outcome.mode := by
+  intro inFunction loopCtx postBase bodyBase cond post body fuel state outcome
+    hPostWF hBodyWF hRun
+  cases fuel with
+  | zero =>
+      simp [Source.Stmt.runForLoop, Source.invalid, Structured.invalid]
+        at hRun
+  | succ fuel =>
+      unfold Source.Stmt.runForLoop at hRun
+      cases hCond : Source.Expr.evalCondition prim cond state with
+      | error err =>
+          simp [hCond] at hRun
+      | ok condResult =>
+          rcases condResult with ⟨stateAfterCond, condTrue⟩
+          cases condTrue with
+          | false =>
+              simp [hCond, Source.Outcome.regular] at hRun
+              exact
+                SourceModeAllowedByWF.of_outcome_eq hRun
+                  (SourceModeAllowedByWF.regular
+                    (stateAfterCond.restrictTo loopCtx.scope))
+          | true =>
+              cases hBodyRun :
+                  Source.Block.runScoped prim program bodyBase body fuel
+                    stateAfterCond with
+              | error err =>
+                  simp [hCond, hBodyRun] at hRun
+              | ok bodyOutcome =>
+                  have hBodyAllowed :
+                      SourceModeAllowedByWF true true inFunction
+                        bodyOutcome.mode :=
+                    sourceBlockRunScoped_mode_allowed_of_wf prim program
+                      hBodyWF hBodyRun
+                  cases hBodyMode : bodyOutcome.mode with
+                  | brk =>
+                      simp [hCond, hBodyRun, hBodyMode,
+                        Source.Outcome.regular] at hRun
+                      exact
+                        SourceModeAllowedByWF.of_outcome_eq hRun
+                          (SourceModeAllowedByWF.regular bodyOutcome.state)
+                  | regular =>
+                      cases hPostRun :
+                          Source.Block.runScoped prim program postBase post
+                            fuel bodyOutcome.state with
+                      | error err =>
+                          simp [hCond, hBodyRun, hBodyMode, hPostRun] at hRun
+                      | ok postOutcome =>
+                          have hPostAllowed :
+                              SourceModeAllowedByWF false false inFunction
+                                postOutcome.mode :=
+                            sourceBlockRunScoped_mode_allowed_of_wf prim
+                              program hPostWF hPostRun
+                          cases hPostMode : postOutcome.mode with
+                          | regular =>
+                              simp [hCond, hBodyRun, hBodyMode, hPostRun,
+                                hPostMode] at hRun
+                              exact
+                                sourceRunForLoop_mode_allowed_of_wf prim
+                                  program hPostWF hBodyWF hRun
+                          | brk =>
+                              simp [hCond, hBodyRun, hBodyMode, hPostRun,
+                                hPostMode, Source.invalid,
+                                Structured.invalid] at hRun
+                          | cont =>
+                              simp [hCond, hBodyRun, hBodyMode, hPostRun,
+                                hPostMode, Source.invalid,
+                                Structured.invalid] at hRun
+                          | leave =>
+                              simp [hCond, hBodyRun, hBodyMode, hPostRun,
+                                hPostMode] at hRun
+                              exact
+                                SourceModeAllowedByWF.of_outcome_eq hRun
+                                  (by simpa [hPostMode] using hPostAllowed)
+                          | halt kind =>
+                              simp [hCond, hBodyRun, hBodyMode, hPostRun,
+                                hPostMode] at hRun
+                              exact
+                                SourceModeAllowedByWF.of_outcome_eq hRun
+                                  (by simpa [hPostMode] using hPostAllowed)
+                  | cont =>
+                      cases hPostRun :
+                          Source.Block.runScoped prim program postBase post
+                            fuel bodyOutcome.state with
+                      | error err =>
+                          simp [hCond, hBodyRun, hBodyMode, hPostRun] at hRun
+                      | ok postOutcome =>
+                          have hPostAllowed :
+                              SourceModeAllowedByWF false false inFunction
+                                postOutcome.mode :=
+                            sourceBlockRunScoped_mode_allowed_of_wf prim
+                              program hPostWF hPostRun
+                          cases hPostMode : postOutcome.mode with
+                          | regular =>
+                              simp [hCond, hBodyRun, hBodyMode, hPostRun,
+                                hPostMode] at hRun
+                              exact
+                                sourceRunForLoop_mode_allowed_of_wf prim
+                                  program hPostWF hBodyWF hRun
+                          | brk =>
+                              simp [hCond, hBodyRun, hBodyMode, hPostRun,
+                                hPostMode, Source.invalid,
+                                Structured.invalid] at hRun
+                          | cont =>
+                              simp [hCond, hBodyRun, hBodyMode, hPostRun,
+                                hPostMode, Source.invalid,
+                                Structured.invalid] at hRun
+                          | leave =>
+                              simp [hCond, hBodyRun, hBodyMode, hPostRun,
+                                hPostMode] at hRun
+                              exact
+                                SourceModeAllowedByWF.of_outcome_eq hRun
+                                  (by simpa [hPostMode] using hPostAllowed)
+                          | halt kind =>
+                              simp [hCond, hBodyRun, hBodyMode, hPostRun,
+                                hPostMode] at hRun
+                              exact
+                                SourceModeAllowedByWF.of_outcome_eq hRun
+                                  (by simpa [hPostMode] using hPostAllowed)
+                  | leave =>
+                      simp [hCond, hBodyRun, hBodyMode] at hRun
+                      exact
+                        SourceModeAllowedByWF.of_outcome_eq hRun
+                          (by simpa [SourceModeAllowedByWF, hBodyMode]
+                            using hBodyAllowed)
+                  | halt kind =>
+                      simp [hCond, hBodyRun, hBodyMode] at hRun
+                      exact
+                        SourceModeAllowedByWF.of_outcome_eq hRun
+                          (by simpa [SourceModeAllowedByWF, hBodyMode])
+  termination_by
+    inFunction loopCtx postBase bodyBase cond post body fuel state outcome
+      hPostWF hBodyWF hRun =>
+      (fuel, 3, 0)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+theorem sourceStmtRun_mode_allowed_of_wf
+    (prim : Source.PrimitiveSemantics) (program : Program) :
+    ∀ {canBreak canContinue inFunction : Bool}
+      {ctx : Source.Ctx} {fuel : Nat} {stmt : Stmt}
+      {state : Source.State} {outcome : Source.Outcome}
+      {runCtx : Source.Ctx},
+      Stmt.WF canBreak canContinue inFunction stmt →
+      Source.Stmt.run prim program ctx fuel stmt state =
+        .ok (outcome, runCtx) →
+      SourceModeAllowedByWF canBreak canContinue inFunction outcome.mode := by
+  intro canBreak canContinue inFunction ctx fuel stmt state outcome runCtx
+    hWF hRun
+  cases hWF with
+  | expr =>
+      rename_i expr
+      cases hEval : Source.Expr.eval prim expr state with
+      | error err =>
+          simp [Source.Stmt.run, hEval] at hRun
+      | ok result =>
+          simp [Source.Stmt.run, hEval, Source.Outcome.regular] at hRun
+          rcases hRun with ⟨hOutcome, _hCtx⟩
+          exact
+            SourceModeAllowedByWF.of_outcome_eq hOutcome
+              (SourceModeAllowedByWF.regular result.1)
+  | let_ =>
+      rename_i name value
+      cases hEval : Source.Expr.evalOne prim value state with
+      | error err =>
+          simp [Source.Stmt.run, hEval] at hRun
+      | ok result =>
+          simp [Source.Stmt.run, hEval, Source.Outcome.regular] at hRun
+          rcases hRun with ⟨hOutcome, _hCtx⟩
+          exact
+            SourceModeAllowedByWF.of_outcome_eq hOutcome
+              (SourceModeAllowedByWF.regular
+                (Locals.Source.State.insert result.1 name result.2))
+  | assign =>
+      rename_i name value
+      cases hContains : state.vars.contains name with
+      | false =>
+          simp [Source.Stmt.run, hContains, Source.invalid,
+            Structured.invalid] at hRun
+      | true =>
+          cases hEval : Source.Expr.evalOne prim value state with
+          | error err =>
+              simp [Source.Stmt.run, hContains, hEval] at hRun
+          | ok result =>
+              simp [Source.Stmt.run, hContains, hEval,
+                Source.Outcome.regular] at hRun
+              rcases hRun with ⟨hOutcome, _hCtx⟩
+              exact
+                SourceModeAllowedByWF.of_outcome_eq hOutcome
+                  (SourceModeAllowedByWF.regular
+                    (Locals.Source.State.withVars result.1
+                      (result.1.vars.insert name result.2)))
+  | block hBodyWF =>
+      rename_i body
+      cases hBodyRun :
+          Source.Block.runScoped prim program ctx body fuel state with
+      | error err =>
+          simp [Source.Stmt.run, hBodyRun] at hRun
+      | ok bodyOutcome =>
+          have hAllowed :=
+            sourceBlockRunScoped_mode_allowed_of_wf prim program hBodyWF
+              hBodyRun
+          simp [Source.Stmt.run, hBodyRun] at hRun
+          rcases hRun with ⟨hOutcome, _hCtx⟩
+          exact SourceModeAllowedByWF.of_outcome_eq hOutcome hAllowed
+  | if_ hBodyWF =>
+      rename_i cond body
+      cases fuel with
+      | zero =>
+          simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hRun
+      | succ fuel =>
+          cases hCond : Source.Expr.evalCondition prim cond state with
+          | error err =>
+              simp [Source.Stmt.run, hCond] at hRun
+          | ok condResult =>
+              rcases condResult with ⟨stateAfterCond, condTrue⟩
+              cases condTrue with
+              | false =>
+                  simp [Source.Stmt.run, hCond, Source.Outcome.regular]
+                    at hRun
+                  rcases hRun with ⟨hOutcome, _hCtx⟩
+                  exact
+                    SourceModeAllowedByWF.of_outcome_eq hOutcome
+                      (SourceModeAllowedByWF.regular stateAfterCond)
+              | true =>
+                  cases hBodyRun :
+                      Source.Block.runScoped prim program ctx body fuel
+                        stateAfterCond with
+                  | error err =>
+                      simp [Source.Stmt.run, hCond, hBodyRun] at hRun
+                  | ok bodyOutcome =>
+                      have hAllowed :=
+                        sourceBlockRunScoped_mode_allowed_of_wf prim program
+                          hBodyWF hBodyRun
+                      simp [Source.Stmt.run, hCond, hBodyRun] at hRun
+                      rcases hRun with ⟨hOutcome, _hCtx⟩
+                      exact
+                        SourceModeAllowedByWF.of_outcome_eq hOutcome
+                          hAllowed
+  | switch hCasesWF hDefaultWF =>
+      rename_i scrutinee cases defaultBody
+      cases fuel with
+      | zero =>
+          simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hRun
+      | succ fuel =>
+          cases hScrutinee : Source.Expr.evalOne prim scrutinee state with
+          | error err =>
+              simp [Source.Stmt.run, hScrutinee] at hRun
+          | ok scrutineeResult =>
+              rcases scrutineeResult with ⟨stateAfterScrutinee, value⟩
+              cases hSelect : Source.Switch.select value cases defaultBody with
+              | none =>
+                  simp [Source.Stmt.run, hScrutinee, hSelect,
+                    Source.Outcome.regular] at hRun
+                  rcases hRun with ⟨hOutcome, _hCtx⟩
+                  exact
+                    SourceModeAllowedByWF.of_outcome_eq hOutcome
+                      (SourceModeAllowedByWF.regular stateAfterScrutinee)
+              | some selected =>
+                  cases hSelectedRun :
+                      Source.Block.runScoped prim program ctx selected fuel
+                        stateAfterScrutinee with
+                  | error err =>
+                      simp [Source.Stmt.run, hScrutinee, hSelect,
+                        hSelectedRun] at hRun
+                  | ok selectedOutcome =>
+                      have hSelectedWF :
+                          Block.WF canBreak canContinue inFunction selected := by
+                        exact
+                          sourceSwitch_select_wf hCasesWF hDefaultWF hSelect
+                      have hAllowed :=
+                        sourceBlockRunScoped_mode_allowed_of_wf prim program
+                          hSelectedWF hSelectedRun
+                      simp [Source.Stmt.run, hScrutinee, hSelect,
+                        hSelectedRun] at hRun
+                      rcases hRun with ⟨hOutcome, _hCtx⟩
+                      exact
+                        SourceModeAllowedByWF.of_outcome_eq hOutcome
+                          hAllowed
+  | for_ hInitWF hPostWF hBodyWF =>
+      rename_i init post body cond
+      cases fuel with
+      | zero =>
+          simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hRun
+      | succ fuel =>
+          let initBase := ctx.withoutLoopControl
+          cases hInitRun :
+              Source.Block.runOpen prim program initBase fuel init state with
+          | error err =>
+              simp [Source.Stmt.run, initBase, hInitRun] at hRun
+          | ok initResult =>
+              rcases initResult with ⟨initOutcome, initCtx⟩
+              have hInitAllowed :
+                  SourceModeAllowedByWF false false inFunction
+                    initOutcome.mode :=
+                sourceBlockRunOpen_mode_allowed_of_wf prim program hInitWF
+                  hInitRun
+              cases hInitMode : initOutcome.mode with
+              | regular =>
+                  cases hLoopRun :
+                      Source.Stmt.runForLoop prim program initCtx cond
+                        initCtx.withoutLoopControl post
+                        (initCtx.withLoopControl initCtx.scope initCtx.scope)
+                        body fuel initOutcome.state with
+                  | error err =>
+                      simp [Source.Stmt.run, initBase, hInitRun,
+                        hInitMode, hLoopRun] at hRun
+                  | ok loopOutcome =>
+                      have hLoopAllowed :
+                          SourceModeAllowedByWF false false inFunction
+                            loopOutcome.mode :=
+                        sourceRunForLoop_mode_allowed_of_wf prim program
+                          hPostWF hBodyWF hLoopRun
+                      cases hLoopMode : loopOutcome.mode with
+                      | regular =>
+                            simp [Source.Stmt.run, initBase, hInitRun,
+                              hInitMode, hLoopRun, hLoopMode,
+                              Source.Outcome.regular] at hRun
+                            rcases hRun with ⟨hOutcome, _hCtx⟩
+                            exact
+                              SourceModeAllowedByWF.of_outcome_eq hOutcome
+                                (SourceModeAllowedByWF.regular
+                                  (loopOutcome.state.restrictTo ctx.scope))
+                      | brk =>
+                          simp [Source.Stmt.run, initBase, hInitRun,
+                            hInitMode, hLoopRun, hLoopMode, Source.invalid,
+                            Structured.invalid] at hRun
+                      | cont =>
+                          simp [Source.Stmt.run, initBase, hInitRun,
+                            hInitMode, hLoopRun, hLoopMode, Source.invalid,
+                            Structured.invalid] at hRun
+                        | leave =>
+                            simp [Source.Stmt.run, initBase, hInitRun,
+                              hInitMode, hLoopRun, hLoopMode] at hRun
+                            rcases hRun with ⟨hOutcome, _hCtx⟩
+                            exact
+                              SourceModeAllowedByWF.of_outcome_eq hOutcome
+                                (SourceModeAllowedByWF.weaken_loopless
+                                  (by simpa [hLoopMode] using hLoopAllowed))
+                        | halt kind =>
+                            simp [Source.Stmt.run, initBase, hInitRun,
+                              hInitMode, hLoopRun, hLoopMode] at hRun
+                            rcases hRun with ⟨hOutcome, _hCtx⟩
+                            exact
+                              SourceModeAllowedByWF.of_outcome_eq hOutcome
+                                (SourceModeAllowedByWF.weaken_loopless
+                                  (by simpa [hLoopMode] using hLoopAllowed))
+              | brk =>
+                  simp [Source.Stmt.run, initBase, hInitRun, hInitMode,
+                    Source.invalid, Structured.invalid] at hRun
+              | cont =>
+                  simp [Source.Stmt.run, initBase, hInitRun, hInitMode,
+                    Source.invalid, Structured.invalid] at hRun
+              | leave =>
+                    simp [Source.Stmt.run, initBase, hInitRun, hInitMode]
+                      at hRun
+                    rcases hRun with ⟨hOutcome, _hCtx⟩
+                    exact
+                      SourceModeAllowedByWF.of_outcome_eq hOutcome
+                        (SourceModeAllowedByWF.weaken_loopless
+                          (by simpa [hInitMode] using hInitAllowed))
+                | halt kind =>
+                    simp [Source.Stmt.run, initBase, hInitRun, hInitMode]
+                      at hRun
+                    rcases hRun with ⟨hOutcome, _hCtx⟩
+                    exact
+                      SourceModeAllowedByWF.of_outcome_eq hOutcome
+                        (SourceModeAllowedByWF.weaken_loopless
+                          (by simpa [hInitMode] using hInitAllowed))
+  | brk hAllowed =>
+      cases hBreak : ctx.breakScope? with
+      | none =>
+          simp [Source.Stmt.run, hBreak, Source.invalid,
+            Structured.invalid] at hRun
+        | some scope =>
+            simp [Source.Stmt.run, hBreak, Source.Outcome.brk] at hRun
+            rcases hRun with ⟨hOutcome, _hCtx⟩
+            exact
+              SourceModeAllowedByWF.of_outcome_eq hOutcome
+                (by
+                  simp [SourceModeAllowedByWF, Source.Outcome.brk,
+                    Locals.Source.Outcome.brk, hAllowed])
+  | cont hAllowed =>
+      cases hContinue : ctx.continueScope? with
+      | none =>
+          simp [Source.Stmt.run, hContinue, Source.invalid,
+            Structured.invalid] at hRun
+        | some scope =>
+            simp [Source.Stmt.run, hContinue, Source.Outcome.cont] at hRun
+            rcases hRun with ⟨hOutcome, _hCtx⟩
+            exact
+              SourceModeAllowedByWF.of_outcome_eq hOutcome
+                (by
+                  simp [SourceModeAllowedByWF, Source.Outcome.cont,
+                    Locals.Source.Outcome.cont, hAllowed])
+  | leave hAllowed =>
+      cases hLeave : ctx.leaveScope? with
+      | none =>
+          simp [Source.Stmt.run, hLeave, Source.invalid,
+            Structured.invalid] at hRun
+        | some scope =>
+            simp [Source.Stmt.run, hLeave, Source.Outcome.leave] at hRun
+            rcases hRun with ⟨hOutcome, _hCtx⟩
+            exact
+              SourceModeAllowedByWF.of_outcome_eq hOutcome
+                (by
+                  simp [SourceModeAllowedByWF, Source.Outcome.leave,
+                    Locals.Source.Outcome.leave, hAllowed])
+  | call =>
+      rename_i targets functionName args
+      cases fuel with
+      | zero =>
+          simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hRun
+      | succ fuel =>
+          unfold Source.Stmt.run at hRun
+          by_cases hTargets : targets.Nodup
+          · simp [hTargets] at hRun
+            cases hArgs : Source.ArgList.eval prim args state with
+            | error err =>
+                simp [hArgs] at hRun
+            | ok argResult =>
+                rcases argResult with ⟨stateAfterArgs, argValues⟩
+                simp [hArgs] at hRun
+                cases hFind :
+                    FunList.find? functionName program.functions with
+                | none =>
+                    rw [hFind] at hRun
+                    simp [Source.invalid, Structured.invalid] at hRun
+                | some fn =>
+                    rw [hFind] at hRun
+                    simp at hRun
+                    cases hBody :
+                        Source.FunDef.runBody prim program fn argValues fuel
+                          stateAfterArgs.shared with
+                    | error err =>
+                        simp [hBody] at hRun
+                    | ok callResult =>
+                        cases callResult with
+                        | returned sharedAfterCall returnValues =>
+                            simp [hBody] at hRun
+                            cases hAssign :
+                                Source.Store.assignMany targets returnValues
+                                  stateAfterArgs.vars with
+                            | none =>
+                                simp [hAssign, Source.invalid,
+                                  Structured.invalid] at hRun
+                            | some returnStore =>
+                                simp [hAssign, Source.Outcome.regular] at hRun
+                                rcases hRun with ⟨hOutcome, _hCtx⟩
+                                exact
+                                  SourceModeAllowedByWF.of_outcome_eq
+                                    hOutcome
+                                    (SourceModeAllowedByWF.regular
+                                      { shared := sharedAfterCall,
+                                        vars := returnStore })
+                        | halted kind haltedState =>
+                            simp [hBody, Source.Outcome.halt] at hRun
+                            rcases hRun with ⟨hOutcome, _hCtx⟩
+                            exact
+                              SourceModeAllowedByWF.of_outcome_eq hOutcome
+                                (SourceModeAllowedByWF.halt kind
+                                  haltedState)
+          · simp [hTargets, Source.invalid, Structured.invalid] at hRun
+  | terminal =>
+      rename_i kind
+      cases hTerminal : prim.terminal kind state.shared [] with
+      | error err =>
+          simp [Source.Stmt.run, hTerminal] at hRun
+      | ok shared =>
+          simp [Source.Stmt.run, hTerminal, Source.Outcome.halt] at hRun
+          rcases hRun with ⟨hOutcome, _hCtx⟩
+          exact
+            SourceModeAllowedByWF.of_outcome_eq hOutcome
+              (SourceModeAllowedByWF.halt kind
+                (state.withShared shared))
+  | terminalArgs =>
+      rename_i kind args
+      cases hArgs : Locals.Source.Expr.ExprSeq.eval prim args state with
+      | error err =>
+          simp [Source.Stmt.run, hArgs] at hRun
+      | ok argResult =>
+          rcases argResult with ⟨stateAfterArgs, values⟩
+          cases hTerminal : prim.terminal kind stateAfterArgs.shared values with
+          | error err =>
+              simp [Source.Stmt.run, hArgs, hTerminal] at hRun
+          | ok shared =>
+              simp [Source.Stmt.run, hArgs, hTerminal, Source.Outcome.halt]
+                at hRun
+              rcases hRun with ⟨hOutcome, _hCtx⟩
+              exact
+                SourceModeAllowedByWF.of_outcome_eq hOutcome
+                  (SourceModeAllowedByWF.halt kind
+                    (stateAfterArgs.withShared shared))
+  termination_by
+    canBreak canContinue inFunction ctx fuel stmt state outcome runCtx hWF
+      hRun =>
+      (fuel, 4, sizeOf stmt)
+  decreasing_by
+    all_goals simp_wf
+    all_goals
+      first
+      | omega
+      | exact Prod.Lex.right _
+          (Prod.Lex.left _ _ (by omega))
+
+end
+
+theorem sourceProgram_run_regular_or_halt_of_wf
+    {prim : Source.PrimitiveSemantics} {program : Program}
+    {fuel : Nat} {initial : EVMState} {sourceOutcome : Source.Outcome}
+    (hWF : program.WF)
+    (hRun :
+      Source.Program.run prim fuel program initial = .ok sourceOutcome) :
+    SourceOutcomeRegularOrHalt sourceOutcome := by
+  have hAllowed :
+      SourceModeAllowedByWF false false false sourceOutcome.mode := by
+    unfold Source.Program.run Source.Program.runState at hRun
+    exact
+      sourceBlockRunScoped_mode_allowed_of_wf prim program hWF.2 hRun
+  rcases
+      SourceModeAllowedByWF.regular_or_halt_of_top hAllowed with
+    hRegular | hHalt
+  · cases sourceOutcome with
+    | mk state mode =>
+        cases hRegular
+        exact Or.inl ⟨state, rfl⟩
+  · rcases hHalt with ⟨kind, hMode⟩
+    cases sourceOutcome with
+    | mk state mode =>
+        cases hMode
+        exact Or.inr ⟨kind, state, rfl⟩
+
 theorem compileCheckedPlannedPrealloc?_regular_or_halt_preserves_initialState_emptyMemory_privateObservable_endPc
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
@@ -16937,6 +17711,37 @@ theorem compileCheckedPlannedPrealloc?_regular_or_halt_preserves_initialState_em
       compileCheckedPlannedPrealloc?_halt_preserves_initialState_emptyMemory_privateObservable_endPc
         hSpec hWordBytes hCompile hSupport hInitialMemory hInitialStack
         hInitialPc hSourceRun
+
+theorem compileCheckedPlannedPrealloc?_sourceAccepted_preserves_initialState_emptyMemory_privateObservable_endPc
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {maxWords : Nat} {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState} {sourceOutcome : Source.Outcome}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm))
+    (hSupport : ProgramCallAwareSupported program)
+    (hSourceAccepted : program.SourceAccepted)
+    (hInitialMemory : ScratchInitialMemoryEmpty initial.toMachineState)
+    (hInitialStack : initial.stack = [])
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hSourceRun :
+      Source.Program.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.AdaptiveSpillPrivateObservableProgramOutcomeRel
+        range sourceOutcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  exact
+    compileCheckedPlannedPrealloc?_regular_or_halt_preserves_initialState_emptyMemory_privateObservable_endPc
+      hSpec hWordBytes hCompile hSupport hInitialMemory hInitialStack
+      hInitialPc hSourceRun
+      (sourceProgram_run_regular_or_halt_of_wf hSourceAccepted.1 hSourceRun)
 
 theorem compileCheckedPlannedPrealloc?_lookup_of_find?
     {maxWords : Nat} {program : Program}
