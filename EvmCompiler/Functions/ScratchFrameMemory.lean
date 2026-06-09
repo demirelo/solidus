@@ -157,6 +157,18 @@ def atomicStmtListSafe? : List Stmt → Bool
   | [] => true
   | stmt :: rest => atomicStmtSafe? stmt && atomicStmtListSafe? rest
 
+def atomicOrBlockStmtSafe? : Stmt → Bool
+  | .expr expr => sourceExprSafe? expr
+  | .let_ _name value => sourceExprSafe? value
+  | .assign _name value => sourceExprSafe? value
+  | .block body => atomicStmtListSafe? body.stmts
+  | _ => false
+
+def atomicOrBlockStmtListSafe? : List Stmt → Bool
+  | [] => true
+  | stmt :: rest =>
+      atomicOrBlockStmtSafe? stmt && atomicOrBlockStmtListSafe? rest
+
 theorem atomicStmtSafe?_sound {stmt : Stmt}
     (hCheck : atomicStmtSafe? stmt = true) :
     AtomicStmtSafe stmt := by
@@ -200,6 +212,58 @@ theorem atomicStmtListSafe?_sound {stmts : List Stmt}
             atomicStmtListSafe? rest = true := by
         simpa [atomicStmtListSafe?] using hCheck
       exact ⟨atomicStmtSafe?_sound hAnd.1, ih hAnd.2⟩
+
+theorem atomicOrBlockStmtSafe?_sound {stmt : Stmt}
+    (hCheck : atomicOrBlockStmtSafe? stmt = true) :
+    AtomicOrBlockStmtSafe stmt := by
+  cases stmt with
+  | expr expr =>
+      exact
+        sourceExprSafe?_sound
+          (by simpa [atomicOrBlockStmtSafe?] using hCheck)
+  | let_ name value =>
+      exact
+        sourceExprSafe?_sound
+          (by simpa [atomicOrBlockStmtSafe?] using hCheck)
+  | assign name value =>
+      exact
+        sourceExprSafe?_sound
+          (by simpa [atomicOrBlockStmtSafe?] using hCheck)
+  | block body =>
+      exact
+        atomicStmtListSafe?_sound
+          (by simpa [atomicOrBlockStmtSafe?] using hCheck)
+  | if_ cond body =>
+      simp [atomicOrBlockStmtSafe?] at hCheck
+  | switch scrutinee cases defaultBody =>
+      simp [atomicOrBlockStmtSafe?] at hCheck
+  | for_ init cond post body =>
+      simp [atomicOrBlockStmtSafe?] at hCheck
+  | brk =>
+      simp [atomicOrBlockStmtSafe?] at hCheck
+  | cont =>
+      simp [atomicOrBlockStmtSafe?] at hCheck
+  | leave =>
+      simp [atomicOrBlockStmtSafe?] at hCheck
+  | call targets functionName args =>
+      simp [atomicOrBlockStmtSafe?] at hCheck
+  | terminal kind =>
+      simp [atomicOrBlockStmtSafe?] at hCheck
+  | terminalArgs kind args =>
+      simp [atomicOrBlockStmtSafe?] at hCheck
+
+theorem atomicOrBlockStmtListSafe?_sound {stmts : List Stmt}
+    (hCheck : atomicOrBlockStmtListSafe? stmts = true) :
+    AtomicOrBlockStmtListSafe stmts := by
+  induction stmts with
+  | nil =>
+      trivial
+  | cons stmt rest ih =>
+      have hAnd :
+          atomicOrBlockStmtSafe? stmt = true ∧
+            atomicOrBlockStmtListSafe? rest = true := by
+        simpa [atomicOrBlockStmtListSafe?] using hCheck
+      exact ⟨atomicOrBlockStmtSafe?_sound hAnd.1, ih hAnd.2⟩
 
 def range (base : Word) (words : Nat) : ScratchRange :=
   { base := base.toNat, words := words }
