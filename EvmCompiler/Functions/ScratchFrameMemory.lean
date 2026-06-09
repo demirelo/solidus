@@ -33,6 +33,12 @@ abbrev WordByteEncodingSpec :=
 abbrev SharedStateEqOutsideScratch :=
   Locals.SourceLowering.StateRel.SpillScratch.SharedStateEqOutsideScratch
 
+abbrev SharedStatePrivateScratchInvariant :=
+  Locals.SourceLowering.StateRel.SpillScratch.SharedStatePrivateScratchInvariant
+
+abbrev SharedStatePrivateScratchObservable :=
+  Locals.SourceLowering.StateRel.SpillScratch.SharedStatePrivateScratchObservable
+
 abbrev SourceExprSafe {results : Nat} (expr : Expr results) : Prop :=
   Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.ExprSafe expr
 
@@ -69,6 +75,141 @@ def frameInitMachine (words : Nat)
     (machine : EvmYul.MachineState) : EvmYul.MachineState :=
   let loaded := machine.mload freePtrWord
   preallocMachineFromBase loaded.1 words (frameBumpMachine words machine)
+
+theorem preallocMachineFromBase_privateScratchInvariant
+    (base : Word) (words : Nat) (shared : EvmYul.SharedState .EVM) :
+    SharedStatePrivateScratchInvariant shared
+      ({ shared with
+        toMachineState :=
+          preallocMachineFromBase base words shared.toMachineState } :
+        EvmYul.SharedState .EVM) := by
+  cases words with
+  | zero =>
+      refine
+        { accountMap_eq := ?_
+          sigma0_eq := ?_
+          totalGasUsedInBlock_eq := ?_
+          transactionReceipts_eq := ?_
+          substate_eq := ?_
+          executionEnv_eq := ?_
+          blocks_eq := ?_
+          genesisBlockHeader_eq := ?_
+          createdAccounts_eq := ?_
+          gasAvailable_eq := ?_
+          returnData_eq := ?_
+          hReturn_eq := ?_ } <;>
+        simp [preallocMachineFromBase]
+  | succ slot =>
+      refine
+        { accountMap_eq := ?_
+          sigma0_eq := ?_
+          totalGasUsedInBlock_eq := ?_
+          transactionReceipts_eq := ?_
+          substate_eq := ?_
+          executionEnv_eq := ?_
+          blocks_eq := ?_
+          genesisBlockHeader_eq := ?_
+          createdAccounts_eq := ?_
+          gasAvailable_eq := ?_
+          returnData_eq := ?_
+          hReturn_eq := ?_ } <;>
+        simp [preallocMachineFromBase, EvmYul.MachineState.mstore,
+          EvmYul.MachineState.writeWord, EvmYul.writeBytes]
+
+theorem frameBumpMachine_privateScratchInvariant
+    (words : Nat) (shared : EvmYul.SharedState .EVM) :
+    SharedStatePrivateScratchInvariant shared
+      ({ shared with
+        toMachineState := frameBumpMachine words shared.toMachineState } :
+        EvmYul.SharedState .EVM) := by
+  refine
+    { accountMap_eq := ?_
+      sigma0_eq := ?_
+      totalGasUsedInBlock_eq := ?_
+      transactionReceipts_eq := ?_
+      substate_eq := ?_
+      executionEnv_eq := ?_
+      blocks_eq := ?_
+      genesisBlockHeader_eq := ?_
+      createdAccounts_eq := ?_
+      gasAvailable_eq := ?_
+      returnData_eq := ?_
+      hReturn_eq := ?_ } <;>
+    simp [frameBumpMachine, EvmYul.MachineState.mload,
+      EvmYul.MachineState.mstore, EvmYul.MachineState.writeWord,
+      EvmYul.writeBytes]
+
+theorem frameInitMachine_privateScratchInvariant
+    (words : Nat) (shared : EvmYul.SharedState .EVM) :
+    SharedStatePrivateScratchInvariant shared
+      ({ shared with
+        toMachineState := frameInitMachine words shared.toMachineState } :
+        EvmYul.SharedState .EVM) := by
+  cases words with
+  | zero =>
+      refine
+        { accountMap_eq := ?_
+          sigma0_eq := ?_
+          totalGasUsedInBlock_eq := ?_
+          transactionReceipts_eq := ?_
+          substate_eq := ?_
+          executionEnv_eq := ?_
+          blocks_eq := ?_
+          genesisBlockHeader_eq := ?_
+          createdAccounts_eq := ?_
+          gasAvailable_eq := ?_
+          returnData_eq := ?_
+          hReturn_eq := ?_ } <;>
+        simp [frameInitMachine, frameBumpMachine,
+          EvmYul.MachineState.mload, EvmYul.MachineState.mstore,
+          EvmYul.MachineState.writeWord, EvmYul.writeBytes,
+          preallocMachineFromBase]
+  | succ slot =>
+      refine
+        { accountMap_eq := ?_
+          sigma0_eq := ?_
+          totalGasUsedInBlock_eq := ?_
+          transactionReceipts_eq := ?_
+          substate_eq := ?_
+          executionEnv_eq := ?_
+          blocks_eq := ?_
+          genesisBlockHeader_eq := ?_
+          createdAccounts_eq := ?_
+          gasAvailable_eq := ?_
+          returnData_eq := ?_
+          hReturn_eq := ?_ } <;>
+        simp [frameInitMachine, frameBumpMachine,
+          EvmYul.MachineState.mload, EvmYul.MachineState.mstore,
+          EvmYul.MachineState.writeWord, EvmYul.writeBytes,
+          preallocMachineFromBase]
+
+theorem preallocMachineFromBase_privateScratchObservable
+    (base : Word) (words : Nat) (shared : EvmYul.SharedState .EVM) :
+    SharedStatePrivateScratchObservable shared
+      ({ shared with
+        toMachineState :=
+          preallocMachineFromBase base words shared.toMachineState } :
+        EvmYul.SharedState .EVM) :=
+  Locals.SourceLowering.StateRel.SpillScratch.SharedStatePrivateScratchInvariant.observable
+      (preallocMachineFromBase_privateScratchInvariant base words shared)
+
+theorem frameBumpMachine_privateScratchObservable
+    (words : Nat) (shared : EvmYul.SharedState .EVM) :
+    SharedStatePrivateScratchObservable shared
+      ({ shared with
+        toMachineState := frameBumpMachine words shared.toMachineState } :
+        EvmYul.SharedState .EVM) :=
+  Locals.SourceLowering.StateRel.SpillScratch.SharedStatePrivateScratchInvariant.observable
+      (frameBumpMachine_privateScratchInvariant words shared)
+
+theorem frameInitMachine_privateScratchObservable
+    (words : Nat) (shared : EvmYul.SharedState .EVM) :
+    SharedStatePrivateScratchObservable shared
+      ({ shared with
+        toMachineState := frameInitMachine words shared.toMachineState } :
+        EvmYul.SharedState .EVM) :=
+  Locals.SourceLowering.StateRel.SpillScratch.SharedStatePrivateScratchInvariant.observable
+      (frameInitMachine_privateScratchInvariant words shared)
 
 private theorem word_add_comm (left right : Word) :
     left + right = right + left := by
