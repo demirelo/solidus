@@ -32,7 +32,7 @@ def callAwareSpillFallbackScratchWords : Nat :=
   64
 
 def scratchFrameSpillFallbackWords : Nat :=
-  4096
+  8192
 
 def compileCallAwareSpillFallback? (program : Program) :
     Option Assembly.TargetProgram := do
