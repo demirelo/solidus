@@ -69,12 +69,25 @@ def SwitchDefaultBodyAtomicSafe : Option Block → Prop
   | none => True
   | some body => AtomicStmtListSafe body.stmts
 
+def switchCaseBodiesAtomicFuel : List (Word × Block) → Nat
+  | [] => 0
+  | (_value, body) :: rest =>
+      max (2 * body.stmts.length) (switchCaseBodiesAtomicFuel rest)
+
+def switchDefaultBodyAtomicFuel : Option Block → Nat
+  | none => 0
+  | some body => 2 * body.stmts.length
+
 def AtomicOrBlockStmtSafe : Stmt → Prop
   | .expr expr => SourceExprSafe expr
   | .let_ _name value => SourceExprSafe value
   | .assign _name value => SourceExprSafe value
   | .block body => AtomicStmtListSafe body.stmts
   | .if_ cond body => SourceExprSafe cond ∧ AtomicStmtListSafe body.stmts
+  | .switch scrutinee cases defaultBody =>
+      SourceExprSafe scrutinee ∧
+        SwitchCaseBodiesAtomicSafe cases ∧
+        SwitchDefaultBodyAtomicSafe defaultBody
   | _ => False
 
 def AtomicOrBlockStmtListSafe : List Stmt → Prop
@@ -89,6 +102,9 @@ mutual
     | .assign _name _value => 2
     | .block body => 2 * body.stmts.length + 1
     | .if_ _cond body => 2 * body.stmts.length + 3
+    | .switch _scrutinee cases defaultBody =>
+        max (switchCaseBodiesAtomicFuel cases)
+          (switchDefaultBodyAtomicFuel defaultBody) + 3
     | _ => 0
 
   def atomicOrBlockStmtListFuel : List Stmt → Nat
@@ -179,6 +195,138 @@ theorem switchCaseBodiesAtomicSafe_select_some
       · simp [hEq] at hSelect
         exact ih hRestSafe hSelect
 
+theorem switchDefaultScoped_select_some
+    {scope : List Name} {value : Word}
+    {defaultBody : Option Block} {selectedBody : Block}
+    (hScoped :
+      EvmCompiler.Functions.Scope.Default.Scoped scope defaultBody)
+    (hSelect :
+      EvmCompiler.Functions.Source.Switch.select value [] defaultBody =
+        some selectedBody) :
+    EvmCompiler.Functions.Scope.Block.Scoped scope selectedBody := by
+  cases defaultBody with
+  | none =>
+      simp [EvmCompiler.Functions.Source.Switch.select] at hSelect
+  | some body =>
+      unfold EvmCompiler.Functions.Source.Switch.select at hSelect
+      cases hSelect
+      simpa [EvmCompiler.Functions.Scope.Default.Scoped] using hScoped
+
+theorem switchCaseListScoped_select_some
+    {scope : List Name} {value : Word}
+    {cases : List (Word × Block)}
+    {defaultBody : Option Block} {selectedBody : Block}
+    (hCasesScoped :
+      EvmCompiler.Functions.Scope.CaseList.Scoped scope cases)
+    (hDefaultScoped :
+      EvmCompiler.Functions.Scope.Default.Scoped scope defaultBody)
+    (hSelect :
+      EvmCompiler.Functions.Source.Switch.select value cases defaultBody =
+        some selectedBody) :
+    EvmCompiler.Functions.Scope.Block.Scoped scope selectedBody := by
+  induction cases with
+  | nil =>
+      exact switchDefaultScoped_select_some hDefaultScoped hSelect
+  | cons head rest ih =>
+      rcases head with ⟨caseValue, body⟩
+      have hHeadScoped :
+          EvmCompiler.Functions.Scope.Block.Scoped scope body := by
+        simpa [EvmCompiler.Functions.Scope.CaseList.Scoped] using
+          hCasesScoped.1
+      have hRestScoped :
+          EvmCompiler.Functions.Scope.CaseList.Scoped scope rest := by
+        simpa [EvmCompiler.Functions.Scope.CaseList.Scoped] using
+          hCasesScoped.2
+      unfold EvmCompiler.Functions.Source.Switch.select at hSelect
+      by_cases hEq : caseValue = value
+      · simp [hEq] at hSelect
+        cases hSelect
+        exact hHeadScoped
+      · simp [hEq] at hSelect
+        exact ih hRestScoped hSelect
+
+theorem switchDefaultBodyAtomicFuel_select_some_le
+    {value : Word} {defaultBody : Option Block} {selectedBody : Block}
+    (hSelect :
+      EvmCompiler.Functions.Source.Switch.select value [] defaultBody =
+        some selectedBody) :
+    2 * selectedBody.stmts.length ≤
+      switchDefaultBodyAtomicFuel defaultBody := by
+  cases defaultBody with
+  | none =>
+      simp [EvmCompiler.Functions.Source.Switch.select] at hSelect
+  | some body =>
+      unfold EvmCompiler.Functions.Source.Switch.select at hSelect
+      cases hSelect
+      simp [switchDefaultBodyAtomicFuel]
+
+theorem switchCaseBodiesAtomicFuel_select_some_le
+    {value : Word} {cases : List (Word × Block)}
+    {defaultBody : Option Block} {selectedBody : Block}
+    (hSelect :
+      EvmCompiler.Functions.Source.Switch.select value cases defaultBody =
+        some selectedBody) :
+    2 * selectedBody.stmts.length ≤
+      max (switchCaseBodiesAtomicFuel cases)
+        (switchDefaultBodyAtomicFuel defaultBody) := by
+  induction cases with
+  | nil =>
+      exact le_trans
+        (switchDefaultBodyAtomicFuel_select_some_le hSelect)
+        (Nat.le_max_right
+          (switchCaseBodiesAtomicFuel [])
+          (switchDefaultBodyAtomicFuel defaultBody))
+  | cons head rest ih =>
+      rcases head with ⟨caseValue, body⟩
+      unfold EvmCompiler.Functions.Source.Switch.select at hSelect
+      by_cases hEq : caseValue = value
+      · simp [hEq] at hSelect
+        have hBodyEq : body = selectedBody := by
+          exact hSelect
+        rw [← hBodyEq]
+        exact
+          Nat.le_trans
+            (Nat.le_max_left (2 * body.stmts.length)
+              (switchCaseBodiesAtomicFuel rest))
+            (Nat.le_max_left
+              (max (2 * body.stmts.length)
+                (switchCaseBodiesAtomicFuel rest))
+              (switchDefaultBodyAtomicFuel defaultBody))
+      · simp [hEq] at hSelect
+        have hRestFuelLe :
+            switchCaseBodiesAtomicFuel rest ≤
+              switchCaseBodiesAtomicFuel ((caseValue, body) :: rest) := by
+          simp [switchCaseBodiesAtomicFuel]
+        exact
+          Nat.le_trans (ih hSelect)
+            (Nat.max_le.mpr
+              ⟨Nat.le_trans hRestFuelLe
+                  (Nat.le_max_left
+                    (switchCaseBodiesAtomicFuel ((caseValue, body) :: rest))
+                    (switchDefaultBodyAtomicFuel defaultBody)),
+                Nat.le_max_right
+                  (switchCaseBodiesAtomicFuel ((caseValue, body) :: rest))
+                  (switchDefaultBodyAtomicFuel defaultBody)⟩)
+
+theorem switchStmtAtomicFuel_select_none_ge_two
+    {cases : List (Word × Block)} {defaultBody : Option Block} :
+    2 ≤
+      max (switchCaseBodiesAtomicFuel cases)
+        (switchDefaultBodyAtomicFuel defaultBody) + 3 := by
+  omega
+
+theorem switchStmtAtomicFuel_select_some_ge
+    {value : Word} {cases : List (Word × Block)}
+    {defaultBody : Option Block} {selectedBody : Block}
+    (hSelect :
+      EvmCompiler.Functions.Source.Switch.select value cases defaultBody =
+        some selectedBody) :
+    2 * selectedBody.stmts.length + 3 ≤
+      max (switchCaseBodiesAtomicFuel cases)
+        (switchDefaultBodyAtomicFuel defaultBody) + 3 := by
+  exact Nat.add_le_add_right
+    (switchCaseBodiesAtomicFuel_select_some_le hSelect) 3
+
 def sourceExprSafe? {results : Nat} (expr : Expr results) : Bool :=
   Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.expr? expr
 
@@ -210,12 +358,26 @@ def atomicStmtListSafe? : List Stmt → Bool
   | [] => true
   | stmt :: rest => atomicStmtSafe? stmt && atomicStmtListSafe? rest
 
+def switchCaseBodiesAtomicSafe? : List (Word × Block) → Bool
+  | [] => true
+  | (_value, body) :: rest =>
+      atomicStmtListSafe? body.stmts &&
+        switchCaseBodiesAtomicSafe? rest
+
+def switchDefaultBodyAtomicSafe? : Option Block → Bool
+  | none => true
+  | some body => atomicStmtListSafe? body.stmts
+
 def atomicOrBlockStmtSafe? : Stmt → Bool
   | .expr expr => sourceExprSafe? expr
   | .let_ _name value => sourceExprSafe? value
   | .assign _name value => sourceExprSafe? value
   | .block body => atomicStmtListSafe? body.stmts
   | .if_ cond body => sourceExprSafe? cond && atomicStmtListSafe? body.stmts
+  | .switch scrutinee cases defaultBody =>
+      sourceExprSafe? scrutinee &&
+        switchCaseBodiesAtomicSafe? cases &&
+        switchDefaultBodyAtomicSafe? defaultBody
   | _ => false
 
 def atomicOrBlockStmtListSafe? : List Stmt → Bool
@@ -267,6 +429,31 @@ theorem atomicStmtListSafe?_sound {stmts : List Stmt}
         simpa [atomicStmtListSafe?] using hCheck
       exact ⟨atomicStmtSafe?_sound hAnd.1, ih hAnd.2⟩
 
+theorem switchCaseBodiesAtomicSafe?_sound {cases : List (Word × Block)}
+    (hCheck : switchCaseBodiesAtomicSafe? cases = true) :
+    SwitchCaseBodiesAtomicSafe cases := by
+  induction cases with
+  | nil =>
+      trivial
+  | cons head rest ih =>
+      rcases head with ⟨value, body⟩
+      have hAnd :
+          atomicStmtListSafe? body.stmts = true ∧
+            switchCaseBodiesAtomicSafe? rest = true := by
+        simpa [switchCaseBodiesAtomicSafe?] using hCheck
+      exact ⟨atomicStmtListSafe?_sound hAnd.1, ih hAnd.2⟩
+
+theorem switchDefaultBodyAtomicSafe?_sound {defaultBody : Option Block}
+    (hCheck : switchDefaultBodyAtomicSafe? defaultBody = true) :
+    SwitchDefaultBodyAtomicSafe defaultBody := by
+  cases defaultBody with
+  | none =>
+      trivial
+  | some body =>
+      exact
+        atomicStmtListSafe?_sound
+          (by simpa [switchDefaultBodyAtomicSafe?] using hCheck)
+
 theorem atomicOrBlockStmtSafe?_sound {stmt : Stmt}
     (hCheck : atomicOrBlockStmtSafe? stmt = true) :
     AtomicOrBlockStmtSafe stmt := by
@@ -296,7 +483,15 @@ theorem atomicOrBlockStmtSafe?_sound {stmt : Stmt}
         ⟨sourceExprSafe?_sound hAnd.1,
           atomicStmtListSafe?_sound hAnd.2⟩
   | switch scrutinee cases defaultBody =>
-      simp [atomicOrBlockStmtSafe?] at hCheck
+      have hAnd :
+          sourceExprSafe? scrutinee = true ∧
+            switchCaseBodiesAtomicSafe? cases = true ∧
+            switchDefaultBodyAtomicSafe? defaultBody = true := by
+        simpa [atomicOrBlockStmtSafe?, Bool.and_assoc] using hCheck
+      exact
+        ⟨sourceExprSafe?_sound hAnd.1,
+          switchCaseBodiesAtomicSafe?_sound hAnd.2.1,
+          switchDefaultBodyAtomicSafe?_sound hAnd.2.2⟩
   | for_ init cond post body =>
       simp [atomicOrBlockStmtSafe?] at hCheck
   | brk =>
@@ -1956,7 +2151,38 @@ theorem compileStmt?_atomicOrBlock_envNamesInScope_of_scoped
               change EnvNamesInScope bodyPlan.state.env scope
               exact EnvNamesInScope.of_compileBlockScoped hNames hBodyCompile
   | switch scrutinee cases defaultBody =>
-      simp [AtomicOrBlockStmtSafe] at hSafe
+      unfold compileStmt? at hCompile
+      cases hScrutineeCode : compileExprCode? state.env 0 scrutinee with
+      | none =>
+          simp [hScrutineeCode] at hCompile
+      | some scrutineeCode =>
+          cases hCases :
+              compileCases? ctx returns state cases with
+          | none =>
+              simp [hScrutineeCode, hCases] at hCompile
+          | some casesResult =>
+              rcases casesResult with ⟨compiledCases, stateAfterCases⟩
+              cases hDefault :
+                  compileDefault? ctx returns stateAfterCases defaultBody with
+              | none =>
+                  simp [hScrutineeCode, hCases, hDefault] at hCompile
+              | some defaultResult =>
+                  rcases defaultResult with
+                    ⟨compiledDefault, stateAfterDefault⟩
+                  simp [hScrutineeCode, hCases, hDefault] at hCompile
+                  cases hCompile
+                  have hCasesEnv :
+                      stateAfterCases.env = state.env :=
+                    compileCases?_env_eq hCases
+                  have hDefaultEnv :
+                      stateAfterDefault.env = stateAfterCases.env :=
+                    compileDefault?_env_eq hDefault
+                  intro other slot hLookup
+                  have hLookupOuter :
+                      lookupSlot? other state.env = some slot := by
+                    simpa [EvmCompiler.Functions.Scope.Stmt.outEnv,
+                      hDefaultEnv, hCasesEnv] using hLookup
+                  exact hNames hLookupOuter
   | for_ init cond post body =>
       simp [AtomicOrBlockStmtSafe] at hSafe
   | brk =>
@@ -2094,7 +2320,68 @@ theorem source_stmt_run_regular_scope_eq_outEnv_of_atomicOrBlock
                   simpa [EvmCompiler.Functions.Scope.Stmt.outEnv] using
                     (congrArg (fun c => c.scope) hRun.2).symm
   | switch scrutinee cases defaultBody =>
-      simp [AtomicOrBlockStmtSafe] at hSafe
+      cases fuel with
+      | zero =>
+          simp [EvmCompiler.Functions.Source.Stmt.run,
+            EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+      | succ fuel' =>
+          unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+          cases hEval :
+              Locals.Source.Expr.evalOne
+                Locals.Source.PrimitiveSemantics.structured scrutinee
+                source with
+          | error err =>
+              simp [hEval] at hRun
+          | ok scrutineeResult =>
+              rcases scrutineeResult with ⟨sourceAfterScrutinee, value⟩
+              cases hSelect :
+                  EvmCompiler.Functions.Source.Switch.select value cases
+                    defaultBody with
+              | none =>
+                  simp [hEval, hSelect,
+                    EvmCompiler.Functions.Source.Outcome.regular] at hRun
+                  simpa [EvmCompiler.Functions.Scope.Stmt.outEnv] using
+                    (congrArg (fun c => c.scope) hRun.2).symm
+              | some selectedBody =>
+                  cases hScoped :
+                      EvmCompiler.Functions.Source.Block.runScoped
+                        Locals.Source.PrimitiveSemantics.structured
+                        sourceProgram ctx selectedBody fuel'
+                        sourceAfterScrutinee with
+                  | error err =>
+                      simp [hEval, hSelect, hScoped] at hRun
+                  | ok outcome =>
+                      cases outcome with
+                      | mk scopedSource mode =>
+                          cases mode with
+                          | regular =>
+                              simp [hEval, hSelect, hScoped,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                at hRun
+                              simpa [EvmCompiler.Functions.Scope.Stmt.outEnv]
+                                using
+                                  (congrArg (fun c => c.scope)
+                                    hRun.2).symm
+                          | brk =>
+                              simp [hEval, hSelect, hScoped,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                at hRun
+                              cases hRun.1
+                          | cont =>
+                              simp [hEval, hSelect, hScoped,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                at hRun
+                              cases hRun.1
+                          | leave =>
+                              simp [hEval, hSelect, hScoped,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                at hRun
+                              cases hRun.1
+                          | halt kind =>
+                              simp [hEval, hSelect, hScoped,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                at hRun
+                              cases hRun.1
   | for_ init cond post body =>
       simp [AtomicOrBlockStmtSafe] at hSafe
   | brk =>
@@ -4547,6 +4834,19 @@ theorem source_stmt_run_atomicOrBlock_privateScratchInvariant
           hSafe.1 hSafe.2 hRel hRun
   | switch scrutinee cases defaultBody =>
       simp [AtomicOrBlockStmtSafe] at hSafe
+      exact
+        source_stmt_run_switch_atomic_privateScratchInvariant
+          (scrutinee := scrutinee)
+          (cases := cases)
+          (defaultBody := defaultBody)
+          (program := program)
+          (source := source)
+          (source' := source')
+          (target := target)
+          (sourceCtx := sourceCtx)
+          (sourceCtx' := sourceCtx')
+          (fuel := fuel)
+          hSafe.1 hSafe.2.1 hSafe.2.2 hRel hRun
   | for_ init cond post body =>
       simp [AtomicOrBlockStmtSafe] at hSafe
   | brk =>
@@ -10352,6 +10652,257 @@ theorem run_compileStmt?_atomicOrBlock_block_frameStore_of_source_run_regular_sc
           hStack, hReadyFinal, hSharedFinal, hRelFinal⟩
   | switch scrutinee cases defaultBody =>
       simp [AtomicOrBlockStmtSafe] at hSafe
+      have hCtxEq : sourceCtx' = sourceCtx := by
+        cases sourceFuel with
+        | zero =>
+            simp [EvmCompiler.Functions.Source.Stmt.run,
+              EvmCompiler.Functions.Source.invalid, Structured.invalid]
+              at hRun
+        | succ sourceFuel' =>
+            unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+            cases hEval :
+                Locals.Source.Expr.evalOne
+                  Locals.Source.PrimitiveSemantics.structured scrutinee
+                  source with
+            | error err =>
+                simp [hEval] at hRun
+            | ok scrutineeResult =>
+                rcases scrutineeResult with ⟨sourceAfterScrutinee, value⟩
+                cases hSelect :
+                    EvmCompiler.Functions.Source.Switch.select value cases
+                      defaultBody with
+                | none =>
+                    simp [hEval, hSelect,
+                      EvmCompiler.Functions.Source.Outcome.regular] at hRun
+                    exact hRun.2.symm
+                | some selectedBody =>
+                    cases hScopedRun :
+                        EvmCompiler.Functions.Source.Block.runScoped
+                          Locals.Source.PrimitiveSemantics.structured
+                          sourceProgram sourceCtx selectedBody sourceFuel'
+                          sourceAfterScrutinee with
+                    | error err =>
+                        simp [hEval, hSelect, hScopedRun] at hRun
+                    | ok outcome =>
+                        cases outcome with
+                        | mk scopedSource mode =>
+                            cases mode with
+                            | regular =>
+                                simp [hEval, hSelect, hScopedRun,
+                                  EvmCompiler.Functions.Source.Outcome.regular]
+                                  at hRun
+                                exact hRun.2.symm
+                            | brk =>
+                                simp [hEval, hSelect, hScopedRun,
+                                  EvmCompiler.Functions.Source.Outcome.regular]
+                                  at hRun
+                                cases hRun.1
+                            | cont =>
+                                simp [hEval, hSelect, hScopedRun,
+                                  EvmCompiler.Functions.Source.Outcome.regular]
+                                  at hRun
+                                cases hRun.1
+                            | leave =>
+                                simp [hEval, hSelect, hScopedRun,
+                                  EvmCompiler.Functions.Source.Outcome.regular]
+                                  at hRun
+                                cases hRun.1
+                            | halt kind =>
+                                simp [hEval, hSelect, hScopedRun,
+                                  EvmCompiler.Functions.Source.Outcome.regular]
+                                  at hRun
+                                cases hRun.1
+      cases hCtxEq
+      cases sourceFuel with
+      | zero =>
+          simp [EvmCompiler.Functions.Source.Stmt.run,
+            EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+      | succ sourceFuel' =>
+          unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+          cases hEvalOne :
+              Locals.Source.Expr.evalOne
+                Locals.Source.PrimitiveSemantics.structured scrutinee
+                source with
+          | error err =>
+              simp [hEvalOne] at hRun
+          | ok scrutineeResult =>
+              rcases scrutineeResult with ⟨sourceAfterScrutinee, value⟩
+              cases hSelect :
+                  EvmCompiler.Functions.Source.Switch.select value cases
+                    defaultBody with
+              | none =>
+                  have hSourceEq : sourceAfterScrutinee = source' := by
+                    have hOutcomeEq :
+                        EvmCompiler.Functions.Source.Outcome.regular
+                            sourceAfterScrutinee =
+                          EvmCompiler.Functions.Source.Outcome.regular
+                            source' := by
+                      simpa [hEvalOne, hSelect,
+                        EvmCompiler.Functions.Source.Outcome.regular]
+                        using hRun
+                    cases hOutcomeEq
+                    rfl
+                  rcases
+                    run_compileStmt?_switch_none_frameStore_of_source_evalOne
+                      (ctx := ctx)
+                      (returns := returns)
+                      (compileState := compileState)
+                      (scrutinee := scrutinee)
+                      (cases := cases)
+                      (defaultBody := defaultBody)
+                      (plan := plan)
+                      (compiledProgram := compiledProgram)
+                      (source := source)
+                      (sourceAfterScrutinee := sourceAfterScrutinee)
+                      (value := value)
+                      (blockFuel := blockFuel)
+                      (runState := runState)
+                      (evmState := evmState)
+                      (base := base)
+                      (words := words)
+                      hCompile hSafe.1 hEvalOne hSelect hStateBound
+                      hFrameWords hReady hShared hRel rest with
+                  ⟨final, hBlockRun, hStack, hReadyFinal, hSharedFinal,
+                    hRelFinal⟩
+                  refine
+                    ⟨final, ?_, hStack, hReadyFinal, ?_, ?_⟩
+                  · exact
+                      expressionsBlockRun_mono compiledProgram
+                        (by
+                          have hBound :
+                              2 ≤
+                                max (switchCaseBodiesAtomicFuel cases)
+                                  (switchDefaultBodyAtomicFuel defaultBody) +
+                                  3 :=
+                            switchStmtAtomicFuel_select_none_ge_two
+                          simp [atomicOrBlockStmtFuel, hBound])
+                        hBlockRun
+                  · simpa [hSourceEq] using hSharedFinal
+                  · intro name slot hLookup
+                    rcases hRelFinal hLookup with
+                      ⟨stored, hStore, hValue⟩
+                    exact ⟨stored, by simpa [hSourceEq] using hStore, hValue⟩
+              | some selectedBody =>
+                  cases hScopedRun :
+                      EvmCompiler.Functions.Source.Block.runScoped
+                        Locals.Source.PrimitiveSemantics.structured
+                        sourceProgram sourceCtx selectedBody sourceFuel'
+                        sourceAfterScrutinee with
+                  | error err =>
+                      simp [hEvalOne, hSelect, hScopedRun] at hRun
+                  | ok outcome =>
+                      cases outcome with
+                      | mk scopedSource mode =>
+                          cases mode with
+                          | regular =>
+                              simp [hEvalOne, hSelect, hScopedRun,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                at hRun
+                              have hScopedEq : scopedSource = source' := by
+                                cases hRun
+                                rfl
+                              have hScopedRunRegular :
+                                  EvmCompiler.Functions.Source.Block.runScoped
+                                      Locals.Source.PrimitiveSemantics.structured
+                                      sourceProgram sourceCtx selectedBody
+                                      sourceFuel' sourceAfterScrutinee =
+                                    .ok
+                                      (EvmCompiler.Functions.Source.Outcome.regular
+                                        source') := by
+                                simpa [EvmCompiler.Functions.Source.Outcome.regular,
+                                  hScopedEq]
+                                  using hScopedRun
+                              have hSelectedStmtRun :
+                                  EvmCompiler.Functions.Source.Stmt.run
+                                      Locals.Source.PrimitiveSemantics.structured
+                                      sourceProgram sourceCtx sourceFuel'
+                                      (.block selectedBody)
+                                      sourceAfterScrutinee =
+                                    .ok
+                                      (EvmCompiler.Functions.Source.Outcome.regular
+                                        source', sourceCtx) := by
+                                unfold EvmCompiler.Functions.Source.Stmt.run
+                                simp [hScopedRunRegular,
+                                  EvmCompiler.Functions.Source.Outcome.regular,
+                                  Locals.Source.Outcome.regular]
+                              have hSelectedSafe :
+                                  AtomicStmtListSafe selectedBody.stmts :=
+                                switchCaseBodiesAtomicSafe_select_some
+                                  hSafe.2.1 hSafe.2.2 hSelect
+                              have hSelectedScoped :
+                                  EvmCompiler.Functions.Scope.Block.Scoped
+                                    sourceCtx.scope selectedBody :=
+                                switchCaseListScoped_select_some
+                                  hScoped.2.1 hScoped.2.2 hSelect
+                              rcases
+                                run_compileStmt?_switch_some_frameStore_of_source_evalOne_run_regular_scoped
+                                  hSpec hWordBytes
+                                  (ctx := ctx)
+                                  (returns := returns)
+                                  (compileState := compileState)
+                                  (scrutinee := scrutinee)
+                                  (cases := cases)
+                                  (defaultBody := defaultBody)
+                                  (selectedBody := selectedBody)
+                                  (plan := plan)
+                                  (sourceProgram := sourceProgram)
+                                  (compiledProgram := compiledProgram)
+                                  (source := source)
+                                  (sourceAfterScrutinee :=
+                                    sourceAfterScrutinee)
+                                  (source' := source')
+                                  (sourceCtx := sourceCtx)
+                                  (sourceFuel := sourceFuel')
+                                  (blockFuel := blockFuel)
+                                  (value := value)
+                                  (runState := runState)
+                                  (evmState := evmState)
+                                  (base := base)
+                                  (words := words)
+                                  hCompile hSafe.1 hSelectedSafe
+                                  hSelectedScoped hEvalOne hSelect
+                                  hSelectedStmtRun hStateBound hStateNodup
+                                  hNames hFrameWords hReady hShared hRel
+                                  rest with
+                              ⟨final, hBlockRun, hStack, hReadyFinal,
+                                hSharedFinal, hRelFinal⟩
+                              refine
+                                ⟨final, ?_, hStack, hReadyFinal,
+                                  hSharedFinal, hRelFinal⟩
+                              exact
+                                expressionsBlockRun_mono compiledProgram
+                                  (by
+                                    have hBound :
+                                        2 * selectedBody.stmts.length + 3 ≤
+                                          max
+                                            (switchCaseBodiesAtomicFuel cases)
+                                            (switchDefaultBodyAtomicFuel
+                                              defaultBody) + 3 :=
+                                      switchStmtAtomicFuel_select_some_ge
+                                        hSelect
+                                    simp [atomicOrBlockStmtFuel]
+                                    omega)
+                                  hBlockRun
+                          | brk =>
+                              simp [hEvalOne, hSelect, hScopedRun,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                at hRun
+                              cases hRun
+                          | cont =>
+                              simp [hEvalOne, hSelect, hScopedRun,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                at hRun
+                              cases hRun
+                          | leave =>
+                              simp [hEvalOne, hSelect, hScopedRun,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                at hRun
+                              cases hRun
+                          | halt kind =>
+                              simp [hEvalOne, hSelect, hScopedRun,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                at hRun
+                              cases hRun
   | for_ init cond post body =>
       simp [AtomicOrBlockStmtSafe] at hSafe
   | brk =>
@@ -11083,7 +11634,167 @@ theorem run_compileStmtList?_atomicOrBlock_block_frameStore_of_source_run_open_r
                                     run_block_append_regular_of_block_prefix_and_suffix_run
                                       hPrefix hTailRun'
                               | switch scrutinee cases defaultBody =>
-                                  simp [AtomicOrBlockStmtSafe] at hHeadSafe
+                                  have hHeadLen :
+                                      head.block.stmts.length = 1 := by
+                                    unfold compileStmt? at hHead
+                                    cases hScrutineeCode :
+                                        compileExprCode? compileState.env 0
+                                          scrutinee with
+                                    | none =>
+                                        simp [hScrutineeCode] at hHead
+                                    | some scrutineeCode =>
+                                        cases hCases :
+                                            compileCases? ctx returns
+                                              compileState cases with
+                                        | none =>
+                                            simp [hScrutineeCode, hCases]
+                                              at hHead
+                                        | some casesResult =>
+                                            rcases casesResult with
+                                              ⟨compiledCases,
+                                                stateAfterCases⟩
+                                            cases hDefault :
+                                                compileDefault? ctx returns
+                                                  stateAfterCases
+                                                  defaultBody with
+                                            | none =>
+                                                simp [hScrutineeCode, hCases,
+                                                  hDefault] at hHead
+                                            | some defaultResult =>
+                                                rcases defaultResult with
+                                                  ⟨compiledDefault,
+                                                    stateAfterDefault⟩
+                                                simp [hScrutineeCode, hCases,
+                                                  hDefault] at hHead
+                                                cases hHead
+                                                rfl
+                                  rcases
+                                      ih
+                                        (compileState := head.state)
+                                        (plan := tailPlan)
+                                        (source := sourceAfterHead)
+                                        (sourceCtx := headCtx)
+                                        (sourceFuel := sourceFuel')
+                                        (evmState := headFinal)
+                                        (blockFuel :=
+                                          blockFuel +
+                                            max
+                                              (switchCaseBodiesAtomicFuel
+                                                cases)
+                                              (switchDefaultBodyAtomicFuel
+                                                defaultBody) + 2)
+                                        hTail hTailScoped' hTailSafe hTailRun
+                                        hHeadBound hHeadNodup hHeadNames
+                                        hFrameWords hHeadReady hHeadShared
+                                        hHeadRel with
+                                    ⟨final, hTailBlockRun, hFinalStack,
+                                      hReadyFinal, hSharedFinal, hRelFinal⟩
+                                  refine
+                                    ⟨final, ?_, hFinalStack, hReadyFinal,
+                                      hSharedFinal, hRelFinal⟩
+                                  have hPrefix :
+                                      Expressions.Block.run compiledProgram
+                                          (((blockFuel +
+                                                max
+                                                  (switchCaseBodiesAtomicFuel
+                                                    cases)
+                                                  (switchDefaultBodyAtomicFuel
+                                                    defaultBody) + 2) +
+                                                atomicOrBlockStmtListFuel tail +
+                                              1) + head.block.stmts.length)
+                                          head.block
+                                          { runState with
+                                            evm :=
+                                              { evmState with
+                                                stack := base :: restStack } } =
+                                        .ok
+                                          (Expressions.Outcome.regular
+                                            ({ runState with
+                                              evm := headFinal })) := by
+                                    have hFuel :
+                                        ((blockFuel +
+                                                max
+                                                  (switchCaseBodiesAtomicFuel
+                                                    cases)
+                                                  (switchDefaultBodyAtomicFuel
+                                                    defaultBody) + 2) +
+                                              atomicOrBlockStmtListFuel tail +
+                                            1) + head.block.stmts.length =
+                                          blockFuel +
+                                              atomicOrBlockStmtListFuel tail +
+                                            1 +
+                                              atomicOrBlockStmtFuel
+                                                (.switch scrutinee cases
+                                                  defaultBody) := by
+                                      simp [atomicOrBlockStmtFuel, hHeadLen]
+                                      omega
+                                    rw [hFuel]
+                                    exact hHeadRun
+                                  have hStartTail :
+                                      ({ runState with evm := headFinal } :
+                                        Expressions.RunState) =
+                                      ({ runState with
+                                        evm :=
+                                          { headFinal with
+                                            stack := base :: restStack } } :
+                                        Expressions.RunState) := by
+                                    cases headFinal
+                                    simp at hHeadStack ⊢
+                                    exact hHeadStack
+                                  have hTailRun' :
+                                      Expressions.Block.run compiledProgram
+                                          ((blockFuel +
+                                                max
+                                                  (switchCaseBodiesAtomicFuel
+                                                    cases)
+                                                  (switchDefaultBodyAtomicFuel
+                                                    defaultBody) + 2) +
+                                            atomicOrBlockStmtListFuel tail + 1)
+                                          tailPlan.block
+                                          ({ runState with evm := headFinal } :
+                                            Expressions.RunState) =
+                                        .ok
+                                          (Expressions.Outcome.regular
+                                            ({ runState with evm := final })) := by
+                                    simpa [hStartTail] using hTailBlockRun
+                                  have hTotal :
+                                      blockFuel +
+                                          atomicOrBlockStmtListFuel
+                                            (.switch scrutinee cases
+                                              defaultBody :: tail) + 1 =
+                                        ((blockFuel +
+                                              max
+                                                (switchCaseBodiesAtomicFuel
+                                                  cases)
+                                                (switchDefaultBodyAtomicFuel
+                                                  defaultBody) + 2) +
+                                            atomicOrBlockStmtListFuel tail + 1) +
+                                          head.block.stmts.length := by
+                                    simp [atomicOrBlockStmtListFuel,
+                                      atomicOrBlockStmtFuel, hHeadLen]
+                                    omega
+                                  rw [hTotal]
+                                  change
+                                    Expressions.Block.run compiledProgram
+                                        (((blockFuel +
+                                              max
+                                                (switchCaseBodiesAtomicFuel
+                                                  cases)
+                                                (switchDefaultBodyAtomicFuel
+                                                  defaultBody) + 2) +
+                                            atomicOrBlockStmtListFuel tail + 1) +
+                                          head.block.stmts.length)
+                                        (Block.append head.block tailPlan.block)
+                                        { runState with
+                                          evm :=
+                                            { evmState with
+                                              stack := base :: restStack } } =
+                                      .ok
+                                        (Expressions.Outcome.regular
+                                          ({ runState with evm := final }))
+                                  exact
+                                    run_block_append_regular_of_block_prefix_and_suffix_run
+                                      hPrefix hTailRun'
                               | for_ init cond post body =>
                                   simp [AtomicOrBlockStmtSafe] at hHeadSafe
                               | brk =>
