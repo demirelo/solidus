@@ -2688,6 +2688,169 @@ theorem run_block_append_regular_of_prefix_run
                   simp [hStmt, Expressions.Outcome.regular] at hPrefix
                   cases hPrefix
 
+mutual
+  theorem compileNoVarExprCode?_eq_compileExprCode?_nil_of_source_safe :
+      ∀ {results : Nat} (expr : Expr results) (valuesAboveBase : Nat),
+        SourceExprSafe expr →
+          compileNoVarExprCode? expr =
+            compileExprCode? [] valuesAboveBase expr := by
+    intro results expr valuesAboveBase hSafe
+    cases expr with
+    | lit value =>
+        rfl
+    | var name =>
+        simp [compileNoVarExprCode?, compileExprCode?, lookupSlot?]
+    | code raw =>
+        simp [SourceExprSafe,
+          Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.ExprSafe]
+          at hSafe
+    | prim op args =>
+        simp [SourceExprSafe] at hSafe
+        rcases hSafe with ⟨_hOpSafe, hArgsSafe⟩
+        have hArgs :=
+          compileNoVarExprSeqCode?_eq_compileExprSeqCode?_nil_of_source_safe
+            args valuesAboveBase hArgsSafe
+        simp [compileNoVarExprCode?, compileExprCode?, hArgs]
+
+  theorem compileNoVarExprSeqCode?_eq_compileExprSeqCode?_nil_of_source_safe :
+      ∀ {results : Nat} (exprs : Locals.ExprSeq results)
+        (valuesAboveBase : Nat),
+        SourceExprSeqSafe exprs →
+          compileNoVarExprSeqCode? exprs =
+            compileExprSeqCode? [] valuesAboveBase exprs := by
+    intro results exprs valuesAboveBase hSafe
+    cases exprs with
+    | nil =>
+        rfl
+    | @cons left right head tail =>
+        simp [SourceExprSeqSafe] at hSafe
+        rcases hSafe with ⟨hHeadSafe, hTailSafe⟩
+        have hHead :=
+          compileNoVarExprCode?_eq_compileExprCode?_nil_of_source_safe
+            head valuesAboveBase hHeadSafe
+        have hTail :=
+          compileNoVarExprSeqCode?_eq_compileExprSeqCode?_nil_of_source_safe
+            tail (valuesAboveBase + left) hTailSafe
+        simp [compileNoVarExprSeqCode?, compileExprSeqCode?, hHead, hTail]
+end
+
+theorem compilePreludeStmt?_expr_compileExprCode_nil_of_source_safe
+    {expr : Expr 0} {compiled : Expressions.Stmt}
+    (hSafe : SourceExprSafe expr)
+    (hCompile : compilePreludeStmt? (.expr expr) = some compiled) :
+    ∃ code,
+      compiled = Expressions.Stmt.code code ∧
+        compileExprCode? [] 0 expr = some code := by
+  simp [compilePreludeStmt?] at hCompile
+  cases hNoVar : compileNoVarExprCode? expr with
+  | none =>
+      simp [hNoVar] at hCompile
+  | some code =>
+      simp [hNoVar] at hCompile
+      cases hCompile
+      have hEq :=
+        compileNoVarExprCode?_eq_compileExprCode?_nil_of_source_safe
+          expr 0 hSafe
+      rw [hNoVar] at hEq
+      exact ⟨code, rfl, hEq.symm⟩
+
+theorem splitPrelude_atomic_source_safe_compileExprCode_nil :
+    ∀ {stmts : List Stmt} {prelude : List Expressions.Stmt}
+      {rest : List Stmt},
+      AtomicStmtListSafe stmts →
+      splitPrelude stmts = (prelude, rest) →
+        ∀ compiled, compiled ∈ prelude →
+          ∃ (expr : Expr 0) (code : Structured.Code),
+            compiled = Expressions.Stmt.code code ∧
+              SourceExprSafe expr ∧
+                compileExprCode? [] 0 expr = some code
+  | [], prelude, rest, _hSafe, hSplit, compiled, hMem => by
+      simp [splitPrelude] at hSplit
+      rcases hSplit with ⟨rfl, rfl⟩
+      simp at hMem
+  | stmt :: stmts, prelude, rest, hSafe, hSplit, query, hMem => by
+      unfold splitPrelude at hSplit
+      cases hPrelude : compilePreludeStmt? stmt with
+      | none =>
+          simp [hPrelude] at hSplit
+          rcases hSplit with ⟨rfl, rfl⟩
+          simp at hMem
+      | some compiled =>
+          cases hTail : splitPrelude stmts with
+          | mk tailPrelude tailRest =>
+              simp [hPrelude, hTail] at hSplit
+              rcases hSplit with ⟨rfl, rfl⟩
+              simp at hMem
+              rcases hMem with hHead | hTailMem
+              · cases hHead
+                cases stmt with
+                | expr expr =>
+                    simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                    rcases hSafe with ⟨hHeadSafe, _hTailSafe⟩
+                    rcases
+                      compilePreludeStmt?_expr_compileExprCode_nil_of_source_safe
+                        hHeadSafe hPrelude with
+                      ⟨code, hCompiled, hCode⟩
+                    exact ⟨expr, code, hCompiled, hHeadSafe, hCode⟩
+                | let_ name value =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | assign name value =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | block body =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | if_ cond body =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | switch scrutinee cases defaultBody =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | for_ init cond post body =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | brk =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | cont =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | leave =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | call targets functionName args =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | terminal kind =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | terminalArgs kind args =>
+                    simp [compilePreludeStmt?] at hPrelude
+              · have hTailSafe : AtomicStmtListSafe stmts := by
+                  cases stmt with
+                  | expr expr =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                      exact hSafe.2
+                  | let_ name value =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                      exact hSafe.2
+                  | assign name value =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                      exact hSafe.2
+                  | block body =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                  | if_ cond body =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                  | switch scrutinee cases defaultBody =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                  | for_ init cond post body =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                  | brk =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                  | cont =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                  | leave =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                  | call targets functionName args =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                  | terminal kind =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                  | terminalArgs kind args =>
+                      simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                exact
+                  splitPrelude_atomic_source_safe_compileExprCode_nil
+                    hTailSafe hTail query hTailMem
+
 theorem run_compileStmtList?_nil_block_frameStore_of_source_run_open_regular
     {ctx : CompileCtx} {returns : List Name}
     {compileState : CompileState} {plan : Plan}
