@@ -4898,6 +4898,73 @@ theorem compileExpressionsProgram?_nodup_passes
       hFinalFunctions, hFinalFunctionsNodup, hMain, hMainNodup,
       hExprProgram⟩
 
+theorem compilePreludeStmt?_code {stmt : Stmt}
+    {compiled : Expressions.Stmt}
+    (hCompile : compilePreludeStmt? stmt = some compiled) :
+    ∃ code, compiled = Expressions.Stmt.code code := by
+  cases stmt with
+  | expr expr =>
+      simp [compilePreludeStmt?] at hCompile
+      cases hCode : compileNoVarExprCode? expr with
+      | none =>
+          simp [hCode] at hCompile
+      | some code =>
+          simp [hCode] at hCompile
+          cases hCompile
+          exact ⟨code, rfl⟩
+  | let_ name value =>
+      simp [compilePreludeStmt?] at hCompile
+  | assign name value =>
+      simp [compilePreludeStmt?] at hCompile
+  | block body =>
+      simp [compilePreludeStmt?] at hCompile
+  | if_ cond body =>
+      simp [compilePreludeStmt?] at hCompile
+  | switch scrutinee cases defaultBody =>
+      simp [compilePreludeStmt?] at hCompile
+  | for_ init cond post body =>
+      simp [compilePreludeStmt?] at hCompile
+  | brk =>
+      simp [compilePreludeStmt?] at hCompile
+  | cont =>
+      simp [compilePreludeStmt?] at hCompile
+  | leave =>
+      simp [compilePreludeStmt?] at hCompile
+  | call targets functionName args =>
+      simp [compilePreludeStmt?] at hCompile
+  | terminal kind =>
+      simp [compilePreludeStmt?] at hCompile
+  | terminalArgs kind args =>
+      simp [compilePreludeStmt?] at hCompile
+
+theorem splitPrelude_code :
+    ∀ {stmts : List Stmt} {prelude : List Expressions.Stmt}
+      {rest : List Stmt},
+      splitPrelude stmts = (prelude, rest) →
+        ∀ compiled, compiled ∈ prelude →
+          ∃ code, compiled = Expressions.Stmt.code code
+  | [], prelude, rest, hSplit, compiled, hMem => by
+      simp [splitPrelude] at hSplit
+      rcases hSplit with ⟨rfl, rfl⟩
+      simp at hMem
+  | stmt :: stmts, prelude, rest, hSplit, query, hMem => by
+      unfold splitPrelude at hSplit
+      cases hPrelude : compilePreludeStmt? stmt with
+      | none =>
+          simp [hPrelude] at hSplit
+          rcases hSplit with ⟨rfl, rfl⟩
+          simp at hMem
+      | some compiled =>
+          cases hTail : splitPrelude stmts with
+          | mk tailPrelude tailRest =>
+              simp [hPrelude, hTail] at hSplit
+              rcases hSplit with ⟨rfl, rfl⟩
+              simp at hMem
+              rcases hMem with hHead | hTailMem
+              · cases hHead
+                exact compilePreludeStmt?_code hPrelude
+              · exact splitPrelude_code hTail query hTailMem
+
 theorem compilePreludeStmt?_noCallCreate {stmt : Stmt}
     {compiled : Expressions.Stmt}
     (hStmt : stmt.usesCallCreate = false)
