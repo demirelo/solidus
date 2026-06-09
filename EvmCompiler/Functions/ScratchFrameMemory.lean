@@ -1130,6 +1130,9 @@ def FrameStoreRel (env : SlotEnv) (store : Locals.Source.Store)
         store name = some value ∧
           (machine.mload (base + slotOffset slot)).1 = value
 
+def EnvNamesInScope (env : SlotEnv) (scope : List Name) : Prop :=
+  ∀ {name slot}, lookupSlot? name env = some slot → name ∈ scope
+
 theorem mload_generated_slot_machine_eq
     {machine : EvmYul.MachineState} {base : Word} {words slot : Nat}
     (hReady : ScratchRegionReady machine (range base words).base
@@ -1163,6 +1166,82 @@ theorem FrameStoreRel.empty
     FrameStoreRel [] store machine base := by
   intro name slot hLookup
   simp [lookupSlot?] at hLookup
+
+theorem EnvNamesInScope.empty {scope : List Name} :
+    EnvNamesInScope [] scope := by
+  intro name slot hLookup
+  simp [lookupSlot?] at hLookup
+
+theorem EnvNamesInScope.allocateName
+    {state : CompileState} {scope : List Name} {name : Name}
+    (hName : name ∈ scope)
+    (hNames : EnvNamesInScope state.env scope) :
+    EnvNamesInScope (allocateName name state).2.env scope := by
+  intro other slot hLookup
+  change lookupSlot? other ((name, state.nextSlot) :: state.env) = some slot
+    at hLookup
+  by_cases hEq : name = other
+  · simpa [hEq] using hName
+  · have hTail :
+        lookupSlot? other state.env = some slot := by
+      simpa [lookupSlot?, hEq] using hLookup
+    exact hNames hTail
+
+theorem EnvNamesInScope.of_compileBlockScoped
+    {ctx : CompileCtx} {returns : List Name} {state : CompileState}
+    {block : Block} {plan : Plan} {scope : List Name}
+    (hNames : EnvNamesInScope state.env scope)
+    (hCompile :
+      compileBlockScoped? ctx returns state block = some plan) :
+    EnvNamesInScope plan.state.env scope := by
+  unfold EvmCompiler.Functions.ScratchFrameSpill.compileBlockScoped?
+    at hCompile
+  cases hOpen :
+      EvmCompiler.Functions.ScratchFrameSpill.compileBlockOpen?
+        ctx returns state block with
+  | none =>
+      simp [hOpen] at hCompile
+  | some openPlan =>
+      simp [hOpen] at hCompile
+      cases hCompile
+      exact hNames
+
+theorem FrameStoreRel.restrictTo
+    {env : SlotEnv} {scope : List Name}
+    {store : Locals.Source.Store} {machine : EvmYul.MachineState}
+    {base : Word}
+    (hNames : EnvNamesInScope env scope)
+    (hRel : FrameStoreRel env store machine base) :
+    FrameStoreRel env (Locals.Source.Store.restrictTo scope store)
+      machine base := by
+  intro name slot hLookup
+  rcases hRel hLookup with ⟨value, hStore, hValue⟩
+  refine ⟨value, ?_, hValue⟩
+  rw [Locals.Source.Store.restrictTo_mem (hNames hLookup)]
+  exact hStore
+
+theorem FrameStoreRel.restrictTo_of_compileBlockScoped?
+    {ctx : CompileCtx} {returns : List Name} {state : CompileState}
+    {block : Block} {plan : Plan} {scope : List Name}
+    {store : Locals.Source.Store} {machine : EvmYul.MachineState}
+    {base : Word}
+    (hNames : EnvNamesInScope state.env scope)
+    (hRel : FrameStoreRel state.env store machine base)
+    (hCompile :
+      compileBlockScoped? ctx returns state block = some plan) :
+    FrameStoreRel plan.state.env
+      (Locals.Source.Store.restrictTo scope store) machine base := by
+  unfold EvmCompiler.Functions.ScratchFrameSpill.compileBlockScoped?
+    at hCompile
+  cases hOpen :
+      EvmCompiler.Functions.ScratchFrameSpill.compileBlockOpen?
+        ctx returns state block with
+  | none =>
+      simp [hOpen] at hCompile
+  | some openPlan =>
+      simp [hOpen] at hCompile
+      cases hCompile
+      exact FrameStoreRel.restrictTo hNames hRel
 
 theorem StateSlotsBounded.empty (nextSlot : Nat) :
     StateSlotsBounded
