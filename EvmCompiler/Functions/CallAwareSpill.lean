@@ -16896,6 +16896,48 @@ theorem compileCheckedPlannedPrealloc?_halt_preserves_initialState_emptyMemory_p
             Source.Outcome.halt, Locals.Source.Outcome.halt, hOpen]
             using hSourceRun.symm
 
+def SourceOutcomeRegularOrHalt (outcome : Source.Outcome) : Prop :=
+  (∃ sourceAfter, outcome = Source.Outcome.regular sourceAfter) ∨
+    (∃ kind sourceAfter, outcome = Source.Outcome.halt kind sourceAfter)
+
+theorem compileCheckedPlannedPrealloc?_regular_or_halt_preserves_initialState_emptyMemory_privateObservable_endPc
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {maxWords : Nat} {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState} {sourceOutcome : Source.Outcome}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm))
+    (hSupport : ProgramCallAwareSupported program)
+    (hInitialMemory : ScratchInitialMemoryEmpty initial.toMachineState)
+    (hInitialStack : initial.stack = [])
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hSourceRun :
+      Source.Program.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok sourceOutcome)
+    (hOutcome : SourceOutcomeRegularOrHalt sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.AdaptiveSpillPrivateObservableProgramOutcomeRel
+        range sourceOutcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases hOutcome with ⟨sourceAfter, hOutcomeEq⟩ |
+    ⟨kind, sourceAfter, hOutcomeEq⟩
+  · subst sourceOutcome
+    exact
+      compileCheckedPlannedPrealloc?_regular_preserves_initialState_emptyMemory_privateObservable_endPc
+        hSpec hWordBytes hCompile hSupport hInitialMemory hInitialPc
+        hSourceRun
+  · subst sourceOutcome
+    exact
+      compileCheckedPlannedPrealloc?_halt_preserves_initialState_emptyMemory_privateObservable_endPc
+        hSpec hWordBytes hCompile hSupport hInitialMemory hInitialStack
+        hInitialPc hSourceRun
+
 theorem compileCheckedPlannedPrealloc?_lookup_of_find?
     {maxWords : Nat} {program : Program}
     {range : ScratchRange} {plan : Plan}
