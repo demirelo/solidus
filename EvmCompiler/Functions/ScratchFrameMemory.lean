@@ -662,6 +662,34 @@ theorem mload_mstore_generated_slot_value
       hSpec hWordBytes hReady
         (by simpa [range] using hSlot)
 
+theorem mload_mstore_generated_slot_other_value
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {machine : EvmYul.MachineState} {base : Word}
+    {words writeSlot readSlot : Nat} {value : Word}
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (hWriteSlot : writeSlot < words)
+    (hReadSlot : readSlot < words)
+    (hNe : readSlot ≠ writeSlot) :
+    ((machine.mstore (base + slotOffset writeSlot) value).mload
+        (base + slotOffset readSlot)).1 =
+      (machine.mload (base + slotOffset readSlot)).1 := by
+  rw [generatedAddress_eq_range_word base words writeSlot]
+  rw [generatedAddress_eq_range_word base words readSlot]
+  exact
+    Locals.SourceLowering.StateRel.SpillScratch.ScratchRegionReady.mload_mstore_range_other_slot_value
+      hSpec hWordBytes hReady
+      (by simpa [range] using hWriteSlot)
+      (by simpa [range] using hReadSlot)
+      (by
+        intro hEq
+        exact hNe (by
+          simpa [range,
+            Locals.SourceLowering.StateRel.SpillScratch.ScratchRange.word,
+            Locals.SourceLowering.StateRel.SpillScratch.ScratchRange.slot]
+            using hEq))
+
 def FrameStoreRel (env : SlotEnv) (store : Locals.Source.Store)
     (machine : EvmYul.MachineState) (base : Word) : Prop :=
   ∀ {name slot},
@@ -815,6 +843,59 @@ theorem FrameStoreRel.mstore_insert
                 Locals.SourceLowering.StateRel.SpillScratch.ScratchRange.slot]
                 using hEq))]
       simpa [generatedAddress_eq_range_word base words readSlot] using hLoad
+
+theorem FrameStoreRel.mstore_allocateName_insert
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {compileState stateAfter : CompileState}
+    {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {name : Name} {slot : Nat} {value : Word}
+    (hAlloc : allocateName name compileState = (slot, stateAfter))
+    (hBound : StateSlotsBounded compileState)
+    (hFrameWords : stateAfter.nextSlot ≤ words)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (hRel : FrameStoreRel compileState.env store machine base) :
+    FrameStoreRel stateAfter.env
+      (Locals.Source.Store.insert store name value)
+      (machine.mstore (base + slotOffset slot) value) base := by
+  cases compileState with
+  | mk env nextSlot =>
+      change
+        (nextSlot,
+          { env := (name, nextSlot) :: env
+            nextSlot := nextSlot + 1 }) = (slot, stateAfter) at hAlloc
+      cases hAlloc
+      intro other readSlot hLookup
+      have hFrameWords' : slot + 1 ≤ words := by
+        simpa using hFrameWords
+      have hWriteSlot : slot < words := by
+        omega
+      by_cases hOther : other = name
+      · subst other
+        simp [lookupSlot?] at hLookup
+        cases hLookup
+        refine ⟨value, ?_, ?_⟩
+        · exact Locals.Source.Store.insert_self store name value
+        · exact
+            mload_mstore_generated_slot_value hSpec hWordBytes hReady
+              hWriteSlot
+      · have hNameNe : name ≠ other := by
+          intro hEq
+          exact hOther hEq.symm
+        simp [lookupSlot?, hNameNe] at hLookup
+        rcases hRel hLookup with ⟨storedValue, hStore, hLoad⟩
+        have hReadSlotLtNext : readSlot < slot :=
+          hBound (other, readSlot) (lookupSlot?_some_mem hLookup)
+        have hReadSlot : readSlot < words := by omega
+        have hSlotNe : readSlot ≠ slot := by omega
+        refine ⟨storedValue, ?_, ?_⟩
+        · simpa [Locals.Source.Store.insert_of_ne hOther] using hStore
+        · rw [
+            mload_mstore_generated_slot_other_value hSpec hWordBytes
+              hReady hWriteSlot hReadSlot hSlotNe]
+          exact hLoad
 
 theorem run_loadSlotCode?_frameStore_lookup
     {env : SlotEnv} {store : Locals.Source.Store}
@@ -1875,6 +1956,92 @@ theorem run_storeTopSlotCode?_frameStore_assign_shared_of_stateSlots
   · rw [hFinalMachine, hMachine]
     exact hRelStored
 
+theorem run_storeTopSlotCode?_frameStore_let_shared_of_allocateName
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {compileState stateAfter : CompileState}
+    {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {sourceShared : EvmYul.SharedState .EVM}
+    {name : Name} {slot valuesAboveBase : Nat}
+    {code : Structured.Code} {value : Word}
+    (hCode : storeTopSlotCode? valuesAboveBase slot = some code)
+    (hAlloc : allocateName name compileState = (slot, stateAfter))
+    (hStateBound : StateSlotsBounded compileState)
+    (hFrameWords : stateAfter.nextSlot ≤ words)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (state : EVMState)
+    (hShared : SharedStateEqOutsideScratch (range base words) sourceShared
+      state.toSharedState)
+    (hRel : FrameStoreRel compileState.env store machine base)
+    (tail rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (hValues : (value :: tail).length = valuesAboveBase) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := (value :: tail) ++ base :: rest } =
+        .ok final ∧
+      final.stack = tail ++ base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) sourceShared
+        final.toSharedState ∧
+      FrameStoreRel stateAfter.env
+        (Locals.Source.Store.insert store name value)
+        final.toMachineState base := by
+  rcases run_storeTopSlotCode? hCode state value tail rest base hValues with
+    ⟨final, hRun, hStack, hFinalMachine, hFinalSharedRaw⟩
+  have hSlot : slot < words := by
+    cases compileState with
+    | mk env nextSlot =>
+        change
+          (nextSlot,
+            { env := (name, nextSlot) :: env
+              nextSlot := nextSlot + 1 }) = (slot, stateAfter) at hAlloc
+        cases hAlloc
+        have hFrameWords' : slot + 1 ≤ words := by
+          simpa using hFrameWords
+        omega
+  have hReadyStored :
+      ScratchRegionReady
+        (machine.mstore (base + slotOffset slot) value)
+        (range base words).base (range base words).words :=
+    mstore_generated_slot_ready hSpec hWordBytes hReady hSlot
+  have hRelStored :
+      FrameStoreRel stateAfter.env
+        (Locals.Source.Store.insert store name value)
+        (machine.mstore (base + slotOffset slot) value) base :=
+    FrameStoreRel.mstore_allocateName_insert hSpec hWordBytes hAlloc
+      hStateBound hFrameWords hReady hRel
+  have hSharedStored :
+      SharedStateEqOutsideScratch (range base words) sourceShared
+        ({ state with
+          toMachineState :=
+            state.toMachineState.mstore (base + slotOffset slot) value } :
+          EVMState).toSharedState := by
+    have hSlotRange : slot < (range base words).words := by
+      simpa [range] using hSlot
+    have hTargetStore :
+        SharedStateEqOutsideScratch (range base words) sourceShared
+          ({ state.toSharedState with
+            toMachineState :=
+              state.toSharedState.toMachineState.mstore
+                ((range base words).word slot) value } :
+            EvmYul.SharedState .EVM) :=
+      Locals.SourceLowering.StateRel.SpillScratch.SharedStateEqOutsideScratch.mstore_target_scratch_slot
+        hSpec hWordBytes hShared
+        (by simpa [hMachine] using hReady) hSlotRange
+    cases state
+    simpa [generatedAddress_eq_range_word base words slot] using hTargetStore
+  refine ⟨final, hRun, hStack, ?_, ?_, ?_⟩
+  · rw [hFinalMachine, hMachine]
+    exact hReadyStored
+  · rw [hFinalSharedRaw]
+    exact hSharedStored
+  · rw [hFinalMachine, hMachine]
+    exact hRelStored
+
 theorem source_evalOne_eq_eval_singleton
     {source source' : Locals.Source.State} {value : Word}
     {expr : Expr 1}
@@ -2048,6 +2215,116 @@ theorem run_compileStmt?_assign_frameStore_of_source_evalOne
     rw [Structured.Preservation.Code.run_append, hRunValueStart]
     simpa [hMidStart] using hRunStore
   · simpa using hFinalStack
+
+theorem run_compileStmt?_let_frameStore_of_source_evalOne
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {name : Name} {valueExpr : Expr 1}
+    {plan : Plan}
+    {source sourceAfterValue : Locals.Source.State} {value : Word}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmt? ctx returns compileState (.let_ name valueExpr) =
+        some plan)
+    (hSafe : SourceExprSafe valueExpr)
+    (hEvalOne :
+      Locals.Source.Expr.evalOne
+          Locals.Source.PrimitiveSemantics.structured valueExpr source =
+        .ok (sourceAfterValue, value))
+    (hStateBound : StateSlotsBounded compileState)
+    (hFrameWords : plan.state.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (rest : EvmYul.Stack Word) :
+    ∃ final code,
+      plan.block = Block.ofCode code ∧
+      Structured.Code.run code { evmState with stack := base :: rest } =
+        .ok final ∧
+      final.stack = base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) sourceAfterValue.shared
+        final.toSharedState ∧
+      FrameStoreRel plan.state.env
+        (Locals.Source.Store.insert sourceAfterValue.vars name value)
+        final.toMachineState base := by
+  simp [compileStmt?] at hCompile
+  cases hValueCode : compileExprCode? compileState.env 0 valueExpr with
+  | none =>
+      simp [hValueCode] at hCompile
+  | some valueCode =>
+      cases hAlloc : allocateName name compileState with
+      | mk slot stateAfter =>
+          cases hStoreCode : storeTopSlotCode? 1 slot with
+          | none =>
+              simp [hValueCode, hAlloc, hStoreCode] at hCompile
+          | some storeCode =>
+              simp [hValueCode, hAlloc, hStoreCode] at hCompile
+              cases hCompile
+              have hOldFrameWords : compileState.nextSlot ≤ words := by
+                have hMono :
+                    compileState.nextSlot ≤ stateAfter.nextSlot := by
+                  simpa [hAlloc] using
+                    compileStmt?_nextSlot_mono
+                      (ctx := ctx) (returns := returns)
+                      (state := compileState)
+                      (stmt := .let_ name valueExpr)
+                      (plan :=
+                        { state := stateAfter
+                          block := Block.ofCode (valueCode ++ storeCode) })
+                      (by
+                        simp [compileStmt?, hValueCode, hAlloc,
+                          hStoreCode])
+                exact Nat.le_trans hMono hFrameWords
+              have hExprEval :
+                  Locals.Source.Expr.eval
+                      Locals.Source.PrimitiveSemantics.structured
+                      valueExpr source = .ok (sourceAfterValue, [value]) :=
+                source_evalOne_eq_eval_singleton hEvalOne
+              rcases
+                  run_compileExprCode?_frameStore_of_source_eval
+                    (source := source)
+                    (source' := sourceAfterValue)
+                    (state := evmState)
+                    (base := base)
+                    (words := words)
+                    (valuesAboveBase := 0)
+                    (front := [])
+                    (rest := rest)
+                    (resultValues := [value])
+                    (code := valueCode)
+                    hSafe hExprEval hValueCode hStateBound hOldFrameWords
+                    hReady hShared hRel (by simp) with
+                ⟨mid, _hValueLen, hRunValue, hMidStack, hReadyMid,
+                  hSharedMid, hRelMid⟩
+              rcases
+                  run_storeTopSlotCode?_frameStore_let_shared_of_allocateName
+                    hSpec hWordBytes hStoreCode hAlloc hStateBound
+                    hFrameWords hReadyMid mid hSharedMid hRelMid
+                    [] rest rfl (by simp) (value := value) with
+                ⟨final, hRunStore, hFinalStack, hReadyFinal,
+                  hSharedFinal, hRelFinal⟩
+              have hMidStart :
+                  ({ mid with stack := value :: base :: rest } : EVMState) =
+                    mid := by
+                cases mid
+                simp at hMidStack ⊢
+                exact hMidStack.symm
+              refine
+                ⟨final, valueCode ++ storeCode, rfl, ?_, ?_,
+                  hReadyFinal, hSharedFinal, hRelFinal⟩
+              · have hRunValueStart :
+                    Structured.Code.run valueCode
+                        { evmState with stack := base :: rest } = .ok mid := by
+                  simpa using hRunValue
+                rw [Structured.Preservation.Code.run_append, hRunValueStart]
+                simpa [hMidStart] using hRunStore
+              · simpa using hFinalStack
 
 end FrameMemory
 
