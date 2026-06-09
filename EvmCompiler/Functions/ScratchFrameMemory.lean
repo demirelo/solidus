@@ -60,6 +60,72 @@ def AtomicStmtListSafe : List Stmt → Prop
   | [] => True
   | stmt :: rest => AtomicStmtSafe stmt ∧ AtomicStmtListSafe rest
 
+def AtomicOrBlockStmtSafe : Stmt → Prop
+  | .expr expr => SourceExprSafe expr
+  | .let_ _name value => SourceExprSafe value
+  | .assign _name value => SourceExprSafe value
+  | .block body => AtomicStmtListSafe body.stmts
+  | _ => False
+
+def AtomicOrBlockStmtListSafe : List Stmt → Prop
+  | [] => True
+  | stmt :: rest =>
+      AtomicOrBlockStmtSafe stmt ∧ AtomicOrBlockStmtListSafe rest
+
+mutual
+  def atomicOrBlockStmtFuel : Stmt → Nat
+    | .expr _expr => 2
+    | .let_ _name _value => 2
+    | .assign _name _value => 2
+    | .block body => 2 * body.stmts.length + 1
+    | _ => 0
+
+  def atomicOrBlockStmtListFuel : List Stmt → Nat
+    | [] => 0
+    | stmt :: rest =>
+        atomicOrBlockStmtFuel stmt + atomicOrBlockStmtListFuel rest
+end
+
+theorem atomicOrBlockStmtListFuel_of_atomic :
+    ∀ {stmts : List Stmt},
+      AtomicStmtListSafe stmts →
+        atomicOrBlockStmtListFuel stmts = 2 * stmts.length
+  | [], _hSafe => by
+      rfl
+  | stmt :: rest, hSafe => by
+      rcases hSafe with ⟨hHeadSafe, hTailSafe⟩
+      have hTail := atomicOrBlockStmtListFuel_of_atomic hTailSafe
+      cases stmt with
+      | expr expr =>
+          simp [atomicOrBlockStmtListFuel, atomicOrBlockStmtFuel, hTail]
+          omega
+      | let_ name value =>
+          simp [atomicOrBlockStmtListFuel, atomicOrBlockStmtFuel, hTail]
+          omega
+      | assign name value =>
+          simp [atomicOrBlockStmtListFuel, atomicOrBlockStmtFuel, hTail]
+          omega
+      | block body =>
+          simp [AtomicStmtSafe] at hHeadSafe
+      | if_ cond body =>
+          simp [AtomicStmtSafe] at hHeadSafe
+      | switch scrutinee cases defaultBody =>
+          simp [AtomicStmtSafe] at hHeadSafe
+      | for_ init cond post body =>
+          simp [AtomicStmtSafe] at hHeadSafe
+      | brk =>
+          simp [AtomicStmtSafe] at hHeadSafe
+      | cont =>
+          simp [AtomicStmtSafe] at hHeadSafe
+      | leave =>
+          simp [AtomicStmtSafe] at hHeadSafe
+      | call targets functionName args =>
+          simp [AtomicStmtSafe] at hHeadSafe
+      | terminal kind =>
+          simp [AtomicStmtSafe] at hHeadSafe
+      | terminalArgs kind args =>
+          simp [AtomicStmtSafe] at hHeadSafe
+
 def sourceExprSafe? {results : Nat} (expr : Expr results) : Bool :=
   Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.expr? expr
 
@@ -3743,6 +3809,30 @@ theorem run_block_append_regular_of_prefix_run
                   simp [hStmt, Expressions.Outcome.regular] at hPrefix
                   cases hPrefix
 
+theorem run_block_append_regular_of_block_prefix_run
+    {program : Expressions.Program} {fuel : Nat}
+    {pref suffix : Expressions.Block}
+    {state mid : Expressions.RunState}
+    (hPrefix :
+      Expressions.Block.run program (fuel + pref.stmts.length) pref state =
+        .ok (Expressions.Outcome.regular mid)) :
+    Expressions.Block.run program (fuel + pref.stmts.length)
+        (Block.append pref suffix) state =
+      Expressions.Block.run program fuel suffix mid := by
+  cases pref with
+  | mk prefStmts =>
+      cases suffix with
+      | mk suffixStmts =>
+          simpa [Block.append] using
+            run_block_append_regular_of_prefix_run
+              (program := program)
+              (fuel := fuel)
+              (pref := prefStmts)
+              (suffix := suffixStmts)
+              (state := state)
+              (mid := mid)
+              hPrefix
+
 mutual
   theorem compileNoVarExprCode?_eq_compileExprCode?_nil_of_source_safe :
       ∀ {results : Nat} (expr : Expr results) (valuesAboveBase : Nat),
@@ -4398,6 +4488,131 @@ theorem run_compileStmtList?_nil_block_frameStore_of_source_run_open_regular
       cases hOutcome
       exact ⟨rfl, by simp [Expressions.Block.run,
         Expressions.Outcome.regular], hReady, hShared, hRel⟩
+
+theorem compileStmt?_atomic_block_stmts_length
+    {ctx : CompileCtx} {returns : List Name}
+    {state : CompileState} {stmt : Stmt} {plan : Plan}
+    (hSafe : AtomicStmtSafe stmt)
+    (hCompile : compileStmt? ctx returns state stmt = some plan) :
+    plan.block.stmts.length = 1 := by
+  cases stmt with
+  | expr expr =>
+      unfold compileStmt? at hCompile
+      cases hCode : compileExprCode? state.env 0 expr with
+      | none =>
+          simp [hCode] at hCompile
+      | some code =>
+          simp [hCode, Block.ofCode] at hCompile
+          cases hCompile
+          rfl
+  | let_ name value =>
+      unfold compileStmt? at hCompile
+      cases hCode : compileExprCode? state.env 0 value with
+      | none =>
+          simp [hCode] at hCompile
+      | some code =>
+          cases hStore :
+              storeTopSlotCode? 1 (allocateName name state).1 with
+          | none =>
+              simp [hCode, hStore] at hCompile
+          | some store =>
+              simp [hCode, hStore, Block.ofCode] at hCompile
+              cases hCompile
+              rfl
+  | assign name value =>
+      unfold compileStmt? at hCompile
+      cases hSlot : lookupSlot? name state.env with
+      | none =>
+          simp [hSlot] at hCompile
+      | some slot =>
+          cases hCode : compileExprCode? state.env 0 value with
+          | none =>
+              simp [hSlot, hCode] at hCompile
+          | some code =>
+              cases hStore : storeTopSlotCode? 1 slot with
+              | none =>
+                  simp [hSlot, hCode, hStore] at hCompile
+              | some store =>
+                  simp [hSlot, hCode, hStore, Block.ofCode] at hCompile
+                  cases hCompile
+                  rfl
+  | block body =>
+      simp [AtomicStmtSafe] at hSafe
+  | if_ cond body =>
+      simp [AtomicStmtSafe] at hSafe
+  | switch scrutinee cases defaultBody =>
+      simp [AtomicStmtSafe] at hSafe
+  | for_ init cond post body =>
+      simp [AtomicStmtSafe] at hSafe
+  | brk =>
+      simp [AtomicStmtSafe] at hSafe
+  | cont =>
+      simp [AtomicStmtSafe] at hSafe
+  | leave =>
+      simp [AtomicStmtSafe] at hSafe
+  | call targets functionName args =>
+      simp [AtomicStmtSafe] at hSafe
+  | terminal kind =>
+      simp [AtomicStmtSafe] at hSafe
+  | terminalArgs kind args =>
+      simp [AtomicStmtSafe] at hSafe
+
+theorem compileStmtList?_atomic_block_stmts_length :
+    ∀ {ctx : CompileCtx} {returns : List Name}
+      {state : CompileState} {stmts : List Stmt} {plan : Plan},
+      AtomicStmtListSafe stmts →
+      compileStmtList? ctx returns state stmts = some plan →
+        plan.block.stmts.length = stmts.length
+  | ctx, returns, state, [], plan, _hSafe, hCompile => by
+      simp [compileStmtList?] at hCompile
+      cases hCompile
+      rfl
+  | ctx, returns, state, stmt :: rest, plan, hSafe, hCompile => by
+      unfold compileStmtList? at hCompile
+      cases hHead : compileStmt? ctx returns state stmt with
+      | none =>
+          simp [hHead] at hCompile
+      | some head =>
+          cases hTail :
+              compileStmtList? ctx returns head.state rest with
+          | none =>
+              simp [hHead, hTail] at hCompile
+          | some tailPlan =>
+              simp [hHead, hTail] at hCompile
+              cases hCompile
+              rcases hSafe with ⟨hHeadSafe, hTailSafe⟩
+              have hHeadLen :
+                  head.block.stmts.length = 1 :=
+                compileStmt?_atomic_block_stmts_length hHeadSafe hHead
+              have hTailLen :
+                  tailPlan.block.stmts.length = rest.length :=
+                compileStmtList?_atomic_block_stmts_length hTailSafe hTail
+              simp [Block.append, hHeadLen, hTailLen]
+              omega
+
+theorem compileStmt?_block_atomic_block_stmts_length
+    {ctx : CompileCtx} {returns : List Name}
+    {state : CompileState} {body : Block} {plan : Plan}
+    (hSafe : AtomicStmtListSafe body.stmts)
+    (hCompile : compileStmt? ctx returns state (.block body) = some plan) :
+    plan.block.stmts.length = body.stmts.length := by
+  unfold compileStmt? at hCompile
+  unfold compileBlockScoped? at hCompile
+  cases hOpen : compileBlockOpen? ctx returns state body with
+  | none =>
+      simp [hOpen] at hCompile
+  | some openPlan =>
+      simp [hOpen] at hCompile
+      cases hCompile
+      have hOpenStmtList :
+          compileStmtList? ctx returns state body.stmts = some openPlan := by
+        cases body
+        simpa [compileBlockOpen?] using hOpen
+      have hOpenLen :
+          openPlan.block.stmts.length = body.stmts.length :=
+        compileStmtList?_atomic_block_stmts_length
+          (plan := openPlan) hSafe hOpenStmtList
+      simpa using hOpenLen
 
 set_option maxHeartbeats 1200000 in
 theorem run_compileStmtList?_atomic_block_frameStore_of_source_run_open_regular
@@ -5068,6 +5283,305 @@ theorem run_compileStmt?_block_frameStore_of_source_run_regular_scoped
           (plan := openPlan)
           hScoped hSafe hNames EnvLookupPreserved.refl hOpen)
       hFrameWords hReady hShared hRel restStack
+
+set_option maxHeartbeats 1200000 in
+theorem run_compileStmtList?_cons_block_atomic_tail_frameStore_of_source_run_open_regular
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {body : Block} {tail : List Stmt}
+    {plan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source source' : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel blockFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmtList? ctx returns compileState (.block body :: tail) =
+        some plan)
+    (hBodySafe : AtomicStmtListSafe body.stmts)
+    (hBodyScoped :
+      EvmCompiler.Functions.Scope.Block.Scoped sourceCtx.scope body)
+    (hTailSafe : AtomicStmtListSafe tail)
+    (hRun :
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtx sourceFuel
+          { stmts := .block body :: tail } source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx'))
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hNames : EnvNamesInScope compileState.env sourceCtx.scope)
+    (hFrameWords : plan.state.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (restStack : EvmYul.Stack Word) :
+    ∃ final,
+      Expressions.Block.run compiledProgram
+          (blockFuel + atomicOrBlockStmtFuel (.block body) +
+            atomicOrBlockStmtListFuel tail + 1) plan.block
+          { runState with evm := { evmState with stack := base :: restStack } } =
+        .ok (Expressions.Outcome.regular ({ runState with evm := final })) ∧
+      final.stack = base :: restStack ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) source'.shared
+        final.toSharedState ∧
+      FrameStoreRel plan.state.env source'.vars final.toMachineState base := by
+  unfold compileStmtList? at hCompile
+  cases hHead : compileStmt? ctx returns compileState (.block body) with
+  | none =>
+      simp [hHead] at hCompile
+  | some head =>
+      cases hTail :
+          compileStmtList? ctx returns head.state tail with
+      | none =>
+          simp [hHead, hTail] at hCompile
+      | some tailPlan =>
+          simp [hHead, hTail] at hCompile
+          cases hCompile
+          have hHeadBound : StateSlotsBounded head.state :=
+            compileStmt?_stateSlotsBounded
+              (plan := head) hStateBound hHead
+          have hHeadNodup : StateSlotsNodup head.state :=
+            compileStmt?_stateSlotsNodup
+              (plan := head) hStateBound hStateNodup hHead
+          have hTailMono :
+              head.state.nextSlot ≤ tailPlan.state.nextSlot :=
+            compileStmtList?_nextSlot_mono
+              (stmts := tail) (plan := tailPlan) hTail
+          have hHeadFrameWords : head.state.nextSlot ≤ words :=
+            Nat.le_trans hTailMono hFrameWords
+          have hTailFuel :
+              atomicOrBlockStmtListFuel tail = 2 * tail.length :=
+            atomicOrBlockStmtListFuel_of_atomic hTailSafe
+          have hHeadLen :
+              head.block.stmts.length = body.stmts.length :=
+            compileStmt?_block_atomic_block_stmts_length hBodySafe hHead
+          cases sourceFuel with
+          | zero =>
+              simp [EvmCompiler.Functions.Source.Block.runOpen,
+                EvmCompiler.Functions.Source.invalid, Structured.invalid]
+                at hRun
+          | succ sourceFuel' =>
+              cases hStmtRun :
+                  EvmCompiler.Functions.Source.Stmt.run
+                      Locals.Source.PrimitiveSemantics.structured
+                      sourceProgram sourceCtx sourceFuel' (.block body)
+                      source with
+              | error err =>
+                  simp [EvmCompiler.Functions.Source.Block.runOpen,
+                    hStmtRun] at hRun
+              | ok stmtResult =>
+                  rcases stmtResult with ⟨stmtOutcome, headCtx⟩
+                  cases stmtOutcome with
+                  | mk sourceAfterHead mode =>
+                      cases mode with
+                      | regular =>
+                          have hStmtRunRegular :
+                              EvmCompiler.Functions.Source.Stmt.run
+                                  Locals.Source.PrimitiveSemantics.structured
+                                  sourceProgram sourceCtx sourceFuel'
+                                  (.block body) source =
+                                .ok
+                                  (EvmCompiler.Functions.Source.Outcome.regular
+                                    sourceAfterHead, headCtx) := by
+                            simpa [EvmCompiler.Functions.Source.Outcome.regular]
+                              using hStmtRun
+                          have hHeadCtx : headCtx = sourceCtx := by
+                            unfold EvmCompiler.Functions.Source.Stmt.run
+                              at hStmtRunRegular
+                            cases hScoped :
+                                EvmCompiler.Functions.Source.Block.runScoped
+                                  Locals.Source.PrimitiveSemantics.structured
+                                  sourceProgram sourceCtx body sourceFuel'
+                                  source with
+                            | error err =>
+                                simp [hScoped] at hStmtRunRegular
+                            | ok outcome =>
+                                have hPair :
+                                    (outcome, sourceCtx) =
+                                      (EvmCompiler.Functions.Source.Outcome.regular
+                                        sourceAfterHead, headCtx) := by
+                                  simpa [hScoped] using hStmtRunRegular
+                                exact (congrArg Prod.snd hPair).symm
+                          subst headCtx
+                          have hTailRun :
+                              EvmCompiler.Functions.Source.Block.runOpen
+                                  Locals.Source.PrimitiveSemantics.structured
+                                  sourceProgram sourceCtx sourceFuel'
+                                  { stmts := tail } sourceAfterHead =
+                                .ok
+                                  (EvmCompiler.Functions.Source.Outcome.regular
+                                    source', sourceCtx') := by
+                              simpa [EvmCompiler.Functions.Source.Block.runOpen,
+                                hStmtRun,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                using hRun
+                          rcases
+                            run_compileStmt?_block_frameStore_of_source_run_regular_scoped
+                              hSpec hWordBytes
+                              (ctx := ctx)
+                              (returns := returns)
+                              (compileState := compileState)
+                              (body := body)
+                              (plan := head)
+                              (sourceProgram := sourceProgram)
+                              (compiledProgram := compiledProgram)
+                              (source := source)
+                              (source' := sourceAfterHead)
+                              (sourceCtx := sourceCtx)
+                              (sourceFuel := sourceFuel')
+                              (blockFuel :=
+                                blockFuel + atomicOrBlockStmtListFuel tail + 1)
+                              (runState := runState)
+                              (evmState := evmState)
+                              (base := base)
+                              (words := words)
+                              hHead hBodySafe hBodyScoped hStmtRunRegular
+                              hStateBound hStateNodup hNames hHeadFrameWords
+                              hReady hShared hRel restStack with
+                          ⟨headFinal, hHeadRun, hHeadStack, hHeadReady,
+                            hHeadShared, hHeadRel⟩
+                          rcases
+                            run_compileStmtList?_atomic_block_frameStore_of_source_run_open_regular
+                              hSpec hWordBytes
+                              (ctx := ctx)
+                              (returns := returns)
+                              (compileState := head.state)
+                              (stmts := tail)
+                              (plan := tailPlan)
+                              (sourceProgram := sourceProgram)
+                              (compiledProgram := compiledProgram)
+                              (source := sourceAfterHead)
+                              (source' := source')
+                              (sourceCtx := sourceCtx)
+                              (sourceCtx' := sourceCtx')
+                              (sourceFuel := sourceFuel')
+                              (blockFuel := blockFuel + body.stmts.length + 1)
+                              (runState := runState)
+                              (evmState := headFinal)
+                              (base := base)
+                              (words := words)
+                              hTail hTailSafe hTailRun hHeadBound hHeadNodup
+                              hFrameWords hHeadReady hHeadShared hHeadRel
+                              restStack with
+                          ⟨final, hTailBlockRun, hFinalStack, hReadyFinal,
+                            hSharedFinal, hRelFinal⟩
+                          refine
+                            ⟨final, ?_, hFinalStack, hReadyFinal,
+                              hSharedFinal, hRelFinal⟩
+                          have hTotal :
+                              blockFuel + atomicOrBlockStmtFuel (.block body) +
+                                  atomicOrBlockStmtListFuel tail + 1 =
+                                (blockFuel + body.stmts.length + 1 +
+                                    atomicOrBlockStmtListFuel tail + 1) +
+                                  head.block.stmts.length := by
+                            simp [atomicOrBlockStmtFuel, hHeadLen]
+                            omega
+                          have hPrefixBlock :
+                              Expressions.Block.run compiledProgram
+                                  ((blockFuel + body.stmts.length + 1 +
+                                        atomicOrBlockStmtListFuel tail + 1) +
+                                    head.block.stmts.length)
+                                  head.block
+                                  { runState with
+                                    evm :=
+                                      { evmState with
+                                        stack := base :: restStack } } =
+                                .ok
+                                  (Expressions.Outcome.regular
+                                    ({ runState with evm := headFinal })) := by
+                              rw [← hTotal]
+                              simpa [atomicOrBlockStmtFuel, Nat.add_assoc,
+                                Nat.add_comm, Nat.add_left_comm] using hHeadRun
+                          have hStartTail :
+                              ({ runState with evm := headFinal } :
+                                Expressions.RunState) =
+                            ({ runState with
+                              evm :=
+                                { headFinal with
+                                  stack := base :: restStack } } :
+                              Expressions.RunState) := by
+                            cases headFinal
+                            simp at hHeadStack ⊢
+                            exact hHeadStack
+                          have hTailRun' :
+                              Expressions.Block.run compiledProgram
+                                  (blockFuel + body.stmts.length + 1 +
+                                    atomicOrBlockStmtListFuel tail + 1)
+                                  tailPlan.block
+                                  ({ runState with evm := headFinal } :
+                                    Expressions.RunState) =
+                                .ok
+                                  (Expressions.Outcome.regular
+                                    ({ runState with evm := final })) := by
+                            rw [hTailFuel]
+                            simpa [hStartTail, Nat.add_assoc, Nat.add_comm,
+                              Nat.add_left_comm] using hTailBlockRun
+                          rw [hTotal]
+                          change
+                            Expressions.Block.run compiledProgram
+                                ((blockFuel + body.stmts.length + 1 +
+                                    atomicOrBlockStmtListFuel tail + 1) +
+                                  head.block.stmts.length)
+                                (Block.append head.block tailPlan.block)
+                                { runState with
+                                  evm :=
+                                    { evmState with
+                                      stack := base :: restStack } } =
+                              .ok
+                                (Expressions.Outcome.regular
+                                  ({ runState with evm := final }))
+                          rw [
+                              run_block_append_regular_of_block_prefix_run
+                                (program := compiledProgram)
+                                (fuel :=
+                                  blockFuel + body.stmts.length + 1 +
+                                    atomicOrBlockStmtListFuel tail + 1)
+                                (pref := head.block)
+                                (suffix := tailPlan.block)
+                                (state :=
+                                  { runState with
+                                    evm :=
+                                      { evmState with
+                                        stack := base :: restStack } })
+                                hPrefixBlock]
+                          exact hTailRun'
+                      | brk =>
+                          simp [EvmCompiler.Functions.Source.Block.runOpen,
+                            hStmtRun,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
+                      | cont =>
+                          simp [EvmCompiler.Functions.Source.Block.runOpen,
+                            hStmtRun,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
+                      | leave =>
+                          simp [EvmCompiler.Functions.Source.Block.runOpen,
+                            hStmtRun,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
+                      | halt kind =>
+                          simp [EvmCompiler.Functions.Source.Block.runOpen,
+                            hStmtRun,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
 
 theorem run_frameInitCode_append_compileStmtList?_atomic_block_frameStore_of_source_run_open_regular
     (hSpec : ZeroPaddingSpec)
