@@ -1792,6 +1792,118 @@ theorem run_storeTopSlotCode?_frameStore_assign_of_stateSlots
       (slotList_nodup_of_stateSlotsNodup hStateNodup)
       hReady hRel hLookup state tail rest hMachine hValues
 
+theorem run_storeTopSlotCode?_frameStore_assign_shared_of_stateSlots
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {compileState : CompileState} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {sourceShared : EvmYul.SharedState .EVM}
+    {name : Name} {slot valuesAboveBase : Nat}
+    {code : Structured.Code} {value : Word}
+    (hCode : storeTopSlotCode? valuesAboveBase slot = some code)
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hFrameWords : compileState.nextSlot ≤ words)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (state : EVMState)
+    (hShared : SharedStateEqOutsideScratch (range base words) sourceShared
+      state.toSharedState)
+    (hRel : FrameStoreRel compileState.env store machine base)
+    (hLookup : lookupSlot? name compileState.env = some slot)
+    (tail rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (hValues : (value :: tail).length = valuesAboveBase) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := (value :: tail) ++ base :: rest } =
+        .ok final ∧
+      final.stack = tail ++ base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) sourceShared
+        final.toSharedState ∧
+      FrameStoreRel compileState.env
+        (Locals.Source.Store.insert store name value)
+        final.toMachineState base := by
+  have hBound : EnvSlotsBounded compileState.env words :=
+    envSlotsBounded_of_stateSlotsBounded_le hStateBound hFrameWords
+  have hNoDup : (slotList compileState.env).Nodup :=
+    slotList_nodup_of_stateSlotsNodup hStateNodup
+  rcases run_storeTopSlotCode? hCode state value tail rest base hValues with
+    ⟨final, hRun, hStack, hFinalMachine, hFinalSharedRaw⟩
+  have hSlot : slot < words :=
+    lookupSlot?_lt_of_bounded hBound hLookup
+  have hReadyStored :
+      ScratchRegionReady
+        (machine.mstore (base + slotOffset slot) value)
+        (range base words).base (range base words).words :=
+    mstore_generated_slot_ready hSpec hWordBytes hReady hSlot
+  have hRelStored :
+      FrameStoreRel compileState.env
+        (Locals.Source.Store.insert store name value)
+        (machine.mstore (base + slotOffset slot) value) base :=
+    FrameStoreRel.mstore_insert hSpec hWordBytes hBound hReady hRel
+      hLookup
+      (fun hOtherLookup =>
+        lookupSlot?_noAlias_of_slotList_nodup hNoDup hLookup hOtherLookup)
+  have hSharedStored :
+      SharedStateEqOutsideScratch (range base words) sourceShared
+        ({ state with
+          toMachineState :=
+            state.toMachineState.mstore (base + slotOffset slot) value } :
+          EVMState).toSharedState := by
+    have hSlotRange : slot < (range base words).words := by
+      simpa [range] using hSlot
+    have hTargetStore :
+        SharedStateEqOutsideScratch (range base words) sourceShared
+          ({ state.toSharedState with
+            toMachineState :=
+              state.toSharedState.toMachineState.mstore
+                ((range base words).word slot) value } :
+            EvmYul.SharedState .EVM) :=
+      Locals.SourceLowering.StateRel.SpillScratch.SharedStateEqOutsideScratch.mstore_target_scratch_slot
+        hSpec hWordBytes hShared
+        (by simpa [hMachine] using hReady) hSlotRange
+    cases state
+    simpa [generatedAddress_eq_range_word base words slot] using hTargetStore
+  refine ⟨final, hRun, hStack, ?_, ?_, ?_⟩
+  · rw [hFinalMachine, hMachine]
+    exact hReadyStored
+  · rw [hFinalSharedRaw]
+    exact hSharedStored
+  · rw [hFinalMachine, hMachine]
+    exact hRelStored
+
+theorem source_evalOne_eq_eval_singleton
+    {source source' : Locals.Source.State} {value : Word}
+    {expr : Expr 1}
+    (hEvalOne :
+      Locals.Source.Expr.evalOne
+          Locals.Source.PrimitiveSemantics.structured expr source =
+        .ok (source', value)) :
+    Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+      expr source = .ok (source', [value]) := by
+  unfold Locals.Source.Expr.evalOne at hEvalOne
+  cases hExprEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+        expr source with
+  | error err =>
+      simp_all [Locals.Source.invalid]
+  | ok exprResult =>
+      rcases exprResult with ⟨sourceAfterExpr, values⟩
+      cases values with
+      | nil =>
+          simp_all [Locals.Source.invalid]
+          cases hEvalOne
+      | cons head tail =>
+          cases tail with
+          | nil =>
+              simp_all
+          | cons second tail =>
+              simp_all [Locals.Source.invalid]
+              cases hEvalOne
+
 theorem run_compileStmt?_assign_frameStore_of_value_code
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
@@ -1850,6 +1962,92 @@ theorem run_compileStmt?_assign_frameStore_of_value_code
   · simpa using hFinalStack
   · exact hReadyFinal
   · exact hRelFinal
+
+theorem run_compileStmt?_assign_frameStore_of_source_evalOne
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {name : Name} {valueExpr : Expr 1}
+    {plan : Plan}
+    {source sourceAfterValue : Locals.Source.State} {value : Word}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmt? ctx returns compileState (.assign name valueExpr) =
+        some plan)
+    (hSafe : SourceExprSafe valueExpr)
+    (hEvalOne :
+      Locals.Source.Expr.evalOne
+          Locals.Source.PrimitiveSemantics.structured valueExpr source =
+        .ok (sourceAfterValue, value))
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hFrameWords : compileState.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (rest : EvmYul.Stack Word) :
+    ∃ final code,
+      plan.block = Block.ofCode code ∧
+      Structured.Code.run code { evmState with stack := base :: rest } =
+        .ok final ∧
+      final.stack = base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) sourceAfterValue.shared
+        final.toSharedState ∧
+      FrameStoreRel compileState.env
+        (Locals.Source.Store.insert sourceAfterValue.vars name value)
+        final.toMachineState base := by
+  rcases
+      compileStmt?_assign_target_slot_bounded hStateBound hCompile with
+    ⟨slot, valueCode, storeCode, hLookup, _hSlot, hValueCode,
+      hStoreCode, _hPlanState, hPlanBlock⟩
+  have hExprEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+        valueExpr source = .ok (sourceAfterValue, [value]) :=
+    source_evalOne_eq_eval_singleton hEvalOne
+  rcases
+      run_compileExprCode?_frameStore_of_source_eval
+        (source := source)
+        (source' := sourceAfterValue)
+        (state := evmState)
+        (base := base)
+        (words := words)
+        (valuesAboveBase := 0)
+        (front := [])
+        (rest := rest)
+        (resultValues := [value])
+        (code := valueCode)
+        hSafe hExprEval hValueCode hStateBound hFrameWords
+        hReady hShared hRel (by simp) with
+    ⟨mid, _hValueLen, hRunValue, hMidStack, hReadyMid,
+      hSharedMid, hRelMid⟩
+  rcases
+      run_storeTopSlotCode?_frameStore_assign_shared_of_stateSlots
+        hSpec hWordBytes hStoreCode hStateBound hStateNodup
+        hFrameWords hReadyMid mid hSharedMid hRelMid hLookup
+        [] rest rfl (by simp) (value := value) with
+    ⟨final, hRunStore, hFinalStack, hReadyFinal, hSharedFinal,
+      hRelFinal⟩
+  have hMidStart :
+      ({ mid with stack := value :: base :: rest } : EVMState) =
+        mid := by
+    cases mid
+    simp at hMidStack ⊢
+    exact hMidStack.symm
+  refine
+    ⟨final, valueCode ++ storeCode, hPlanBlock, ?_, ?_,
+      hReadyFinal, hSharedFinal, hRelFinal⟩
+  · have hRunValueStart :
+        Structured.Code.run valueCode
+            { evmState with stack := base :: rest } = .ok mid := by
+      simpa using hRunValue
+    rw [Structured.Preservation.Code.run_append, hRunValueStart]
+    simpa [hMidStart] using hRunStore
+  · simpa using hFinalStack
 
 end FrameMemory
 
