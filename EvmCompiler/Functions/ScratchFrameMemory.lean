@@ -3243,6 +3243,59 @@ theorem run_splitPrelude_atomic_source_safe_prelude_block_of_source_run_open_reg
               | terminalArgs kind args =>
                   simp [compilePreludeStmt?] at hPrelude
 
+theorem splitPrelude_atomic_stmt_list_safe_rest :
+    ∀ {stmts : List Stmt} {prelude : List Expressions.Stmt}
+      {rest : List Stmt},
+      AtomicStmtListSafe stmts →
+      splitPrelude stmts = (prelude, rest) →
+        AtomicStmtListSafe rest
+  | [], prelude, rest, _hSafe, hSplit => by
+      simp [splitPrelude] at hSplit
+      rcases hSplit with ⟨rfl, rfl⟩
+      trivial
+  | stmt :: stmts, prelude, rest, hSafe, hSplit => by
+      unfold splitPrelude at hSplit
+      cases hPrelude : compilePreludeStmt? stmt with
+      | none =>
+          simp [hPrelude] at hSplit
+          rcases hSplit with ⟨rfl, rfl⟩
+          exact hSafe
+      | some compiled =>
+          cases hTail : splitPrelude stmts with
+          | mk tailPrelude tailRest =>
+              simp [hPrelude, hTail] at hSplit
+              rcases hSplit with ⟨rfl, rfl⟩
+              have hTailSafe : AtomicStmtListSafe stmts := by
+                cases stmt with
+                | expr expr =>
+                    simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                    exact hSafe.2
+                | let_ name value =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | assign name value =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | block body =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | if_ cond body =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | switch scrutinee cases defaultBody =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | for_ init cond post body =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | brk =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | cont =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | leave =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | call targets functionName args =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | terminal kind =>
+                    simp [compilePreludeStmt?] at hPrelude
+                | terminalArgs kind args =>
+                    simp [compilePreludeStmt?] at hPrelude
+              exact splitPrelude_atomic_stmt_list_safe_rest hTailSafe hTail
+
 theorem run_compileStmtList?_nil_block_frameStore_of_source_run_open_regular
     {ctx : CompileCtx} {returns : List Name}
     {compileState : CompileState} {plan : Plan}
@@ -4006,6 +4059,126 @@ theorem run_compileMain?_atomic_withPrelude_block_frameStore_of_source_run_open_
           hPreludeRun
       rw [hAppend]
       simpa [Block.append, Block.ofCode] using hTailRun
+
+theorem run_compileMain?_atomic_withPrelude_block_frameStore_of_full_source_run_open_regular
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx}
+    {compileState : CompileState} {stmts rest : List Stmt}
+    {prelude : List Expressions.Stmt} {mainPlan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source source' : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel blockFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState} {words : Nat}
+    (hSplit : splitPrelude stmts = (prelude, rest))
+    (hCompile :
+      compileMain? ctx words compileState { stmts := stmts } =
+        some mainPlan)
+    (hSafe : AtomicStmtListSafe stmts)
+    (hRun :
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtx sourceFuel { stmts := stmts } source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx'))
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hFrameWords : mainPlan.state.nextSlot ≤ words)
+    (hSharedStart : evmState.toSharedState = source.shared) :
+    ∃ sourceAfterPrelude sourceCtxAfterPrelude preludeEvm restFuel,
+      preludeEvm.toSharedState = sourceAfterPrelude.shared ∧
+      preludeEvm.stack = evmState.stack ∧
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtxAfterPrelude restFuel
+          { stmts := rest } sourceAfterPrelude =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx') ∧
+      ∀ {initState : EVMState} {base : Word},
+        Structured.Code.run (frameInitCode words) preludeEvm =
+          .ok initState →
+        initState.stack = base :: preludeEvm.stack →
+        ScratchRegionReady initState.toMachineState
+          (range base words).base (range base words).words →
+        SharedStateEqOutsideScratch (range base words)
+          sourceAfterPrelude.shared initState.toSharedState →
+        FrameStoreRel compileState.env sourceAfterPrelude.vars
+          initState.toMachineState base →
+          ∃ final,
+            Expressions.Block.run compiledProgram
+                ((blockFuel + 2 * rest.length + 2) + prelude.length)
+                mainPlan.block { runState with evm := evmState } =
+              .ok (Expressions.Outcome.regular
+                ({ runState with evm := final })) ∧
+            final.stack = base :: evmState.stack ∧
+            ScratchRegionReady final.toMachineState
+              (range base words).base (range base words).words ∧
+            SharedStateEqOutsideScratch (range base words) source'.shared
+              final.toSharedState ∧
+            FrameStoreRel mainPlan.state.env source'.vars
+              final.toMachineState base := by
+  have hRestSafe :
+      AtomicStmtListSafe rest :=
+    splitPrelude_atomic_stmt_list_safe_rest hSafe hSplit
+  rcases
+      run_splitPrelude_atomic_source_safe_prelude_block_of_source_run_open_regular
+        (stmts := stmts) (prelude := prelude) (restSourceStmts := rest)
+        (sourceProgram := sourceProgram) (compiledProgram := compiledProgram)
+        (source := source) (finalSource := source')
+        (sourceCtx := sourceCtx) (finalCtx := sourceCtx')
+        (sourceFuel := sourceFuel)
+        (targetFuel := blockFuel + 2 * rest.length + 1)
+        (runState := runState) (evm := evmState)
+        hSafe hSplit hSharedStart hRun with
+    ⟨sourceAfterPrelude, sourceCtxAfterPrelude, preludeEvm, restFuel,
+      hPreludeRun, hPreludeShared, hPreludeStack, hRestRun⟩
+  have hPreludeRun' :
+      Expressions.Block.run compiledProgram
+          ((blockFuel + 2 * rest.length + 2) + prelude.length)
+          { stmts := prelude } { runState with evm := evmState } =
+        .ok (Expressions.Outcome.regular
+          ({ runState with evm := preludeEvm })) := by
+    have hFuel :
+        (blockFuel + 2 * rest.length + 1) + prelude.length + 1 =
+          (blockFuel + 2 * rest.length + 2) + prelude.length := by
+      omega
+    rw [← hFuel]
+    exact hPreludeRun
+  refine
+    ⟨sourceAfterPrelude, sourceCtxAfterPrelude, preludeEvm, restFuel,
+      hPreludeShared, hPreludeStack, hRestRun, ?_⟩
+  intro initState base hInitRun hInitStack hReady hShared hRel
+  rcases
+      run_compileMain?_atomic_withPrelude_block_frameStore_of_source_run_open_regular
+        hSpec hWordBytes
+        (ctx := ctx)
+        (compileState := compileState)
+        (stmts := stmts)
+        (rest := rest)
+        (prelude := prelude)
+        (mainPlan := mainPlan)
+        (sourceProgram := sourceProgram)
+        (compiledProgram := compiledProgram)
+        (source := sourceAfterPrelude)
+        (source' := source')
+        (sourceCtx := sourceCtxAfterPrelude)
+        (sourceCtx' := sourceCtx')
+        (sourceFuel := restFuel)
+        (blockFuel := blockFuel)
+        (runState := runState)
+        (evmState := evmState)
+        (preludeEvm := preludeEvm)
+        (initState := initState)
+        (base := base)
+        (words := words)
+        hSplit hCompile hPreludeRun' hRestSafe hRestRun
+        hStateBound hStateNodup hFrameWords hInitRun hInitStack hReady
+        hShared hRel with
+    ⟨final, hMainRun, hStack, hReadyFinal, hSharedFinal, hRelFinal⟩
+  refine ⟨final, hMainRun, ?_, hReadyFinal, hSharedFinal, hRelFinal⟩
+  simpa [hPreludeStack] using hStack
 
 theorem run_compileMain?_atomic_noPrelude_empty_frame_of_frameInit_ready_succ
     (hSpec : ZeroPaddingSpec)
