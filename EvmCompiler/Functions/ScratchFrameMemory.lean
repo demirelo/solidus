@@ -7484,6 +7484,355 @@ theorem run_compileStmt?_switch_some_frameStore_of_source_evalOne_run_regular_sc
                   hRelFinalSelected (name := name) (slot := slot)
                     hLookupSelected
 
+set_option maxHeartbeats 800000 in
+mutual
+  theorem expressionsBlockRun_mono
+      (program : Expressions.Program) :
+      ∀ {fuel fuel' : Nat} {block : Expressions.Block}
+        {state : Expressions.RunState} {result : Expressions.Outcome},
+        fuel ≤ fuel' →
+        Expressions.Block.run program fuel block state = .ok result →
+        Expressions.Block.run program fuel' block state = .ok result := by
+    intro fuel fuel' block state result hLe hRun
+    cases fuel with
+    | zero =>
+        cases block
+        simp [Expressions.Block.run, Structured.invalid] at hRun
+    | succ fuel =>
+        cases fuel' with
+        | zero =>
+            omega
+        | succ fuel' =>
+            have hFuelLe : fuel ≤ fuel' := Nat.succ_le_succ_iff.mp hLe
+            cases block with
+            | mk stmts =>
+                cases stmts with
+                | nil =>
+                    simpa [Expressions.Block.run] using hRun
+                | cons stmt rest =>
+                    cases hStmt :
+                        Expressions.Stmt.run program fuel stmt state with
+                    | error err =>
+                        simp [Expressions.Block.run, hStmt] at hRun
+                    | ok stmtOutcome =>
+                        have hStmt' :
+                            Expressions.Stmt.run program fuel' stmt state =
+                              .ok stmtOutcome :=
+                          expressionsStmtRun_mono program hFuelLe hStmt
+                        cases hMode : stmtOutcome.mode with
+                        | regular =>
+                            simp [Expressions.Block.run, hStmt, hStmt',
+                              hMode] at hRun ⊢
+                            exact expressionsBlockRun_mono program hFuelLe hRun
+                        | brk =>
+                            simp [Expressions.Block.run, hStmt, hStmt',
+                              hMode] at hRun ⊢
+                            exact hRun
+                        | cont =>
+                            simp [Expressions.Block.run, hStmt, hStmt',
+                              hMode] at hRun ⊢
+                            exact hRun
+                        | leave =>
+                            simp [Expressions.Block.run, hStmt, hStmt',
+                              hMode] at hRun ⊢
+                            exact hRun
+                        | halt kind =>
+                            simp [Expressions.Block.run, hStmt, hStmt',
+                              hMode] at hRun ⊢
+                            exact hRun
+
+  theorem expressionsStmtRunForLoop_mono
+      (program : Expressions.Program) :
+      ∀ {fuel fuel' : Nat} {cond : Expressions.Expr 1}
+        {post body : Expressions.Block} {state : Expressions.RunState}
+        {result : Expressions.Outcome},
+        fuel ≤ fuel' →
+        Expressions.Stmt.runForLoop program fuel cond post body state =
+          .ok result →
+        Expressions.Stmt.runForLoop program fuel' cond post body state =
+          .ok result := by
+    intro fuel fuel' cond post body state result hLe hRun
+    cases fuel with
+    | zero =>
+        simp [Expressions.Stmt.runForLoop, Structured.invalid] at hRun
+    | succ fuel =>
+        cases fuel' with
+        | zero =>
+            omega
+        | succ fuel' =>
+            have hFuelLe : fuel ≤ fuel' := Nat.succ_le_succ_iff.mp hLe
+            unfold Expressions.Stmt.runForLoop at hRun ⊢
+            cases hCond :
+                Expressions.Expr.runConditionState cond state with
+            | error err =>
+                simp [hCond] at hRun ⊢
+            | ok condResult =>
+                rcases condResult with ⟨stateAfterCond, condTrue⟩
+                cases condTrue with
+                | false =>
+                    simp [hCond] at hRun ⊢
+                    exact hRun
+                | true =>
+                    simp [hCond] at hRun ⊢
+                    cases hBody :
+                        Expressions.Block.run program fuel body
+                          stateAfterCond with
+                    | error err =>
+                        simp [hBody] at hRun
+                    | ok bodyOutcome =>
+                        have hBody' :
+                            Expressions.Block.run program fuel' body
+                                stateAfterCond =
+                              .ok bodyOutcome :=
+                          expressionsBlockRun_mono program hFuelLe hBody
+                        cases hBodyMode : bodyOutcome.mode with
+                        | brk =>
+                            simp [hBody, hBody', hBodyMode] at hRun ⊢
+                            exact hRun
+                        | regular =>
+                            simp [hBody, hBody', hBodyMode] at hRun ⊢
+                            cases hPost :
+                                Expressions.Block.run program fuel post
+                                  bodyOutcome.state with
+                            | error err =>
+                                simp [hPost] at hRun
+                            | ok postOutcome =>
+                                have hPost' :
+                                    Expressions.Block.run program fuel' post
+                                        bodyOutcome.state =
+                                      .ok postOutcome :=
+                                  expressionsBlockRun_mono program hFuelLe
+                                    hPost
+                                cases hPostMode : postOutcome.mode with
+                                | regular =>
+                                    simp [hPost, hPost', hPostMode]
+                                      at hRun ⊢
+                                    exact
+                                      expressionsStmtRunForLoop_mono program
+                                        hFuelLe hRun
+                                | brk =>
+                                    simp [hPost, hPost', hPostMode]
+                                      at hRun ⊢
+                                    exact hRun
+                                | cont =>
+                                    simp [hPost, hPost', hPostMode]
+                                      at hRun ⊢
+                                    exact hRun
+                                | leave =>
+                                    simp [hPost, hPost', hPostMode]
+                                      at hRun ⊢
+                                    exact hRun
+                                | halt kind =>
+                                    simp [hPost, hPost', hPostMode]
+                                      at hRun ⊢
+                                    exact hRun
+                        | cont =>
+                            simp [hBody, hBody', hBodyMode] at hRun ⊢
+                            cases hPost :
+                                Expressions.Block.run program fuel post
+                                  bodyOutcome.state with
+                            | error err =>
+                                simp [hPost] at hRun
+                            | ok postOutcome =>
+                                have hPost' :
+                                    Expressions.Block.run program fuel' post
+                                        bodyOutcome.state =
+                                      .ok postOutcome :=
+                                  expressionsBlockRun_mono program hFuelLe
+                                    hPost
+                                cases hPostMode : postOutcome.mode with
+                                | regular =>
+                                    simp [hPost, hPost', hPostMode]
+                                      at hRun ⊢
+                                    exact
+                                      expressionsStmtRunForLoop_mono program
+                                        hFuelLe hRun
+                                | brk =>
+                                    simp [hPost, hPost', hPostMode]
+                                      at hRun ⊢
+                                    exact hRun
+                                | cont =>
+                                    simp [hPost, hPost', hPostMode]
+                                      at hRun ⊢
+                                    exact hRun
+                                | leave =>
+                                    simp [hPost, hPost', hPostMode]
+                                      at hRun ⊢
+                                    exact hRun
+                                | halt kind =>
+                                    simp [hPost, hPost', hPostMode]
+                                      at hRun ⊢
+                                    exact hRun
+                        | leave =>
+                            simp [hBody, hBody', hBodyMode] at hRun ⊢
+                            exact hRun
+                        | halt kind =>
+                            simp [hBody, hBody', hBodyMode] at hRun ⊢
+                            exact hRun
+
+  theorem expressionsStmtRun_mono
+      (program : Expressions.Program) :
+      ∀ {fuel fuel' : Nat} {stmt : Expressions.Stmt}
+        {state : Expressions.RunState} {result : Expressions.Outcome},
+        fuel ≤ fuel' →
+        Expressions.Stmt.run program fuel stmt state = .ok result →
+        Expressions.Stmt.run program fuel' stmt state = .ok result := by
+    intro fuel fuel' stmt state result hLe hRun
+    cases stmt with
+    | code code =>
+        simpa [Expressions.Stmt.run] using hRun
+    | expr expr =>
+        simpa [Expressions.Stmt.run] using hRun
+    | if_ cond body =>
+        cases fuel with
+        | zero =>
+            simp [Expressions.Stmt.run, Structured.invalid] at hRun
+        | succ fuel =>
+            cases fuel' with
+            | zero =>
+                omega
+            | succ fuel' =>
+                have hFuelLe : fuel ≤ fuel' :=
+                  Nat.succ_le_succ_iff.mp hLe
+                unfold Expressions.Stmt.run at hRun ⊢
+                cases hCond :
+                    Expressions.Expr.runConditionState cond state with
+                | error err =>
+                    simp [hCond] at hRun ⊢
+                | ok condResult =>
+                    rcases condResult with ⟨stateAfterCond, condTrue⟩
+                    cases condTrue with
+                    | false =>
+                        simp [hCond] at hRun ⊢
+                        exact hRun
+                    | true =>
+                        simp [hCond] at hRun ⊢
+                        exact expressionsBlockRun_mono program hFuelLe hRun
+    | switch scrutinee cases defaultBody =>
+        cases fuel with
+        | zero =>
+            simp [Expressions.Stmt.run, Structured.invalid] at hRun
+        | succ fuel =>
+            cases fuel' with
+            | zero =>
+                omega
+            | succ fuel' =>
+                have hFuelLe : fuel ≤ fuel' :=
+                  Nat.succ_le_succ_iff.mp hLe
+                unfold Expressions.Stmt.run at hRun ⊢
+                cases hScrutinee :
+                    Expressions.Expr.run scrutinee state.evm with
+                | error err =>
+                    simp [hScrutinee] at hRun ⊢
+                | ok evmAfterScrutinee =>
+                    cases hPop : evmAfterScrutinee.stack.pop with
+                    | none =>
+                        simp [hScrutinee, hPop] at hRun ⊢
+                    | some pair =>
+                        rcases pair with ⟨stack, value⟩
+                        cases hSelected :
+                            Expressions.Switch.select value cases
+                              defaultBody with
+                        | none =>
+                            simp [hScrutinee, hPop, hSelected] at hRun ⊢
+                            exact hRun
+                        | some selected =>
+                            simp [hScrutinee, hPop, hSelected] at hRun ⊢
+                            exact expressionsBlockRun_mono program hFuelLe hRun
+    | for_ init cond post body =>
+        cases fuel with
+        | zero =>
+            simp [Expressions.Stmt.run, Structured.invalid] at hRun
+        | succ fuel =>
+            cases fuel' with
+            | zero =>
+                omega
+            | succ fuel' =>
+                have hFuelLe : fuel ≤ fuel' :=
+                  Nat.succ_le_succ_iff.mp hLe
+                unfold Expressions.Stmt.run at hRun ⊢
+                cases hInit :
+                    Expressions.Block.run program fuel init state with
+                | error err =>
+                    simp [hInit] at hRun
+                | ok initOutcome =>
+                    have hInit' :
+                        Expressions.Block.run program fuel' init state =
+                          .ok initOutcome :=
+                      expressionsBlockRun_mono program hFuelLe hInit
+                    cases hInitMode : initOutcome.mode with
+                    | regular =>
+                        simp [hInit, hInit', hInitMode] at hRun ⊢
+                        exact
+                          expressionsStmtRunForLoop_mono program hFuelLe hRun
+                    | brk =>
+                        simp [hInit, hInit', hInitMode] at hRun ⊢
+                        exact hRun
+                    | cont =>
+                        simp [hInit, hInit', hInitMode] at hRun ⊢
+                        exact hRun
+                    | leave =>
+                        simp [hInit, hInit', hInitMode] at hRun ⊢
+                        exact hRun
+                    | halt kind =>
+                        simp [hInit, hInit', hInitMode] at hRun ⊢
+                        exact hRun
+    | brk =>
+        simpa [Expressions.Stmt.run] using hRun
+    | cont =>
+        simpa [Expressions.Stmt.run] using hRun
+    | leave =>
+        cases state.returns <;>
+          simpa [Expressions.Stmt.run, Structured.invalid] using hRun
+    | call name =>
+        cases fuel with
+        | zero =>
+            simp [Expressions.Stmt.run, Structured.invalid] at hRun
+        | succ fuel =>
+            cases fuel' with
+            | zero =>
+                omega
+            | succ fuel' =>
+                have hFuelLe : fuel ≤ fuel' :=
+                  Nat.succ_le_succ_iff.mp hLe
+                unfold Expressions.Stmt.run at hRun ⊢
+                cases hLookup :
+                    Expressions.ProcList.lookup? name program.procs with
+                | none =>
+                    simp [hLookup] at hRun ⊢
+                    exact hRun
+                | some proc =>
+                    cases hSplit :
+                        Structured.StackFrame.splitArgs? proc.argc
+                          state.evm.stack with
+                    | none =>
+                        simp [hLookup, hSplit] at hRun ⊢
+                    | some split =>
+                        rcases split with ⟨args, callerStack⟩
+                        let callEVM := { state.evm with stack := args }
+                        let callState :=
+                          (state.withEVM callEVM).pushReturn callerStack
+                            proc.retc
+                        cases hBody :
+                            Expressions.Block.run program fuel proc.body
+                              callState with
+                        | error err =>
+                            simp [hLookup, hSplit, callEVM, callState,
+                              hBody] at hRun
+                        | ok bodyOutcome =>
+                            have hBody' :
+                                Expressions.Block.run program fuel'
+                                    proc.body callState =
+                                  .ok bodyOutcome :=
+                              expressionsBlockRun_mono program hFuelLe hBody
+                            cases hBodyMode : bodyOutcome.mode <;>
+                              simp [hLookup, hSplit, callEVM, callState,
+                                hBody, hBody', hBodyMode] at hRun ⊢ <;>
+                              exact hRun
+    | terminal kind =>
+        simpa [Expressions.Stmt.run] using hRun
+end
+
 set_option maxHeartbeats 1200000 in
 theorem run_compileStmtList?_cons_block_atomic_tail_frameStore_of_source_run_open_regular
     (hSpec : ZeroPaddingSpec)
