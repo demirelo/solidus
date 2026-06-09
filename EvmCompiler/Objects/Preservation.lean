@@ -1044,6 +1044,141 @@ theorem compileCheckedAssemblyWithScratchFrameSpill?_program_run_assembly_privat
       hChecked, hMainState, hFrameBound, hExprBody, hSplit, hPublic,
       hPreludeShared, hPreludeStack, hRestRun, hCont⟩
 
+theorem compileCheckedAssemblyWithScratchFrameSpill?_program_run_assembly_privateScratch_of_frameInit_ready_check
+    (hSpec :
+      Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {maxFrameWords : Nat} {program : Objects.Program}
+    {asm : Assembly.Program}
+    {publicSource' : Functions.Source.State}
+    {sourceFuel blockFuel : Nat}
+    {initial : EVMState}
+    (hCompile :
+      compileCheckedAssemblyWithScratchFrameSpill? maxFrameWords program =
+        some asm)
+    (hSafe :
+      Functions.ScratchFrameSpill.FrameMemory.AtomicStmtListSafe
+        program.toFunctions.body.stmts)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun :
+      Source.Program.run Locals.Source.PrimitiveSemantics.structured
+          sourceFuel program initial =
+        .ok (Functions.Source.Outcome.regular publicSource')) :
+    ∃ exprProgram : Expressions.Program,
+    ∃ mainProbe : Functions.ScratchFrameSpill.Plan,
+    ∃ main : Functions.ScratchFrameSpill.Plan,
+    ∃ prelude : List Expressions.Stmt,
+    ∃ rest : List Functions.Stmt,
+    ∃ innerSource : Functions.Source.State,
+    ∃ innerCtx : Functions.Source.Ctx,
+    ∃ sourceAfterPrelude : Functions.Source.State,
+    ∃ sourceCtxAfterPrelude : Functions.Source.Ctx,
+    ∃ preludeEvm : EVMState, ∃ restFuel : Nat,
+      compileCheckedWithScratchFrameSpill? maxFrameWords program =
+        some (exprProgram, asm) ∧
+      main.state = mainProbe.state ∧
+      mainProbe.state.nextSlot ≤ maxFrameWords ∧
+      exprProgram.body = main.block ∧
+      Functions.ScratchFrameSpill.splitPrelude
+          program.toFunctions.body.stmts = (prelude, rest) ∧
+      publicSource' =
+        innerSource.restrictTo EvmCompiler.Functions.Source.Ctx.initial.scope ∧
+      preludeEvm.toSharedState = sourceAfterPrelude.shared ∧
+      preludeEvm.stack = initial.stack ∧
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          program.toFunctions sourceCtxAfterPrelude restFuel
+          { stmts := rest } sourceAfterPrelude =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular innerSource,
+          innerCtx) ∧
+      (Locals.SourceLowering.StateRel.SpillScratch.scratchRegionReady?
+          (Functions.ScratchFrameSpill.FrameMemory.frameInitMachine
+            mainProbe.state.nextSlot preludeEvm.toMachineState)
+          (Functions.ScratchFrameSpill.FrameMemory.range
+            (preludeEvm.toMachineState.mload
+              Functions.ScratchFrameSpill.freePtrWord).1
+            mainProbe.state.nextSlot).base
+          (Functions.ScratchFrameSpill.FrameMemory.range
+            (preludeEvm.toMachineState.mload
+              Functions.ScratchFrameSpill.freePtrWord).1
+            mainProbe.state.nextSlot).words = true →
+        ∃ final targetFuel targetOutcome,
+          Assembly.Source.runNResult asm targetFuel initial =
+            .ok targetOutcome ∧
+          Structured.Preservation.WholeProgramOutcomeRel
+            (Expressions.Outcome.regular
+              ({ Structured.Program.initialState initial with
+                evm := final }))
+            targetOutcome ∧
+          Structured.Preservation.TargetOutcomeEndPc asm targetOutcome ∧
+          final.stack =
+            (preludeEvm.toMachineState.mload
+              Functions.ScratchFrameSpill.freePtrWord).1 :: initial.stack ∧
+          Functions.ScratchFrameSpill.FrameMemory.ScratchRegionReady
+            final.toMachineState
+            (Functions.ScratchFrameSpill.FrameMemory.range
+              (preludeEvm.toMachineState.mload
+                Functions.ScratchFrameSpill.freePtrWord).1
+              mainProbe.state.nextSlot).base
+            (Functions.ScratchFrameSpill.FrameMemory.range
+              (preludeEvm.toMachineState.mload
+                Functions.ScratchFrameSpill.freePtrWord).1
+              mainProbe.state.nextSlot).words ∧
+          Functions.ScratchFrameSpill.FrameMemory.SharedStatePrivateScratchObservable
+            publicSource'.shared final.toSharedState ∧
+          Functions.ScratchFrameSpill.FrameMemory.FrameStoreRel
+            main.state.env innerSource.vars final.toMachineState
+            (preludeEvm.toMachineState.mload
+              Functions.ScratchFrameSpill.freePtrWord).1) := by
+  rcases
+      compileCheckedAssemblyWithScratchFrameSpill?_program_run_assembly_privateScratch_cont
+        hSpec hWordBytes
+        (maxFrameWords := maxFrameWords)
+        (program := program)
+        (asm := asm)
+        (publicSource' := publicSource')
+        (sourceFuel := sourceFuel)
+        (blockFuel := blockFuel)
+        (initial := initial)
+        hCompile hSafe hInitialPc hRun with
+    ⟨exprProgram, mainProbe, main, prelude, rest, innerSource, innerCtx,
+      sourceAfterPrelude, sourceCtxAfterPrelude, preludeEvm, restFuel,
+      hChecked, hMainState, hFrameBound, hExprBody, hSplit, hPublic,
+      hPreludeShared, hPreludeStack, hRestRun, hCont⟩
+  refine
+    ⟨exprProgram, mainProbe, main, prelude, rest, innerSource, innerCtx,
+      sourceAfterPrelude, sourceCtxAfterPrelude, preludeEvm, restFuel,
+      hChecked, hMainState, hFrameBound, hExprBody, hSplit, hPublic,
+      hPreludeShared, hPreludeStack, hRestRun, ?_⟩
+  intro hFrameInitReady
+  rcases
+      Functions.ScratchFrameSpill.FrameMemory.run_frameInitCode
+        preludeEvm mainProbe.state.nextSlot with
+    ⟨initState, hInitRun, hInitStack, hInitMachine, hInitInvariant,
+      _hInitObservable⟩
+  have hReady :
+      Functions.ScratchFrameSpill.FrameMemory.ScratchRegionReady
+        initState.toMachineState
+        (Functions.ScratchFrameSpill.FrameMemory.range
+          (preludeEvm.toMachineState.mload
+            Functions.ScratchFrameSpill.freePtrWord).1
+          mainProbe.state.nextSlot).base
+        (Functions.ScratchFrameSpill.FrameMemory.range
+          (preludeEvm.toMachineState.mload
+            Functions.ScratchFrameSpill.freePtrWord).1
+          mainProbe.state.nextSlot).words := by
+    rw [hInitMachine]
+    exact
+      Locals.SourceLowering.StateRel.SpillScratch.scratchRegionReady?_sound
+        hFrameInitReady
+  have hInitInvariantSource :
+      Functions.ScratchFrameSpill.FrameMemory.SharedStatePrivateScratchInvariant
+        sourceAfterPrelude.shared initState.toSharedState := by
+    simpa [← hPreludeShared] using hInitInvariant
+  exact
+    hCont hInitRun hInitStack hReady hInitInvariantSource
+
 theorem compileCheckedAssemblyWithScratchFrameSpill?_eq_some
     {maxFrameWords : Nat} {program : Objects.Program}
     {asm : Assembly.Program}
