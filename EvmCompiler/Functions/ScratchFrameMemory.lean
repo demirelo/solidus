@@ -3492,6 +3492,165 @@ theorem source_stmt_run_block_atomic_privateScratchInvariant
       Locals.SourceLowering.StateRel.SpillScratch.SourceStatePrivateScratchInvariant.restrictTo
         hInnerRel sourceCtx.scope
 
+theorem source_stmt_run_if_atomic_privateScratchInvariant
+    {cond : Expr 1} {body : Block} {program : Program}
+    {source source' target : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat}
+    (hCondSafe : SourceExprSafe cond)
+    (hBodySafe : AtomicStmtListSafe body.stmts)
+    (hRel : SourceStatePrivateScratchInvariant source target)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel (.if_ cond body) source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx')) :
+    ∃ target',
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel (.if_ cond body) target =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular target',
+          sourceCtx') ∧
+      SourceStatePrivateScratchInvariant source' target' := by
+  cases fuel with
+  | zero =>
+      simp [EvmCompiler.Functions.Source.Stmt.run,
+        EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+  | succ fuel' =>
+      unfold EvmCompiler.Functions.Source.Stmt.run at hRun ⊢
+      cases hEvalOne :
+          Locals.Source.Expr.evalOne
+            Locals.Source.PrimitiveSemantics.structured cond source with
+      | error err =>
+          simp [EvmCompiler.Functions.Source.Expr.evalCondition,
+            Locals.Source.Expr.evalCondition, hEvalOne] at hRun
+      | ok condResult =>
+          rcases condResult with ⟨sourceAfterCond, condValue⟩
+          rcases
+            Locals.SourceLowering.PrimitiveSemantics.sourceExpr_evalOne_privateScratchInvariant
+              hCondSafe hRel hEvalOne with
+          ⟨targetAfterCond, hTargetEvalOne, hCondRel⟩
+          cases hCondBool : condValue != EvmYul.UInt256.ofNat 0 with
+          | true =>
+              cases hScopedSource :
+                EvmCompiler.Functions.Source.Block.runScoped
+                    Locals.Source.PrimitiveSemantics.structured
+                    program sourceCtx body fuel' sourceAfterCond with
+              | error err =>
+                  simp [EvmCompiler.Functions.Source.Expr.evalCondition,
+                    Locals.Source.Expr.evalCondition, hEvalOne, hCondBool,
+                    hScopedSource] at hRun
+              | ok outcome =>
+                  cases outcome with
+                  | mk scopedSource mode =>
+                      cases mode with
+                      | regular =>
+                          simp [EvmCompiler.Functions.Source.Expr.evalCondition,
+                            Locals.Source.Expr.evalCondition, hEvalOne,
+                            hCondBool, hScopedSource,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, hCtx⟩
+                          cases hOutcome
+                          cases hCtx
+                          have hScopedSourceRegular :
+                              EvmCompiler.Functions.Source.Block.runScoped
+                                  Locals.Source.PrimitiveSemantics.structured
+                                  program sourceCtx body fuel'
+                                  sourceAfterCond =
+                                .ok
+                                  (EvmCompiler.Functions.Source.Outcome.regular
+                                    source') := by
+                            simpa [EvmCompiler.Functions.Source.Outcome.regular]
+                              using hScopedSource
+                          rcases
+                              EvmCompiler.Functions.Source.Block.runScoped_regular_eq_restrict
+                                hScopedSourceRegular with
+                            ⟨innerSource, innerCtx, hOpenSource, hSource'⟩
+                          rcases
+                            source_block_run_open_atomic_privateScratchInvariant_block
+                              (program := program)
+                              (source := sourceAfterCond)
+                              (source' := innerSource)
+                              (target := targetAfterCond)
+                              (sourceCtx := sourceCtx)
+                              (sourceCtx' := innerCtx)
+                              (fuel := fuel')
+                              hBodySafe hCondRel hOpenSource with
+                          ⟨innerTarget, hOpenTarget, hInnerRel⟩
+                          let target' := innerTarget.restrictTo
+                            sourceCtx.scope
+                          have hScopedTarget :
+                              EvmCompiler.Functions.Source.Block.runScoped
+                                  Locals.Source.PrimitiveSemantics.structured
+                                  program sourceCtx body fuel'
+                                  targetAfterCond =
+                                .ok
+                                  (EvmCompiler.Functions.Source.Outcome.regular
+                                    target') := by
+                            unfold EvmCompiler.Functions.Source.Block.runScoped
+                            simp [hOpenTarget, target',
+                              EvmCompiler.Functions.Source.Outcome.regular,
+                              Locals.Source.Outcome.regular]
+                          refine ⟨target', ?_, ?_⟩
+                          · simp [
+                              EvmCompiler.Functions.Source.Expr.evalCondition,
+                              Locals.Source.Expr.evalCondition,
+                              hTargetEvalOne, hCondBool, hScopedTarget,
+                              EvmCompiler.Functions.Source.Outcome.regular]
+                          · rw [hSource']
+                            exact
+                              Locals.SourceLowering.StateRel.SpillScratch.SourceStatePrivateScratchInvariant.restrictTo
+                                hInnerRel sourceCtx.scope
+                      | brk =>
+                          simp [
+                            EvmCompiler.Functions.Source.Expr.evalCondition,
+                            Locals.Source.Expr.evalCondition, hEvalOne,
+                            hCondBool, hScopedSource,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
+                      | cont =>
+                          simp [
+                            EvmCompiler.Functions.Source.Expr.evalCondition,
+                            Locals.Source.Expr.evalCondition, hEvalOne,
+                            hCondBool, hScopedSource,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
+                      | leave =>
+                          simp [
+                            EvmCompiler.Functions.Source.Expr.evalCondition,
+                            Locals.Source.Expr.evalCondition, hEvalOne,
+                            hCondBool, hScopedSource,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
+                      | halt kind =>
+                          simp [
+                            EvmCompiler.Functions.Source.Expr.evalCondition,
+                            Locals.Source.Expr.evalCondition, hEvalOne,
+                            hCondBool, hScopedSource,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
+          | false =>
+              simp [EvmCompiler.Functions.Source.Expr.evalCondition,
+                Locals.Source.Expr.evalCondition, hEvalOne, hCondBool,
+                EvmCompiler.Functions.Source.Outcome.regular] at hRun
+              rcases hRun with ⟨hOutcome, hCtx⟩
+              cases hOutcome
+              cases hCtx
+              refine ⟨targetAfterCond, ?_, hCondRel⟩
+              simp [EvmCompiler.Functions.Source.Expr.evalCondition,
+                Locals.Source.Expr.evalCondition, hTargetEvalOne, hCondBool,
+                EvmCompiler.Functions.Source.Outcome.regular]
+
 theorem source_stmt_run_atomicOrBlock_privateScratchInvariant
     {stmt : Stmt} {program : Program}
     {source source' target : Locals.Source.State}
