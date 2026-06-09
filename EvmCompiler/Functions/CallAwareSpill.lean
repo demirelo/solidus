@@ -6956,6 +6956,372 @@ def compileContinueWithSpillFallback? (range : ScratchRange)
   else
     none
 
+mutual
+
+theorem spillExpr_compileCode?_noCallCreate_of_usesCallCreate
+    {range : ScratchRange} {offset : Nat} {layout : SpillLayout.Layout}
+    {results : Nat} {expr : Expr results} {code : Structured.Code}
+    (hExpr : expr.usesCallCreate = false)
+    (hCode : SpillExpr.compileCode? range offset layout expr = some code) :
+    code.usesCallCreate = false := by
+  cases expr with
+  | lit value =>
+      simp [SpillExpr.compileCode?] at hCode
+      cases hCode
+      simp [Structured.Code.usesCallCreate,
+        Structured.BasicInstr.usesCallCreate]
+  | var name =>
+      exact SpillLayout.readCode?_noCallCreate (by
+        simpa [SpillExpr.compileCode?] using hCode)
+  | code raw =>
+      simp [SpillExpr.compileCode?] at hCode
+  | prim op args =>
+      have hParts :
+          args.usesCallCreate = false ∧
+            op.toPrimOp.isCallCreate = false := by
+        simpa [Locals.Expr.usesCallCreate] using hExpr
+      unfold SpillExpr.compileCode? at hCode
+      cases hArgs :
+          SpillExpr.compileSeqFullCode? range offset layout args with
+      | none =>
+          simp [hArgs] at hCode
+      | some argsCode =>
+          simp [hArgs] at hCode
+          cases hCode
+          have hArgsNo :
+              argsCode.usesCallCreate = false :=
+            spillExpr_compileSeqFullCode?_noCallCreate_of_usesCallCreate
+              hParts.1 hArgs
+          have hOpNo :
+              Structured.Code.usesCallCreate
+                  ([Structured.BasicInstr.op op] : Structured.Code) =
+                false := by
+            simp [Structured.Code.usesCallCreate,
+              Structured.BasicInstr.usesCallCreate, hParts.2]
+          exact
+            Locals.CompilerFacts.Structured.Code.usesCallCreate_append_eq_false
+              hArgsNo hOpNo
+
+theorem spillExpr_compileSeqFullCode?_noCallCreate_of_usesCallCreate
+    {range : ScratchRange} {offset : Nat} {layout : SpillLayout.Layout}
+    {results : Nat} {exprs : Locals.ExprSeq results}
+    {code : Structured.Code}
+    (hExprs : exprs.usesCallCreate = false)
+    (hCode :
+      SpillExpr.compileSeqFullCode? range offset layout exprs = some code) :
+    code.usesCallCreate = false := by
+  cases exprs with
+  | nil =>
+      simp [SpillExpr.compileSeqFullCode?] at hCode
+      cases hCode
+      simp [Structured.Code.usesCallCreate]
+  | @cons left right head tail =>
+      have hParts :
+          head.usesCallCreate = false ∧ tail.usesCallCreate = false := by
+        simpa [Locals.ExprSeq.usesCallCreate] using hExprs
+      unfold SpillExpr.compileSeqFullCode? at hCode
+      cases hHead :
+          SpillExpr.compileCode? range offset layout head with
+      | none =>
+          simp [hHead] at hCode
+      | some headCode =>
+          cases hTail :
+              SpillExpr.compileSeqFullCode? range (offset + left) layout tail with
+          | none =>
+              simp [hHead, hTail] at hCode
+          | some tailCode =>
+              simp [hHead, hTail] at hCode
+              cases hCode
+              exact
+                Locals.CompilerFacts.Structured.Code.usesCallCreate_append_eq_false
+                  (spillExpr_compileCode?_noCallCreate_of_usesCallCreate
+                    hParts.1 hHead)
+                  (spillExpr_compileSeqFullCode?_noCallCreate_of_usesCallCreate
+                    hParts.2 hTail)
+
+end
+
+theorem compileLocalsBlockOrdinaryStackSpan?_noCallCreate
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {block : Locals.Block} {plan : Plan}
+    (hBlock : block.usesCallCreate = false)
+    (hCompile :
+      compileLocalsBlockOrdinaryStackSpan? returns sourceScope stackLayout
+        layout block = some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileLocalsBlockOrdinaryStackSpan? at hCompile
+  by_cases hLayout : layout = layoutOfStack stackLayout
+  · simp [hLayout] at hCompile
+    let ctx :=
+      match returns with
+      | [] => { Locals.Ctx.initial with layout := stackLayout }
+      | _ :: _ =>
+          Locals.Ctx.procEntryWithLayoutAndRetc stackLayout returns.length
+    cases hOpen : Locals.Block.compileOpen ctx block with
+    | none =>
+        simp [ctx, hOpen] at hCompile
+    | some result =>
+        rcases result with ⟨stmts, finalCtx⟩
+        simp [ctx, hOpen] at hCompile
+        cases hCompile
+        have hStmtsNo :
+            Expressions.StmtList.usesCallCreate stmts = false :=
+          Locals.CompilerFacts.Block.compileOpen_noCallCreate
+            ctx block hBlock hOpen
+        simpa [Expressions.Block.usesCallCreate] using hStmtsNo
+  · simp [hLayout] at hCompile
+
+theorem compileNonCallStmtSpanWithOrdinaryFallback?_noCallCreate
+    {range : ScratchRange} {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {stmt : Stmt} {plan : Plan}
+    (hStmt : stmt.usesCallCreate = false)
+    (hCompile :
+      compileNonCallStmtSpanWithOrdinaryFallback? range returns sourceScope
+        stackLayout layout stmt = some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileNonCallStmtSpanWithOrdinaryFallback? at hCompile
+  cases hSpill :
+      compileNonCallStmtSpan? range returns sourceScope stackLayout layout stmt with
+  | some spillPlan =>
+      simp [hSpill] at hCompile
+      cases hCompile
+      exact compileNonCallStmtSpan?_noCallCreate hSpill
+  | none =>
+      simp [hSpill] at hCompile
+      have hBlock :
+          ({ stmts := Stmt.toLocals returns stmt } : Locals.Block).usesCallCreate =
+            false := by
+        simpa [Locals.Block.usesCallCreate] using
+          CompilerFacts.Stmt.toLocals_noCallCreate returns stmt hStmt
+      exact
+        compileLocalsBlockOrdinaryStackSpan?_noCallCreate hBlock hCompile
+
+theorem compileExprStmtWithSpillFallback?_noCallCreate
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {expr : Expr 0} {plan : Plan}
+    (hExpr : expr.usesCallCreate = false)
+    (hCompile :
+      compileExprStmtWithSpillFallback? range sourceScope stackLayout
+        layout expr = some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileExprStmtWithSpillFallback? at hCompile
+  cases hCode : SpillExpr.compileCode? range 0 layout expr with
+  | none =>
+      simp [hCode] at hCompile
+  | some code =>
+      simp [hCode] at hCompile
+      cases hCompile
+      exact
+        expressionsBlock_ofCode_noCallCreate
+          (spillExpr_compileCode?_noCallCreate_of_usesCallCreate
+            hExpr hCode)
+
+theorem compileLetWithSpillFallback?_noCallCreate
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {name : Name} {value : Expr 1}
+    {plan : Plan}
+    (hValue : value.usesCallCreate = false)
+    (hCompile :
+      compileLetWithSpillFallback? range sourceScope stackLayout layout
+        name value = some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileLetWithSpillFallback? at hCompile
+  by_cases hFresh : name ∈ sourceScope
+  · simp [hFresh] at hCompile
+  · simp [hFresh] at hCompile
+    cases hCode : SpillExpr.compileCode? range 0 layout value with
+    | none =>
+        simp [hCode] at hCompile
+    | some code =>
+        have hCodeNo :
+            code.usesCallCreate = false :=
+          spillExpr_compileCode?_noCallCreate_of_usesCallCreate
+            hValue hCode
+        by_cases hStack : stackLayout.length < 16
+        · simp [hCode, hStack] at hCompile
+          cases hCompile
+          exact expressionsBlock_ofCode_noCallCreate hCodeNo
+        · cases hSlot : SpillLayout.firstFreeScratchSlot? range layout with
+          | none =>
+              simp [hCode, hStack, hSlot] at hCompile
+          | some slot =>
+              simp [hCode, hStack, hSlot] at hCompile
+              cases hCompile
+              exact
+                expressionsBlock_ofCode_noCallCreate
+                  (Locals.CompilerFacts.Structured.Code.usesCallCreate_append_eq_false
+                    hCodeNo
+                    (spillStoreTopCode_noCallCreate (range.word slot)))
+
+theorem compileAssignWithSpillFallback?_noCallCreate
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {name : Name} {value : Expr 1}
+    {plan : Plan}
+    (hValue : value.usesCallCreate = false)
+    (hCompile :
+      compileAssignWithSpillFallback? range sourceScope stackLayout layout
+        name value = some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileAssignWithSpillFallback? at hCompile
+  cases hCode : SpillExpr.compileCode? range 0 layout value with
+  | none =>
+      simp [hCode] at hCompile
+  | some code =>
+      have hCodeNo :
+          code.usesCallCreate = false :=
+        spillExpr_compileCode?_noCallCreate_of_usesCallCreate hValue hCode
+      cases hLookup : SpillLayout.lookup? name layout with
+      | none =>
+          simp [hCode, hLookup] at hCompile
+      | some location =>
+          cases location with
+          | stack depth =>
+              cases hSwap : Locals.StackOp.swap? (depth + 1) with
+              | none =>
+                  simp [hCode, hLookup, hSwap] at hCompile
+              | some swapOp =>
+                  simp [hCode, hLookup, hSwap] at hCompile
+                  cases hCompile
+                  have hSwapNo :
+                      swapOp.toPrimOp.isCallCreate = false :=
+                    Locals.CompilerFacts.StackOp.swap?_not_callCreate
+                      (depth + 1) hSwap
+                  have hAssignNo :
+                      Structured.Code.usesCallCreate
+                          ([Structured.BasicInstr.op swapOp,
+                            Structured.BasicInstr.op .pop] :
+                            Structured.Code) =
+                        false := by
+                    exact
+                      Locals.CompilerFacts.Structured.Code.swapPop_noCallCreate
+                        hSwapNo
+                  exact
+                    expressionsBlock_ofCode_noCallCreate
+                      (Locals.CompilerFacts.Structured.Code.usesCallCreate_append_eq_false
+                        hCodeNo hAssignNo)
+          | scratch slot =>
+              simp [hCode, hLookup] at hCompile
+              cases hCompile
+              exact
+                expressionsBlock_ofCode_noCallCreate
+                  (Locals.CompilerFacts.Structured.Code.usesCallCreate_append_eq_false
+                    hCodeNo
+                    (spillStoreTopCode_noCallCreate (range.word slot)))
+
+theorem compileTerminalArgsWithSpillFallback?_noCallCreate
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {kind : Assembly.HaltKind}
+    {args : Locals.ExprSeq kind.argCount} {plan : Plan}
+    (hArgs : args.usesCallCreate = false)
+    (hCompile :
+      compileTerminalArgsWithSpillFallback? range sourceScope stackLayout
+        layout kind args = some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileTerminalArgsWithSpillFallback? at hCompile
+  cases hCode : SpillExpr.compileSeqFullCode? range 0 layout args with
+  | none =>
+      simp [hCode] at hCompile
+  | some code =>
+      simp [hCode] at hCompile
+      cases hCompile
+      have hCodeNo :
+          code.usesCallCreate = false :=
+        spillExpr_compileSeqFullCode?_noCallCreate_of_usesCallCreate
+          hArgs hCode
+      simp [Expressions.Block.usesCallCreate,
+        Expressions.StmtList.usesCallCreate, Expressions.Stmt.usesCallCreate,
+        hCodeNo]
+
+theorem compileTerminalWithSpillFallback?_noCallCreate
+    {sourceScope stackLayout : List Name} {layout : SpillLayout.Layout}
+    {kind : Assembly.HaltKind} {plan : Plan}
+    (hCompile :
+      compileTerminalWithSpillFallback? sourceScope stackLayout layout kind =
+        some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileTerminalWithSpillFallback? at hCompile
+  cases hCompile
+  simp [Expressions.Block.usesCallCreate,
+    Expressions.StmtList.usesCallCreate, Expressions.Stmt.usesCallCreate]
+
+theorem compileBreakWithSpillFallback?_noCallCreate
+    {range : ScratchRange} {handlers : FallbackHandlers}
+    {sourceScope stackLayout : List Name} {layout : SpillLayout.Layout}
+    {plan : Plan}
+    (hCompile :
+      compileBreakWithSpillFallback? range handlers sourceScope stackLayout
+        layout = some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileBreakWithSpillFallback? at hCompile
+  cases hBreak : handlers.breakScope? with
+  | none =>
+      simp [hBreak] at hCompile
+  | some target =>
+      simp [hBreak] at hCompile
+      cases hEntry :
+          normalizePlanStack? range
+            { sourceScope := sourceScope
+              stackLayout := stackLayout
+              layout := layout
+              block := { stmts := [] } } with
+      | none =>
+          simp [hEntry] at hCompile
+      | some entry =>
+          simp [hEntry] at hCompile
+          by_cases hStack : entry.stackLayout = []
+          · simp [hStack] at hCompile
+            cases hCompile
+            exact
+              expressionsBlock_append_noCallCreate
+                (normalizePlanStack?_noCallCreate hEntry
+                  (by
+                    simp [Expressions.Block.usesCallCreate,
+                      Expressions.StmtList.usesCallCreate]))
+                (by
+                  simp [Expressions.Block.usesCallCreate,
+                    Expressions.StmtList.usesCallCreate,
+                    Expressions.Stmt.usesCallCreate])
+          · simp [hStack] at hCompile
+
+theorem compileContinueWithSpillFallback?_noCallCreate
+    {range : ScratchRange} {handlers : FallbackHandlers}
+    {sourceScope stackLayout : List Name} {layout : SpillLayout.Layout}
+    {plan : Plan}
+    (hCompile :
+      compileContinueWithSpillFallback? range handlers sourceScope
+        stackLayout layout = some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileContinueWithSpillFallback? at hCompile
+  cases hContinue : handlers.continueScope? with
+  | none =>
+      simp [hContinue] at hCompile
+  | some target =>
+      simp [hContinue] at hCompile
+      cases hEntry :
+          normalizePlanStack? range
+            { sourceScope := sourceScope
+              stackLayout := stackLayout
+              layout := layout
+              block := { stmts := [] } } with
+      | none =>
+          simp [hEntry] at hCompile
+      | some entry =>
+          simp [hEntry] at hCompile
+          by_cases hStack : entry.stackLayout = []
+          · simp [hStack] at hCompile
+            cases hCompile
+            exact
+              expressionsBlock_append_noCallCreate
+                (normalizePlanStack?_noCallCreate hEntry
+                  (by
+                    simp [Expressions.Block.usesCallCreate,
+                      Expressions.StmtList.usesCallCreate]))
+                (by
+                  simp [Expressions.Block.usesCallCreate,
+                    Expressions.StmtList.usesCallCreate,
+                    Expressions.Stmt.usesCallCreate])
+          · simp [hStack] at hCompile
+
 theorem compileCall?_eq_some
     {range : ScratchRange} {program : Program}
     {sourceScope stackLayout : List Name}
@@ -7102,6 +7468,42 @@ theorem compileCall?_noCallCreate
                 (expressionsBlock_ofCode_noCallCreate
                   (restoreScratchCode_noCallCreate range saved))
                 expressionsBlock_empty_noCallCreate)))))
+
+theorem compileCallWithNormalizedStackFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {targets : List Name}
+    {functionName : Name} {args : List (Expr 1)} {plan : Plan}
+    (hCompile :
+      compileCallWithNormalizedStackFallback? range program sourceScope
+        stackLayout layout targets functionName args = some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileCallWithNormalizedStackFallback? at hCompile
+  cases hEntry :
+      normalizePlanStack? range
+        { sourceScope := sourceScope
+          stackLayout := stackLayout
+          layout := layout
+          block := { stmts := [] } } with
+  | none =>
+      simp [hEntry] at hCompile
+  | some entry =>
+      simp [hEntry] at hCompile
+      cases hCall :
+          compileCall? range program entry.sourceScope entry.stackLayout
+            entry.layout targets functionName args with
+      | none =>
+          simp [hCall] at hCompile
+      | some callPlan =>
+          simp [hCall] at hCompile
+          cases hCompile
+          exact
+            expressionsBlock_append_noCallCreate
+              (normalizePlanStack?_noCallCreate hEntry
+                (by
+                  simp [Expressions.Block.usesCallCreate,
+                    Expressions.StmtList.usesCallCreate]))
+              (compileCall?_noCallCreate hCall)
 
 theorem compileCall?_returned_targets_lookup_scratch
     {range : ScratchRange} {program : Program}
@@ -8227,6 +8629,764 @@ theorem compileBlockStmt?_noCallCreate
   decreasing_by
     simp_wf
     omega
+
+end
+
+mutual
+
+theorem compileStmtWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {handlers : FallbackHandlers}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {stmt : Stmt} {plan : Plan},
+      stmt.usesCallCreate = false →
+      compileStmtWithSwitchFallback? range program handlers returns
+          sourceScope stackLayout layout stmt =
+        some plan →
+      plan.block.usesCallCreate = false
+  | .call targets functionName args, plan, _hStmt, hCompile =>
+      compileCallWithNormalizedStackFallback?_noCallCreate
+        (by simpa [compileStmtWithSwitchFallback?] using hCompile)
+  | .leave, plan, _hStmt, hCompile =>
+      compileLeave?_noCallCreate
+        (by simpa [compileStmtWithSwitchFallback?] using hCompile)
+  | .block body, plan, hStmt, hCompile =>
+      have hBody : body.usesCallCreate = false := by
+        simpa [Stmt.usesCallCreate] using hStmt
+      compileBlockStmtWithSwitchFallback?_noCallCreate
+        (body := body) (plan := plan) hBody
+        (by simpa [compileStmtWithSwitchFallback?] using hCompile)
+  | .expr expr, plan, hStmt, hCompile => by
+      unfold compileStmtWithSwitchFallback? at hCompile
+      cases hOrd :
+          compileNonCallStmtSpanWithOrdinaryFallback? range returns
+            sourceScope stackLayout layout (.expr expr) with
+      | some ord =>
+          simp [hOrd] at hCompile
+          cases hCompile
+          exact compileNonCallStmtSpanWithOrdinaryFallback?_noCallCreate
+            hStmt hOrd
+      | none =>
+          simp [hOrd] at hCompile
+          exact compileExprStmtWithSpillFallback?_noCallCreate hStmt hCompile
+  | .let_ name value, plan, hStmt, hCompile => by
+      unfold compileStmtWithSwitchFallback? at hCompile
+      cases hOrd :
+          compileNonCallStmtSpanWithOrdinaryFallback? range returns
+            sourceScope stackLayout layout (.let_ name value) with
+      | some ord =>
+          simp [hOrd] at hCompile
+          cases hCompile
+          exact compileNonCallStmtSpanWithOrdinaryFallback?_noCallCreate
+            hStmt hOrd
+      | none =>
+          simp [hOrd] at hCompile
+          exact compileLetWithSpillFallback?_noCallCreate hStmt hCompile
+  | .assign name value, plan, hStmt, hCompile => by
+      unfold compileStmtWithSwitchFallback? at hCompile
+      cases hOrd :
+          compileNonCallStmtSpanWithOrdinaryFallback? range returns
+            sourceScope stackLayout layout (.assign name value) with
+      | some ord =>
+          simp [hOrd] at hCompile
+          cases hCompile
+          exact compileNonCallStmtSpanWithOrdinaryFallback?_noCallCreate
+            hStmt hOrd
+      | none =>
+          simp [hOrd] at hCompile
+          exact compileAssignWithSpillFallback?_noCallCreate hStmt hCompile
+  | .if_ cond body, plan, hStmt, hCompile => by
+      have hParts :
+          cond.usesCallCreate = false ∧ body.usesCallCreate = false := by
+        simpa [Stmt.usesCallCreate] using hStmt
+      unfold compileStmtWithSwitchFallback? at hCompile
+      cases hOrd :
+          compileNonCallStmtSpanWithOrdinaryFallback? range returns
+            sourceScope stackLayout layout (.if_ cond body) with
+      | some ord =>
+          simp [hOrd] at hCompile
+          cases hCompile
+          exact compileNonCallStmtSpanWithOrdinaryFallback?_noCallCreate
+            hStmt hOrd
+      | none =>
+          simp [hOrd] at hCompile
+          exact
+            compileIfFallbackWithSwitchFallback?_noCallCreate
+              (cond := cond) (body := body) (plan := plan)
+              hParts.1 hParts.2 hCompile
+  | .switch scrutinee cases defaultBody, plan, hStmt, hCompile => by
+      have hParts :
+          scrutinee.usesCallCreate = false ∧
+            CaseList.usesCallCreate cases = false ∧
+              Default.usesCallCreate defaultBody = false := by
+        simpa [Stmt.usesCallCreate, Bool.or_assoc] using hStmt
+      unfold compileStmtWithSwitchFallback? at hCompile
+      cases hOrd :
+          compileNonCallStmtSpanWithOrdinaryFallback? range returns
+            sourceScope stackLayout layout
+              (.switch scrutinee cases defaultBody) with
+      | some ord =>
+          simp [hOrd] at hCompile
+          cases hCompile
+          exact compileNonCallStmtSpanWithOrdinaryFallback?_noCallCreate
+            hStmt hOrd
+      | none =>
+          simp [hOrd] at hCompile
+          exact
+            compileSwitchFallbackWithSwitchFallback?_noCallCreate
+              (scrutinee := scrutinee) (cases := cases)
+              (defaultBody := defaultBody) (plan := plan)
+              hParts.1 hParts.2.1 hParts.2.2 hCompile
+  | .for_ init cond post body, plan, hStmt, hCompile => by
+      have hParts :
+          init.usesCallCreate = false ∧ cond.usesCallCreate = false ∧
+            post.usesCallCreate = false ∧ body.usesCallCreate = false := by
+        simpa [Stmt.usesCallCreate, Bool.or_assoc] using hStmt
+      unfold compileStmtWithSwitchFallback? at hCompile
+      cases hOrd :
+          compileNonCallStmtSpanWithOrdinaryFallback? range returns
+            sourceScope stackLayout layout (.for_ init cond post body) with
+      | some ord =>
+          simp [hOrd] at hCompile
+          cases hCompile
+          exact compileNonCallStmtSpanWithOrdinaryFallback?_noCallCreate
+            hStmt hOrd
+      | none =>
+          simp [hOrd] at hCompile
+          exact
+            compileForFallbackWithSwitchFallback?_noCallCreate
+              (init := init) (cond := cond) (post := post) (body := body)
+              (plan := plan) hParts.1 hParts.2.1 hParts.2.2.1
+              hParts.2.2.2 hCompile
+  | .brk, plan, hStmt, hCompile => by
+      unfold compileStmtWithSwitchFallback? at hCompile
+      cases hOrd :
+          compileNonCallStmtSpanWithOrdinaryFallback? range returns
+            sourceScope stackLayout layout .brk with
+      | some ord =>
+          simp [hOrd] at hCompile
+          cases hCompile
+          exact compileNonCallStmtSpanWithOrdinaryFallback?_noCallCreate
+            hStmt hOrd
+      | none =>
+          simp [hOrd] at hCompile
+          exact compileBreakWithSpillFallback?_noCallCreate hCompile
+  | .cont, plan, hStmt, hCompile => by
+      unfold compileStmtWithSwitchFallback? at hCompile
+      cases hOrd :
+          compileNonCallStmtSpanWithOrdinaryFallback? range returns
+            sourceScope stackLayout layout .cont with
+      | some ord =>
+          simp [hOrd] at hCompile
+          cases hCompile
+          exact compileNonCallStmtSpanWithOrdinaryFallback?_noCallCreate
+            hStmt hOrd
+      | none =>
+          simp [hOrd] at hCompile
+          exact compileContinueWithSpillFallback?_noCallCreate hCompile
+  | .terminal kind, plan, hStmt, hCompile => by
+      unfold compileStmtWithSwitchFallback? at hCompile
+      cases hOrd :
+          compileNonCallStmtSpanWithOrdinaryFallback? range returns
+            sourceScope stackLayout layout (.terminal kind) with
+      | some ord =>
+          simp [hOrd] at hCompile
+          cases hCompile
+          exact compileNonCallStmtSpanWithOrdinaryFallback?_noCallCreate
+            hStmt hOrd
+      | none =>
+          simp [hOrd] at hCompile
+          exact compileTerminalWithSpillFallback?_noCallCreate hCompile
+  | .terminalArgs kind args, plan, hStmt, hCompile => by
+      unfold compileStmtWithSwitchFallback? at hCompile
+      cases hOrd :
+          compileNonCallStmtSpanWithOrdinaryFallback? range returns
+            sourceScope stackLayout layout (.terminalArgs kind args) with
+      | some ord =>
+          simp [hOrd] at hCompile
+          cases hCompile
+          exact compileNonCallStmtSpanWithOrdinaryFallback?_noCallCreate
+            hStmt hOrd
+      | none =>
+          simp [hOrd] at hCompile
+          exact compileTerminalArgsWithSpillFallback?_noCallCreate hStmt hCompile
+  termination_by stmt plan _hStmt _hCompile => (sizeOf stmt, 3)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+theorem compileIfFallbackWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {returns : List Name} {handlers : FallbackHandlers}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {cond : Expr 1} {body : Block}
+    {plan : Plan}
+    (hCond : cond.usesCallCreate = false)
+    (hBody : body.usesCallCreate = false)
+    (hCompile :
+      compileIfFallbackWithSwitchFallback? range program returns handlers
+        sourceScope stackLayout layout cond body = some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileIfFallbackWithSwitchFallback? at hCompile
+  cases hEntry :
+      normalizePlanStack? range
+        { sourceScope := sourceScope
+          stackLayout := stackLayout
+          layout := layout
+          block := { stmts := [] } } with
+  | none =>
+      simp [hEntry] at hCompile
+  | some entry =>
+      simp [hEntry] at hCompile
+      by_cases hStack : entry.stackLayout = []
+      · simp [hStack] at hCompile
+        cases hSafe : SourceNoMemoryTouch.expr? cond
+        · simp [hSafe] at hCompile
+        · simp [hSafe] at hCompile
+          cases hCondCode :
+              SpillExpr.compileCode? range 0 entry.layout cond with
+          | none =>
+              simp [hCondCode] at hCompile
+          | some condCode =>
+              simp [hCondCode] at hCompile
+              cases hBodyPlan :
+                  compileBlockStmtWithSwitchFallback? range program handlers
+                    returns entry.sourceScope [] entry.layout body with
+              | none =>
+                  simp [hBodyPlan] at hCompile
+              | some bodyPlan =>
+                  simp [hBodyPlan] at hCompile
+                  cases hNormalized :
+                      normalizePlanStack? range bodyPlan with
+                  | none =>
+                      simp [hNormalized] at hCompile
+                  | some normalized =>
+                      simp [hNormalized] at hCompile
+                      by_cases hOk :
+                          normalized.sourceScope = entry.sourceScope ∧
+                            normalized.stackLayout = [] ∧
+                            normalized.layout = entry.layout
+                      · simp [hOk] at hCompile
+                        cases hCompile
+                        have hEntryNo :
+                            entry.block.usesCallCreate = false :=
+                          normalizePlanStack?_noCallCreate hEntry
+                            expressionsBlock_empty_noCallCreate
+                        have hBodyNo :
+                            normalized.block.usesCallCreate = false :=
+                          normalizePlanStack?_noCallCreate hNormalized
+                            (compileBlockStmtWithSwitchFallback?_noCallCreate
+                              (body := body) (plan := bodyPlan) hBody
+                              hBodyPlan)
+                        have hCondNo :
+                            condCode.usesCallCreate = false :=
+                          spillExpr_compileCode?_noCallCreate_of_usesCallCreate
+                            hCond hCondCode
+                        exact
+                          expressionsBlock_append_noCallCreate hEntryNo
+                            (by
+                              simp [Expressions.Block.usesCallCreate,
+                                Expressions.StmtList.usesCallCreate,
+                                Expressions.Stmt.usesCallCreate,
+                                Expressions.Expr.usesCallCreate,
+                                hCondNo, hBodyNo])
+                      · simp [hOk] at hCompile
+      · simp [hStack] at hCompile
+  termination_by (sizeOf (Stmt.if_ cond body), 2)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+theorem compileSwitchCaseBodiesWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {returns : List Name} {handlers : FallbackHandlers}
+    {sourceScope : List Name} {layout : SpillLayout.Layout} :
+    ∀ {cases : List (Word × Block)}
+      {compiled : List (Word × Expressions.Block)},
+      CaseList.usesCallCreate cases = false →
+      compileSwitchCaseBodiesWithSwitchFallback? range program returns
+          handlers sourceScope layout cases =
+        some compiled →
+      Expressions.CaseList.usesCallCreate compiled = false
+  | [], compiled, _hCases, hCompile => by
+      simp [compileSwitchCaseBodiesWithSwitchFallback?] at hCompile
+      cases hCompile
+      simp [Expressions.CaseList.usesCallCreate]
+  | (value, body) :: rest, compiled, hCases, hCompile => by
+      have hParts :
+          body.usesCallCreate = false ∧
+            CaseList.usesCallCreate rest = false := by
+        simpa [CaseList.usesCallCreate] using hCases
+      unfold compileSwitchCaseBodiesWithSwitchFallback? at hCompile
+      cases hBodyPlan :
+          compileBlockStmtWithSwitchFallback? range program handlers returns
+            sourceScope [] layout body with
+      | none =>
+          simp [hBodyPlan] at hCompile
+      | some bodyPlan =>
+          simp [hBodyPlan] at hCompile
+          cases hNormalized :
+              normalizePlanStack? range bodyPlan with
+          | none =>
+              simp [hNormalized] at hCompile
+          | some normalized =>
+              simp [hNormalized] at hCompile
+              by_cases hOk :
+                  normalized.sourceScope = sourceScope ∧
+                    normalized.stackLayout = [] ∧
+                    normalized.layout = layout
+              · simp [hOk] at hCompile
+                cases hTail :
+                    compileSwitchCaseBodiesWithSwitchFallback? range program
+                      returns handlers sourceScope layout rest with
+                | none =>
+                    simp [hTail] at hCompile
+                | some tail =>
+                    simp [hTail] at hCompile
+                    cases hCompile
+                    have hBodyNo :
+                        normalized.block.usesCallCreate = false :=
+                      normalizePlanStack?_noCallCreate hNormalized
+                        (compileBlockStmtWithSwitchFallback?_noCallCreate
+                          (body := body) (plan := bodyPlan) hParts.1
+                          hBodyPlan)
+                    have hTailNo :
+                        Expressions.CaseList.usesCallCreate tail = false :=
+                      compileSwitchCaseBodiesWithSwitchFallback?_noCallCreate
+                        (cases := rest) (compiled := tail) hParts.2 hTail
+                    simp [Expressions.CaseList.usesCallCreate, hBodyNo,
+                      hTailNo]
+              · simp [hOk] at hCompile
+  termination_by cases compiled _hCases _hCompile => (sizeOf cases, 3)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+theorem compileSwitchDefaultBodyWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {returns : List Name} {handlers : FallbackHandlers}
+    {sourceScope : List Name} {layout : SpillLayout.Layout} :
+    ∀ {defaultBody : Option Block}
+      {compiled : Option Expressions.Block},
+      Default.usesCallCreate defaultBody = false →
+      compileSwitchDefaultBodyWithSwitchFallback? range program returns
+          handlers sourceScope layout defaultBody =
+        some compiled →
+      Expressions.Default.usesCallCreate compiled = false
+  | none, compiled, _hDefault, hCompile => by
+      simp [compileSwitchDefaultBodyWithSwitchFallback?] at hCompile
+      cases hCompile
+      simp [Expressions.Default.usesCallCreate]
+  | some body, compiled, hDefault, hCompile => by
+      have hBody : body.usesCallCreate = false := by
+        simpa [Default.usesCallCreate] using hDefault
+      unfold compileSwitchDefaultBodyWithSwitchFallback? at hCompile
+      cases hBodyPlan :
+          compileBlockStmtWithSwitchFallback? range program handlers returns
+            sourceScope [] layout body with
+      | none =>
+          simp [hBodyPlan] at hCompile
+      | some bodyPlan =>
+          simp [hBodyPlan] at hCompile
+          cases hNormalized :
+              normalizePlanStack? range bodyPlan with
+          | none =>
+              simp [hNormalized] at hCompile
+          | some normalized =>
+              simp [hNormalized] at hCompile
+              by_cases hOk :
+                  normalized.sourceScope = sourceScope ∧
+                    normalized.stackLayout = [] ∧
+                    normalized.layout = layout
+              · simp [hOk] at hCompile
+                cases hCompile
+                have hBodyNo :
+                    normalized.block.usesCallCreate = false :=
+                  normalizePlanStack?_noCallCreate hNormalized
+                    (compileBlockStmtWithSwitchFallback?_noCallCreate
+                      (body := body) (plan := bodyPlan) hBody hBodyPlan)
+                simp [Expressions.Default.usesCallCreate, hBodyNo]
+              · simp [hOk] at hCompile
+  termination_by defaultBody compiled _hDefault _hCompile =>
+    (sizeOf defaultBody, 3)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+theorem compileSwitchFallbackWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {returns : List Name} {handlers : FallbackHandlers}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {scrutinee : Expr 1}
+    {cases : List (Word × Block)} {defaultBody : Option Block}
+    {plan : Plan}
+    (hScrutinee : scrutinee.usesCallCreate = false)
+    (hCases : CaseList.usesCallCreate cases = false)
+    (hDefault : Default.usesCallCreate defaultBody = false)
+    (hCompile :
+      compileSwitchFallbackWithSwitchFallback? range program returns handlers
+        sourceScope stackLayout layout scrutinee cases defaultBody =
+        some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileSwitchFallbackWithSwitchFallback? at hCompile
+  cases hEntry :
+      normalizePlanStack? range
+        { sourceScope := sourceScope
+          stackLayout := stackLayout
+          layout := layout
+          block := { stmts := [] } } with
+  | none =>
+      simp [hEntry] at hCompile
+  | some entry =>
+      simp [hEntry] at hCompile
+      by_cases hStack : entry.stackLayout = []
+      · simp [hStack] at hCompile
+        cases hSafe : SourceNoMemoryTouch.expr? scrutinee
+        · simp [hSafe] at hCompile
+        · simp [hSafe] at hCompile
+          cases hScrutineeCode :
+              SpillExpr.compileCode? range 0 entry.layout scrutinee with
+          | none =>
+              simp [hScrutineeCode] at hCompile
+          | some scrutineeCode =>
+              simp [hScrutineeCode] at hCompile
+              cases hCompiledCases :
+                  compileSwitchCaseBodiesWithSwitchFallback? range program
+                    returns handlers entry.sourceScope entry.layout cases with
+              | none =>
+                  simp [hCompiledCases] at hCompile
+              | some compiledCases =>
+                  simp [hCompiledCases] at hCompile
+                  cases hCompiledDefault :
+                      compileSwitchDefaultBodyWithSwitchFallback? range program
+                        returns handlers entry.sourceScope entry.layout
+                        defaultBody with
+                  | none =>
+                      simp [hCompiledDefault] at hCompile
+                  | some compiledDefault =>
+                      simp [hCompiledDefault] at hCompile
+                      cases hCompile
+                      have hEntryNo :
+                          entry.block.usesCallCreate = false :=
+                        normalizePlanStack?_noCallCreate hEntry
+                          expressionsBlock_empty_noCallCreate
+                      have hScrutineeNo :
+                          scrutineeCode.usesCallCreate = false :=
+                        spillExpr_compileCode?_noCallCreate_of_usesCallCreate
+                          hScrutinee hScrutineeCode
+                      have hCasesNo :
+                          Expressions.CaseList.usesCallCreate
+                            compiledCases = false :=
+                        compileSwitchCaseBodiesWithSwitchFallback?_noCallCreate
+                          (cases := cases) (compiled := compiledCases)
+                          hCases hCompiledCases
+                      have hDefaultNo :
+                          Expressions.Default.usesCallCreate
+                            compiledDefault = false :=
+                        compileSwitchDefaultBodyWithSwitchFallback?_noCallCreate
+                          (defaultBody := defaultBody)
+                          (compiled := compiledDefault)
+                          hDefault hCompiledDefault
+                      exact
+                        expressionsBlock_append_noCallCreate hEntryNo
+                          (by
+                            simp [Expressions.Block.usesCallCreate,
+                              Expressions.StmtList.usesCallCreate,
+                              Expressions.Stmt.usesCallCreate,
+                              Expressions.Expr.usesCallCreate,
+                              hScrutineeNo, hCasesNo, hDefaultNo])
+      · simp [hStack] at hCompile
+  termination_by (sizeOf (Stmt.switch scrutinee cases defaultBody), 2)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+theorem compileForFallbackWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {handlers : FallbackHandlers} {returns : List Name}
+    {sourceScope stackLayout : List Name} {layout : SpillLayout.Layout}
+    {init : Block} {cond : Expr 1} {post body : Block}
+    {plan : Plan}
+    (hInit : init.usesCallCreate = false)
+    (hCond : cond.usesCallCreate = false)
+    (hPost : post.usesCallCreate = false)
+    (hBody : body.usesCallCreate = false)
+    (hCompile :
+      compileForFallbackWithSwitchFallback? range program handlers returns
+        sourceScope stackLayout layout init cond post body =
+        some plan) :
+    plan.block.usesCallCreate = false := by
+  unfold compileForFallbackWithSwitchFallback? at hCompile
+  cases hEntry :
+      normalizePlanStack? range
+        { sourceScope := sourceScope
+          stackLayout := stackLayout
+          layout := layout
+          block := { stmts := [] } } with
+  | none =>
+      simp [hEntry] at hCompile
+  | some entry =>
+      simp [hEntry] at hCompile
+      by_cases hStack : entry.stackLayout = []
+      · simp [hStack] at hCompile
+        let loopless := handlers.withoutLoopControl
+        cases hInitOpen :
+            compileBlockOpenWithSwitchFallback? range program loopless returns
+              entry.sourceScope [] entry.layout init with
+        | none =>
+            simp [loopless, hInitOpen] at hCompile
+        | some initOpen =>
+            simp [loopless, hInitOpen] at hCompile
+            cases hInitNorm :
+                normalizePlanStack? range initOpen with
+            | none =>
+                simp [hInitNorm] at hCompile
+            | some initPlan =>
+                simp [hInitNorm] at hCompile
+                by_cases hInitStack : initPlan.stackLayout = []
+                · simp [hInitStack] at hCompile
+                  cases hSafe : SourceNoMemoryTouch.expr? cond
+                  · simp [hSafe] at hCompile
+                  · simp [hSafe] at hCompile
+                    cases hCondCode :
+                        SpillExpr.compileCode? range 0 initPlan.layout cond with
+                    | none =>
+                        simp [hCondCode] at hCompile
+                    | some condCode =>
+                        simp [hCondCode] at hCompile
+                        cases hPostCompile :
+                            compileBlockStmtWithSwitchFallback? range program
+                              loopless returns initPlan.sourceScope []
+                              initPlan.layout post with
+                        | none =>
+                            simp [loopless, hPostCompile] at hCompile
+                        | some postRaw =>
+                            simp [loopless, hPostCompile] at hCompile
+                            cases hPostNorm :
+                                normalizePlanStack? range postRaw with
+                            | none =>
+                                simp [hPostNorm] at hCompile
+                            | some postPlan =>
+                                simp [hPostNorm] at hCompile
+                                by_cases hPostOk :
+                                    postPlan.sourceScope =
+                                        initPlan.sourceScope ∧
+                                      postPlan.stackLayout = [] ∧
+                                      postPlan.layout = initPlan.layout
+                                · simp [hPostOk] at hCompile
+                                  let bodyHandlers :=
+                                    handlers.withLoopControl
+                                      initPlan.sourceScope
+                                  cases hBodyCompile :
+                                      compileBlockStmtWithSwitchFallback? range
+                                        program bodyHandlers returns
+                                        initPlan.sourceScope [] initPlan.layout
+                                        body with
+                                  | none =>
+                                      simp [bodyHandlers, hBodyCompile] at hCompile
+                                  | some bodyRaw =>
+                                      simp [bodyHandlers, hBodyCompile] at hCompile
+                                      cases hBodyNorm :
+                                          normalizePlanStack? range bodyRaw with
+                                      | none =>
+                                          simp [hBodyNorm] at hCompile
+                                      | some bodyPlan =>
+                                          simp [hBodyNorm] at hCompile
+                                          by_cases hBodyOk :
+                                              bodyPlan.sourceScope =
+                                                  initPlan.sourceScope ∧
+                                                bodyPlan.stackLayout = [] ∧
+                                                bodyPlan.layout =
+                                                  initPlan.layout
+                                          · simp [hBodyOk] at hCompile
+                                            let finalLayout :=
+                                              SpillLayout.restrictToScope
+                                                entry.sourceScope
+                                                initPlan.layout
+                                            cases hCheck :
+                                                SpillLayout.checked? range
+                                                  entry.sourceScope []
+                                                  finalLayout with
+                                            | false =>
+                                                simp [finalLayout, hCheck] at hCompile
+                                            | true =>
+                                                simp [finalLayout, hCheck] at hCompile
+                                                cases hCompile
+                                                have hEntryNo :
+                                                    entry.block.usesCallCreate =
+                                                      false :=
+                                                  normalizePlanStack?_noCallCreate
+                                                    hEntry
+                                                    expressionsBlock_empty_noCallCreate
+                                                have hInitNo :
+                                                    initPlan.block.usesCallCreate =
+                                                      false :=
+                                                  normalizePlanStack?_noCallCreate
+                                                    hInitNorm
+                                                    (compileBlockOpenWithSwitchFallback?_noCallCreate
+                                                      (block := init)
+                                                      (plan := initOpen) hInit
+                                                      hInitOpen)
+                                                have hCondNo :
+                                                    condCode.usesCallCreate =
+                                                      false :=
+                                                  spillExpr_compileCode?_noCallCreate_of_usesCallCreate
+                                                    hCond hCondCode
+                                                have hPostNo :
+                                                    postPlan.block.usesCallCreate =
+                                                      false :=
+                                                  normalizePlanStack?_noCallCreate
+                                                    hPostNorm
+                                                    (compileBlockStmtWithSwitchFallback?_noCallCreate
+                                                      (body := post)
+                                                      (plan := postRaw) hPost
+                                                      hPostCompile)
+                                                have hBodyNo :
+                                                    bodyPlan.block.usesCallCreate =
+                                                      false :=
+                                                  normalizePlanStack?_noCallCreate
+                                                    hBodyNorm
+                                                    (compileBlockStmtWithSwitchFallback?_noCallCreate
+                                                      (body := body)
+                                                      (plan := bodyRaw) hBody
+                                                      hBodyCompile)
+                                                exact
+                                                  expressionsBlock_append_noCallCreate
+                                                    hEntryNo
+                                                    (by
+                                                      simp [Expressions.Block.usesCallCreate,
+                                                        Expressions.StmtList.usesCallCreate,
+                                                        Expressions.Stmt.usesCallCreate,
+                                                        Expressions.Expr.usesCallCreate,
+                                                        hInitNo, hCondNo,
+                                                        hPostNo, hBodyNo])
+                                          · simp [hBodyOk] at hCompile
+                                · simp [hPostOk] at hCompile
+                · simp [hInitStack] at hCompile
+      · simp [hStack] at hCompile
+  termination_by (sizeOf (Stmt.for_ init cond post body), 2)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+theorem compileStmtListWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {handlers : FallbackHandlers}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {stmts : List Stmt} {plan : Plan},
+      StmtList.usesCallCreate stmts = false →
+      compileStmtListWithSwitchFallback? range program handlers returns
+          sourceScope stackLayout layout stmts =
+        some plan →
+      plan.block.usesCallCreate = false
+  | [], plan, _hStmts, hCompile => by
+      simp [compileStmtListWithSwitchFallback?] at hCompile
+      cases hCompile
+      simp [Expressions.Block.usesCallCreate,
+        Expressions.StmtList.usesCallCreate]
+  | stmt :: rest, plan, hStmts, hCompile => by
+      have hParts :
+          stmt.usesCallCreate = false ∧
+            StmtList.usesCallCreate rest = false := by
+        simpa [StmtList.usesCallCreate] using hStmts
+      unfold compileStmtListWithSwitchFallback? at hCompile
+      cases hHead :
+          compileStmtWithSwitchFallback? range program handlers returns
+            sourceScope stackLayout layout stmt with
+      | none =>
+          simp [hHead] at hCompile
+      | some head =>
+          simp [hHead] at hCompile
+          cases hTail :
+              compileStmtListWithSwitchFallback? range program handlers returns
+                head.sourceScope head.stackLayout head.layout rest with
+          | none =>
+              simp [hTail] at hCompile
+          | some tail =>
+              simp [hTail] at hCompile
+              cases hCompile
+              exact
+                expressionsBlock_append_noCallCreate
+                  (compileStmtWithSwitchFallback?_noCallCreate
+                    (stmt := stmt) (plan := head) hParts.1 hHead)
+                  (compileStmtListWithSwitchFallback?_noCallCreate
+                    (stmts := rest) (plan := tail) hParts.2 hTail)
+  termination_by stmts plan _hStmts _hCompile => (sizeOf stmts, 3)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+theorem compileBlockOpenWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {handlers : FallbackHandlers}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {block : Block} {plan : Plan},
+      block.usesCallCreate = false →
+      compileBlockOpenWithSwitchFallback? range program handlers returns
+          sourceScope stackLayout layout block =
+        some plan →
+      plan.block.usesCallCreate = false
+  | ⟨stmts⟩, plan, hBlock, hCompile =>
+      compileStmtListWithSwitchFallback?_noCallCreate
+        (stmts := stmts) (plan := plan)
+        (by simpa [Block.usesCallCreate] using hBlock)
+        (by simpa [compileBlockOpenWithSwitchFallback?] using hCompile)
+  termination_by block plan _hBlock _hCompile => (sizeOf block, 4)
+  decreasing_by
+    cases block
+    simp_wf
+    omega
+
+theorem compileBlockStmtWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {handlers : FallbackHandlers}
+    {returns sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} :
+    ∀ {body : Block} {plan : Plan},
+      body.usesCallCreate = false →
+      compileBlockStmtWithSwitchFallback? range program handlers returns
+          sourceScope stackLayout layout body =
+        some plan →
+      plan.block.usesCallCreate = false
+  | body, plan, hBody, hCompile => by
+      unfold compileBlockStmtWithSwitchFallback? at hCompile
+      cases hBodyPlan :
+          compileBlockOpenWithSwitchFallback? range program handlers returns
+            sourceScope stackLayout layout body with
+      | none =>
+          simp [hBodyPlan] at hCompile
+      | some bodyPlan =>
+          simp [hBodyPlan] at hCompile
+          cases hNormalized :
+              normalizePlanStack? range bodyPlan with
+          | none =>
+              simp [hNormalized] at hCompile
+          | some normalized =>
+              simp [hNormalized] at hCompile
+              cases hCheck :
+                  SpillLayout.checked? range sourceScope
+                    normalized.stackLayout
+                    (SpillLayout.restrictToScope sourceScope
+                      normalized.layout) with
+              | false =>
+                  simp [hCheck] at hCompile
+              | true =>
+                  simp [hCheck] at hCompile
+                  cases hCompile
+                  have hNormalizedNo :
+                      normalized.block.usesCallCreate = false :=
+                    normalizePlanStack?_noCallCreate
+                      (full := normalized) hNormalized
+                      (compileBlockOpenWithSwitchFallback?_noCallCreate
+                        (block := body) (plan := bodyPlan) hBody hBodyPlan)
+                  simpa using hNormalizedNo
+  termination_by body plan _hBody _hCompile => (sizeOf body, 5)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
 
 end
 
@@ -11442,6 +12602,220 @@ def compileExpressionsProgramWithSwitchFallback? (range : ScratchRange)
   let bodyPlan ← compileMainBodyWithSwitchFallback? range program
   let bodyPlan := withScratchPrealloc range bodyPlan
   some (bodyPlan, { procs := procs, body := bodyPlan.block })
+
+theorem compileMainBodyWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program} {plan : Plan}
+    (hBody : program.body.usesCallCreate = false)
+    (hCompile :
+      compileMainBodyWithSwitchFallback? range program = some plan) :
+    plan.block.usesCallCreate = false :=
+  compileBlockOpenWithSwitchFallback?_noCallCreate
+    (block := program.body) (plan := plan) hBody
+    (by simpa [compileMainBodyWithSwitchFallback?] using hCompile)
+
+theorem compileFunDefWithSwitchFallback?_eq_some_header
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    (hCompile :
+      compileFunDefWithSwitchFallback? range program fn = some proc) :
+    proc.name = fn.name ∧
+      proc.argc = fn.params.length ∧
+      proc.retc = fn.returns.length := by
+  unfold compileFunDefWithSwitchFallback? at hCompile
+  cases hInit :
+      compileLocalsBlockSpan? range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params)
+        { stmts := initReturnsInSourceScopeOrder fn.returns } with
+  | none =>
+      simp [hInit] at hCompile
+  | some init =>
+      simp [hInit] at hCompile
+      cases hBody :
+          compileBlockOpenWithSwitchFallback? range program {} fn.returns
+            init.sourceScope init.stackLayout init.layout fn.body with
+      | none =>
+          simp [hBody] at hCompile
+      | some body =>
+          simp [hBody] at hCompile
+          cases hFull :
+              appendReturnFallthrough? range fn.returns
+                { sourceScope := body.sourceScope
+                  stackLayout := body.stackLayout
+                  layout := body.layout
+                  block := ExpressionsBlock.append init.block body.block } with
+          | none =>
+              simp [hFull] at hCompile
+          | some fullBody =>
+              simp [hFull] at hCompile
+              cases hCompile
+              exact ⟨rfl, rfl, rfl⟩
+
+theorem compileFunDefWithSwitchFallback?_eq_some_components
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    (hCompile :
+      compileFunDefWithSwitchFallback? range program fn = some proc) :
+    ∃ init body fullBody,
+      compileLocalsBlockSpan? range fn.params fn.params.reverse
+          (layoutOfParamStack fn.params)
+          { stmts := initReturnsInSourceScopeOrder fn.returns } =
+        some init ∧
+      compileBlockOpenWithSwitchFallback? range program {} fn.returns
+          init.sourceScope init.stackLayout init.layout fn.body =
+        some body ∧
+      appendReturnFallthrough? range fn.returns
+          { sourceScope := body.sourceScope
+            stackLayout := body.stackLayout
+            layout := body.layout
+            block := ExpressionsBlock.append init.block body.block } =
+        some fullBody ∧
+      proc =
+        { name := fn.name
+          argc := fn.params.length
+          retc := fn.returns.length
+          body := fullBody.block } := by
+  unfold compileFunDefWithSwitchFallback? at hCompile
+  cases hInit :
+      compileLocalsBlockSpan? range fn.params fn.params.reverse
+        (layoutOfParamStack fn.params)
+        { stmts := initReturnsInSourceScopeOrder fn.returns } with
+  | none =>
+      simp [hInit] at hCompile
+  | some init =>
+      simp [hInit] at hCompile
+      cases hBody :
+          compileBlockOpenWithSwitchFallback? range program {} fn.returns
+            init.sourceScope init.stackLayout init.layout fn.body with
+      | none =>
+          simp [hBody] at hCompile
+      | some body =>
+          simp [hBody] at hCompile
+          cases hFull :
+              appendReturnFallthrough? range fn.returns
+                { sourceScope := body.sourceScope
+                  stackLayout := body.stackLayout
+                  layout := body.layout
+                  block := ExpressionsBlock.append init.block body.block } with
+          | none =>
+              simp [hFull] at hCompile
+          | some fullBody =>
+              simp [hFull] at hCompile
+              cases hCompile
+              exact
+                ⟨init, body, fullBody,
+                  by simpa [hInit],
+                  by simpa [hBody],
+                  by simpa [hFull],
+                  rfl⟩
+
+theorem compileFunDefWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {fn : FunDef} {proc : Expressions.Proc}
+    (hFn : fn.usesCallCreate = false)
+    (hCompile :
+      compileFunDefWithSwitchFallback? range program fn = some proc) :
+    proc.usesCallCreate = false := by
+  rcases compileFunDefWithSwitchFallback?_eq_some_components hCompile with
+    ⟨init, body, fullBody, hInit, hBody, hFull, hProc⟩
+  subst proc
+  have hInitNo : init.block.usesCallCreate = false :=
+    compileLocalsBlockSpan?_noCallCreate hInit
+  have hBodySourceNo : fn.body.usesCallCreate = false := by
+    simpa [FunDef.usesCallCreate] using hFn
+  have hBodyNo : body.block.usesCallCreate = false :=
+    compileBlockOpenWithSwitchFallback?_noCallCreate
+      (block := fn.body) (plan := body) hBodySourceNo hBody
+  have hCombined :
+      (ExpressionsBlock.append init.block body.block).usesCallCreate = false :=
+    expressionsBlock_append_noCallCreate hInitNo hBodyNo
+  simpa [Expressions.Proc.usesCallCreate] using
+    appendReturnFallthrough?_noCallCreate hFull hCombined
+
+theorem compileFunDefsWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program} :
+    ∀ {fns : List FunDef} {procs : List Expressions.Proc},
+      FunList.usesCallCreate fns = false →
+      compileFunDefsWithSwitchFallback? range program fns = some procs →
+      Expressions.ProcList.usesCallCreate procs = false
+  | [], procs, _hFns, hCompile => by
+      simp [compileFunDefsWithSwitchFallback?] at hCompile
+      cases hCompile
+      simp [Expressions.ProcList.usesCallCreate]
+  | fn :: rest, procs, hFns, hCompile => by
+      have hParts :
+          fn.usesCallCreate = false ∧
+            FunList.usesCallCreate rest = false := by
+        simpa [FunList.usesCallCreate] using hFns
+      unfold compileFunDefsWithSwitchFallback? at hCompile
+      cases hHead : compileFunDefWithSwitchFallback? range program fn with
+      | none =>
+          simp [hHead] at hCompile
+      | some proc =>
+          simp [hHead] at hCompile
+          cases hTail :
+              compileFunDefsWithSwitchFallback? range program rest with
+          | none =>
+              simp [hTail] at hCompile
+          | some tailProcs =>
+              simp [hTail] at hCompile
+              cases hCompile
+              simp [Expressions.ProcList.usesCallCreate,
+                compileFunDefWithSwitchFallback?_noCallCreate hParts.1 hHead,
+                compileFunDefsWithSwitchFallback?_noCallCreate hParts.2 hTail]
+
+theorem compileExpressionsProgramWithSwitchFallback?_eq_some_components
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    (hCompile :
+      compileExpressionsProgramWithSwitchFallback? range program =
+        some (plan, exprProgram)) :
+    ∃ procs bodyPlan,
+      compileFunDefsWithSwitchFallback? range program program.functions =
+          some procs ∧
+        compileMainBodyWithSwitchFallback? range program = some bodyPlan ∧
+        plan = withScratchPrealloc range bodyPlan ∧
+        exprProgram = { procs := procs, body := plan.block } := by
+  unfold compileExpressionsProgramWithSwitchFallback? at hCompile
+  cases hProcs :
+      compileFunDefsWithSwitchFallback? range program program.functions with
+  | none =>
+      simp [hProcs] at hCompile
+  | some procs =>
+      simp [hProcs] at hCompile
+      cases hBody : compileMainBodyWithSwitchFallback? range program with
+      | none =>
+          simp [hBody] at hCompile
+      | some bodyPlan =>
+          simp [hBody] at hCompile
+          rcases hCompile with ⟨rfl, rfl⟩
+          exact ⟨procs, bodyPlan, rfl, rfl, rfl, rfl⟩
+
+theorem compileExpressionsProgramWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    (hProgram : program.usesCallCreate = false)
+    (hCompile :
+      compileExpressionsProgramWithSwitchFallback? range program =
+        some (plan, exprProgram)) :
+    exprProgram.usesCallCreate = false := by
+  rcases
+      compileExpressionsProgramWithSwitchFallback?_eq_some_components
+        hCompile with
+    ⟨procs, bodyPlan, hProcs, hBody, hPlan, hExprProgram⟩
+  subst plan
+  subst exprProgram
+  have hParts :
+      FunList.usesCallCreate program.functions = false ∧
+        program.body.usesCallCreate = false := by
+    simpa [Program.usesCallCreate] using hProgram
+  have hProcsNo : Expressions.ProcList.usesCallCreate procs = false :=
+    compileFunDefsWithSwitchFallback?_noCallCreate hParts.1 hProcs
+  have hBodyNo : bodyPlan.block.usesCallCreate = false :=
+    compileMainBodyWithSwitchFallback?_noCallCreate hParts.2 hBody
+  have hPreallocNo :
+      (withScratchPrealloc range bodyPlan).block.usesCallCreate = false :=
+    withScratchPrealloc_noCallCreate hBodyNo
+  simp [Expressions.Program.usesCallCreate, hProcsNo, hPreallocNo]
 
 def compileTargetWithSwitchFallback? (range : ScratchRange)
     (program : Program) :
@@ -18103,6 +19477,57 @@ theorem compileChecked?_noCallCreate
     Expressions.Program.compileChecked?_noCallCreate
       (compileExpressionsProgram?_noCallCreate hExpr) hAsm
 
+noncomputable def compileCheckedWithSwitchFallback?
+    (range : ScratchRange) (program : Program) :
+    Option (Plan × Expressions.Program × Assembly.Program) := do
+  let (plan, exprProgram) ←
+    compileExpressionsProgramWithSwitchFallback? range program
+  let asm ← Expressions.Program.compileChecked? exprProgram
+  some (plan, exprProgram, asm)
+
+theorem compileCheckedWithSwitchFallback?_eq_some
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithSwitchFallback? range program =
+        some (plan, exprProgram, asm)) :
+    compileExpressionsProgramWithSwitchFallback? range program =
+        some (plan, exprProgram) ∧
+      Expressions.Program.compileChecked? exprProgram = some asm := by
+  unfold compileCheckedWithSwitchFallback? at hCompile
+  cases hExpr :
+      compileExpressionsProgramWithSwitchFallback? range program with
+  | none =>
+      simp [hExpr] at hCompile
+  | some result =>
+      rcases result with ⟨plan', exprProgram'⟩
+      simp [hExpr] at hCompile
+      cases hAsm : Expressions.Program.compileChecked? exprProgram' with
+      | none =>
+          simp [hAsm] at hCompile
+      | some asm' =>
+          simp [hAsm] at hCompile
+          rcases hCompile with ⟨rfl, rfl, rfl⟩
+          exact ⟨rfl, hAsm⟩
+
+theorem compileCheckedWithSwitchFallback?_noCallCreate
+    {range : ScratchRange} {program : Program}
+    {plan : Plan} {exprProgram : Expressions.Program}
+    {asm : Assembly.Program}
+    (hProgram : program.usesCallCreate = false)
+    (hCompile :
+      compileCheckedWithSwitchFallback? range program =
+        some (plan, exprProgram, asm)) :
+    Assembly.Program.usesCallCreate asm = false := by
+  rcases compileCheckedWithSwitchFallback?_eq_some hCompile with
+    ⟨hExpr, hAsm⟩
+  exact
+    Expressions.Program.compileChecked?_noCallCreate
+      (compileExpressionsProgramWithSwitchFallback?_noCallCreate
+        hProgram hExpr)
+      hAsm
+
 noncomputable def compileCheckedAssembly?
     (range : ScratchRange) (program : Program) :
     Option Assembly.Program := do
@@ -18217,6 +19642,36 @@ noncomputable def compileCheckedPlannedPrealloc?
     Option (ScratchRange × Plan × Expressions.Program × Assembly.Program) :=
   if programOpenSupported? program then
     compileCheckedPlannedPreallocFrom? program maxWords 0
+  else
+    none
+
+noncomputable def compileCheckedPlannedPreallocFromWithSwitchFallback?
+    (program : Program) : Nat → Nat →
+      Option (ScratchRange × Plan × Expressions.Program × Assembly.Program)
+  | remaining, words =>
+      match plannedScratchRangeChecked? words with
+      | some range =>
+          match compileCheckedWithSwitchFallback? range program with
+          | some (plan, exprProgram, asm) =>
+              some (range, plan, exprProgram, asm)
+          | none =>
+              match remaining with
+              | 0 => none
+              | remaining' + 1 =>
+                  compileCheckedPlannedPreallocFromWithSwitchFallback?
+                    program remaining' (words + 1)
+      | none =>
+          match remaining with
+          | 0 => none
+          | remaining' + 1 =>
+              compileCheckedPlannedPreallocFromWithSwitchFallback?
+                program remaining' (words + 1)
+
+noncomputable def compileCheckedPlannedPreallocWithSwitchFallback?
+    (maxWords : Nat) (program : Program) :
+    Option (ScratchRange × Plan × Expressions.Program × Assembly.Program) :=
+  if SourceAcceptedCheck.Program.sourceAccepted? program then
+    compileCheckedPlannedPreallocFromWithSwitchFallback? program maxWords 0
   else
     none
 
@@ -18358,6 +19813,152 @@ theorem compileCheckedPlannedPrealloc?_noCallCreate
         some (range, plan, exprProgram, asm)) :
     Assembly.Program.usesCallCreate asm = false :=
   compileChecked?_noCallCreate (compileCheckedPlannedPrealloc?_eq_some hCompile).1
+
+theorem compileCheckedPlannedPreallocFromWithSwitchFallback?_eq_some
+    {program : Program} {remaining start : Nat}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedPlannedPreallocFromWithSwitchFallback? program remaining
+          start =
+        some (range, plan, exprProgram, asm)) :
+    compileCheckedWithSwitchFallback? range program =
+        some (plan, exprProgram, asm) ∧
+      range.preallocFits? = true ∧
+      range.base = 0 ∧
+      start ≤ range.words ∧ range.words ≤ start + remaining := by
+  revert hCompile
+  revert start range plan exprProgram asm
+  induction remaining with
+  | zero =>
+      intro start range plan exprProgram asm hCompile
+      unfold compileCheckedPlannedPreallocFromWithSwitchFallback? at hCompile
+      cases hRange : plannedScratchRangeChecked? start with
+      | none =>
+          simp [hRange] at hCompile
+      | some plannedRange =>
+          cases hFull :
+              compileCheckedWithSwitchFallback? plannedRange program with
+          | none =>
+              simp [hRange, hFull] at hCompile
+          | some result =>
+              rcases result with ⟨plan', exprProgram', asm'⟩
+              simp [hRange, hFull] at hCompile
+              rcases hCompile with ⟨rfl, rfl, rfl, rfl⟩
+              rcases plannedScratchRangeChecked?_eq_some hRange with
+                ⟨hPlanned, hFits⟩
+              subst plannedRange
+              exact ⟨hFull, hFits, rfl, by simp [plannedScratchRange],
+                by simp [plannedScratchRange]⟩
+  | succ remaining ih =>
+      intro start range plan exprProgram asm hCompile
+      unfold compileCheckedPlannedPreallocFromWithSwitchFallback? at hCompile
+      cases hRange : plannedScratchRangeChecked? start with
+      | some plannedRange =>
+          cases hFull :
+              compileCheckedWithSwitchFallback? plannedRange program with
+          | some result =>
+              rcases result with ⟨plan', exprProgram', asm'⟩
+              simp [hRange, hFull] at hCompile
+              rcases hCompile with ⟨rfl, rfl, rfl, rfl⟩
+              rcases plannedScratchRangeChecked?_eq_some hRange with
+                ⟨hPlanned, hFits⟩
+              subst plannedRange
+              exact ⟨hFull, hFits, rfl, by simp [plannedScratchRange],
+                by simp [plannedScratchRange]⟩
+          | none =>
+              simp [hRange, hFull] at hCompile
+              have hTail := ih hCompile
+              rcases hTail with
+                ⟨hChecked, hFits, hBase, hStart, hBound⟩
+              exact ⟨hChecked, hFits, hBase, by omega, by omega⟩
+      | none =>
+          simp [hRange] at hCompile
+          have hTail := ih hCompile
+          rcases hTail with
+            ⟨hChecked, hFits, hBase, hStart, hBound⟩
+          exact ⟨hChecked, hFits, hBase, by omega, by omega⟩
+
+theorem compileCheckedPlannedPreallocWithSwitchFallback?_eq_some
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedPlannedPreallocWithSwitchFallback? maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    compileCheckedWithSwitchFallback? range program =
+        some (plan, exprProgram, asm) ∧
+      range.base = 0 ∧ range.words ≤ maxWords := by
+  unfold compileCheckedPlannedPreallocWithSwitchFallback? at hCompile
+  by_cases hSupported :
+      SourceAcceptedCheck.Program.sourceAccepted? program = true
+  · simp [hSupported] at hCompile
+    have h :=
+      compileCheckedPlannedPreallocFromWithSwitchFallback?_eq_some
+        (program := program) (remaining := maxWords) (start := 0)
+        (range := range) (plan := plan) (exprProgram := exprProgram)
+        (asm := asm)
+        hCompile
+    rcases h with ⟨hChecked, _hFits, hBase, _hStart, hBound⟩
+    exact ⟨hChecked, hBase, by simpa using hBound⟩
+  · have hUnsupported :
+        SourceAcceptedCheck.Program.sourceAccepted? program = false := by
+      cases h : SourceAcceptedCheck.Program.sourceAccepted? program <;>
+        simp [h] at hSupported ⊢
+    simp [hUnsupported] at hCompile
+
+theorem compileCheckedPlannedPreallocWithSwitchFallback?_sourceAccepted
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedPlannedPreallocWithSwitchFallback? maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    program.SourceAccepted := by
+  unfold compileCheckedPlannedPreallocWithSwitchFallback? at hCompile
+  by_cases hSupported :
+      SourceAcceptedCheck.Program.sourceAccepted? program = true
+  · exact SourceAcceptedCheck.Program.sourceAccepted_of_check hSupported
+  · have hUnsupported :
+        SourceAcceptedCheck.Program.sourceAccepted? program = false := by
+      cases h : SourceAcceptedCheck.Program.sourceAccepted? program <;>
+        simp [h] at hSupported ⊢
+    simp [hUnsupported] at hCompile
+
+theorem compileCheckedPlannedPreallocWithSwitchFallback?_noCallCreate
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hProgram : program.usesCallCreate = false)
+    (hCompile :
+      compileCheckedPlannedPreallocWithSwitchFallback? maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    Assembly.Program.usesCallCreate asm = false :=
+  compileCheckedWithSwitchFallback?_noCallCreate hProgram
+    (compileCheckedPlannedPreallocWithSwitchFallback?_eq_some hCompile).1
+
+theorem compileCheckedPlannedPreallocWithSwitchFallback?_preallocFits
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedPlannedPreallocWithSwitchFallback? maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    range.preallocFits? = true := by
+  unfold compileCheckedPlannedPreallocWithSwitchFallback? at hCompile
+  by_cases hSupported :
+      SourceAcceptedCheck.Program.sourceAccepted? program = true
+  · simp [hSupported] at hCompile
+    have h :=
+      compileCheckedPlannedPreallocFromWithSwitchFallback?_eq_some
+        (program := program) (remaining := maxWords) (start := 0)
+        hCompile
+    exact h.2.1
+  · have hUnsupported :
+        SourceAcceptedCheck.Program.sourceAccepted? program = false := by
+      cases h : SourceAcceptedCheck.Program.sourceAccepted? program <;>
+        simp [h] at hSupported ⊢
+    simp [hUnsupported] at hCompile
 
 theorem compileCheckedPlannedPrealloc?_preallocFits
     {maxWords : Nat} {program : Program}

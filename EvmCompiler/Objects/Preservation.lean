@@ -209,6 +209,13 @@ noncomputable def compileCheckedWithCallAwareSpillPlannedPrealloc?
   Functions.CallAwareSpill.compileCheckedPlannedPrealloc? maxWords
     program.toFunctions
 
+noncomputable def compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?
+    (maxWords : Nat) (program : Objects.Program) :
+    Option (Functions.CallAwareSpill.ScratchRange ×
+      Functions.CallAwareSpill.Plan × Expressions.Program × Assembly.Program) :=
+  Functions.CallAwareSpill.compileCheckedPlannedPreallocWithSwitchFallback?
+    maxWords program.toFunctions
+
 noncomputable def compileCheckedWithScratchFrameSpill?
     (maxFrameWords : Nat) (program : Objects.Program) :
     Option (Expressions.Program × Assembly.Program) :=
@@ -497,6 +504,51 @@ theorem compileCheckedWithCallAwareSpillPlannedPrealloc?_noCallCreate
     Assembly.Program.usesCallCreate asm = false :=
   Functions.CallAwareSpill.compileCheckedPlannedPrealloc?_noCallCreate
     (compileCheckedWithCallAwareSpillPlannedPrealloc?_eq_some hCompile)
+
+theorem compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?_eq_some
+    {maxWords : Nat} {program : Objects.Program}
+    {range : Functions.CallAwareSpill.ScratchRange}
+    {plan : Functions.CallAwareSpill.Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc? maxWords
+          program =
+        some (range, plan, exprProgram, asm)) :
+    Functions.CallAwareSpill.compileCheckedPlannedPreallocWithSwitchFallback?
+        maxWords program.toFunctions =
+      some (range, plan, exprProgram, asm) := by
+  simpa [compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?]
+    using hCompile
+
+theorem compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?_sourceAccepted
+    {maxWords : Nat} {program : Objects.Program}
+    {range : Functions.CallAwareSpill.ScratchRange}
+    {plan : Functions.CallAwareSpill.Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc? maxWords
+          program =
+        some (range, plan, exprProgram, asm)) :
+    program.toFunctions.SourceAccepted :=
+  Functions.CallAwareSpill.compileCheckedPlannedPreallocWithSwitchFallback?_sourceAccepted
+    (compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?_eq_some
+      hCompile)
+
+theorem compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?_noCallCreate
+    {maxWords : Nat} {program : Objects.Program}
+    {range : Functions.CallAwareSpill.ScratchRange}
+    {plan : Functions.CallAwareSpill.Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hProgram : program.toFunctions.usesCallCreate = false)
+    (hCompile :
+      compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc? maxWords
+          program =
+        some (range, plan, exprProgram, asm)) :
+    Assembly.Program.usesCallCreate asm = false :=
+  Functions.CallAwareSpill.compileCheckedPlannedPreallocWithSwitchFallback?_noCallCreate
+    hProgram
+    (compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?_eq_some
+      hCompile)
 
 theorem compileCheckedWithScratchFrameSpill?_eq_some
     {maxFrameWords : Nat} {program : Objects.Program}

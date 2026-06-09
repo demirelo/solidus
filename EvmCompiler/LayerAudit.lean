@@ -6299,6 +6299,58 @@ example {program : Objects.Program} {asm : Assembly.Program}
   Objects.Source.Program.compileLiveNoInternalCallChecked?_noCallCreate
     hNoCallCreate hCompile
 
+example {maxWords : Nat} {program : Functions.Program}
+    {range : Functions.CallAwareSpill.ScratchRange}
+    {plan : Functions.CallAwareSpill.Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hNoCallCreate : program.usesCallCreate = false)
+    (hCompile :
+      Functions.CallAwareSpill.compileCheckedPlannedPreallocWithSwitchFallback?
+          maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    Assembly.Program.usesCallCreate asm = false :=
+  Functions.CallAwareSpill.compileCheckedPlannedPreallocWithSwitchFallback?_noCallCreate
+    hNoCallCreate hCompile
+
+example {maxWords : Nat} {program : Objects.Program}
+    {range : Functions.CallAwareSpill.ScratchRange}
+    {plan : Functions.CallAwareSpill.Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      Objects.Source.Program.compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?
+          maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    Functions.CallAwareSpill.compileCheckedPlannedPreallocWithSwitchFallback?
+        maxWords program.toFunctions =
+      some (range, plan, exprProgram, asm) :=
+  Objects.Source.Program.compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?_eq_some
+    hCompile
+
+example {maxWords : Nat} {program : Objects.Program}
+    {range : Functions.CallAwareSpill.ScratchRange}
+    {plan : Functions.CallAwareSpill.Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      Objects.Source.Program.compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?
+          maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    program.toFunctions.SourceAccepted :=
+  Objects.Source.Program.compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?_sourceAccepted
+    hCompile
+
+example {maxWords : Nat} {program : Objects.Program}
+    {range : Functions.CallAwareSpill.ScratchRange}
+    {plan : Functions.CallAwareSpill.Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hNoCallCreate : program.toFunctions.usesCallCreate = false)
+    (hCompile :
+      Objects.Source.Program.compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?
+          maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    Assembly.Program.usesCallCreate asm = false :=
+  Objects.Source.Program.compileCheckedWithCallAwareSpillWithSwitchPlannedPrealloc?_noCallCreate
+    hNoCallCreate hCompile
+
 example {program : Yul.Program} {asm : Assembly.Program}
     {functionProgram : Functions.Program}
     (hCompile :
