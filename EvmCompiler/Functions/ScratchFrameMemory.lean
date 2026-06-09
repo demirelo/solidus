@@ -1133,6 +1133,10 @@ def FrameStoreRel (env : SlotEnv) (store : Locals.Source.Store)
 def EnvNamesInScope (env : SlotEnv) (scope : List Name) : Prop :=
   ∀ {name slot}, lookupSlot? name env = some slot → name ∈ scope
 
+def EnvLookupPreserved (outer inner : SlotEnv) : Prop :=
+  ∀ {name slot}, lookupSlot? name outer = some slot →
+    lookupSlot? name inner = some slot
+
 theorem mload_generated_slot_machine_eq
     {machine : EvmYul.MachineState} {base : Word} {words slot : Nat}
     (hReady : ScratchRegionReady machine (range base words).base
@@ -1216,6 +1220,21 @@ theorem FrameStoreRel.restrictTo
       machine base := by
   intro name slot hLookup
   rcases hRel hLookup with ⟨value, hStore, hValue⟩
+  refine ⟨value, ?_, hValue⟩
+  rw [Locals.Source.Store.restrictTo_mem (hNames hLookup)]
+  exact hStore
+
+theorem FrameStoreRel.restrictTo_env_of_lookup_preserved
+    {outer inner : SlotEnv} {scope : List Name}
+    {store : Locals.Source.Store} {machine : EvmYul.MachineState}
+    {base : Word}
+    (hNames : EnvNamesInScope outer scope)
+    (hLookupPreserved : EnvLookupPreserved outer inner)
+    (hRel : FrameStoreRel inner store machine base) :
+    FrameStoreRel outer (Locals.Source.Store.restrictTo scope store)
+      machine base := by
+  intro name slot hLookup
+  rcases hRel (hLookupPreserved hLookup) with ⟨value, hStore, hValue⟩
   refine ⟨value, ?_, hValue⟩
   rw [Locals.Source.Store.restrictTo_mem (hNames hLookup)]
   exact hStore
@@ -4670,6 +4689,138 @@ theorem run_compileStmtList?_atomic_block_frameStore_of_source_run_open_regular
                                   at hRun
                                 rcases hRun with ⟨hOutcome, _hCtx⟩
                                 cases hOutcome
+
+theorem run_compileStmt?_block_frameStore_of_source_run_regular
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {body : Block} {plan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source source' : Locals.Source.State}
+    {sourceCtx : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel blockFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmt? ctx returns compileState (.block body) = some plan)
+    (hSafe : AtomicStmtListSafe body.stmts)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtx sourceFuel (.block body) source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx))
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hNames : EnvNamesInScope compileState.env sourceCtx.scope)
+    (hLookupPreserved :
+      ∀ {openPlan : Plan},
+        compileBlockOpen? ctx returns compileState body = some openPlan →
+          EnvLookupPreserved compileState.env openPlan.state.env)
+    (hFrameWords : plan.state.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (restStack : EvmYul.Stack Word) :
+    ∃ final,
+      Expressions.Block.run compiledProgram
+          (blockFuel + 2 * body.stmts.length + 1) plan.block
+          { runState with evm := { evmState with stack := base :: restStack } } =
+        .ok (Expressions.Outcome.regular ({ runState with evm := final })) ∧
+      final.stack = base :: restStack ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) source'.shared
+        final.toSharedState ∧
+      FrameStoreRel plan.state.env source'.vars final.toMachineState base := by
+  unfold compileStmt? at hCompile
+  unfold compileBlockScoped? at hCompile
+  cases hOpenCompile : compileBlockOpen? ctx returns compileState body with
+  | none =>
+      simp [hOpenCompile] at hCompile
+  | some openPlan =>
+      simp [hOpenCompile] at hCompile
+      cases hCompile
+      have hScopedSource :
+          EvmCompiler.Functions.Source.Block.runScoped
+              Locals.Source.PrimitiveSemantics.structured
+              sourceProgram sourceCtx body sourceFuel source =
+            .ok (EvmCompiler.Functions.Source.Outcome.regular source') := by
+        unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+        cases hScoped :
+            EvmCompiler.Functions.Source.Block.runScoped
+                Locals.Source.PrimitiveSemantics.structured
+                sourceProgram sourceCtx body sourceFuel source with
+        | error err =>
+            simp [hScoped] at hRun
+        | ok outcome =>
+            cases outcome with
+            | mk scopedState scopedMode =>
+                cases scopedMode
+                · simp [hScoped,
+                    EvmCompiler.Functions.Source.Outcome.regular] at hRun
+                  simpa [hScoped,
+                    EvmCompiler.Functions.Source.Outcome.regular]
+                · simp [hScoped,
+                    EvmCompiler.Functions.Source.Outcome.regular] at hRun
+                  cases hRun
+                · simp [hScoped,
+                    EvmCompiler.Functions.Source.Outcome.regular] at hRun
+                  cases hRun
+                · simp [hScoped,
+                    EvmCompiler.Functions.Source.Outcome.regular] at hRun
+                  cases hRun
+                · simp [hScoped,
+                    EvmCompiler.Functions.Source.Outcome.regular] at hRun
+                  cases hRun
+      rcases
+        EvmCompiler.Functions.Source.Block.runScoped_regular_eq_restrict
+          hScopedSource with
+        ⟨innerSource, innerCtx, hOpenRun, hSource'⟩
+      have hFrameWordsOpen : openPlan.state.nextSlot ≤ words := by
+        simpa using hFrameWords
+      have hOpenStmtList :
+          compileStmtList? ctx returns compileState body.stmts =
+            some openPlan := by
+        cases body
+        simpa [compileBlockOpen?] using hOpenCompile
+      rcases
+        run_compileStmtList?_atomic_block_frameStore_of_source_run_open_regular
+          hSpec hWordBytes
+          (ctx := ctx)
+          (returns := returns)
+          (compileState := compileState)
+          (stmts := body.stmts)
+          (plan := openPlan)
+          (sourceProgram := sourceProgram)
+          (compiledProgram := compiledProgram)
+          (source := source)
+          (source' := innerSource)
+          (sourceCtx := sourceCtx)
+          (sourceCtx' := innerCtx)
+          (sourceFuel := sourceFuel)
+          (blockFuel := blockFuel)
+          (runState := runState)
+          (evmState := evmState)
+          (base := base)
+          (words := words)
+          hOpenStmtList hSafe (by
+            cases body
+            simpa using hOpenRun)
+          hStateBound hStateNodup hFrameWordsOpen hReady hShared hRel
+          restStack with
+      ⟨final, hRunBlock, hStack, hReadyFinal, hSharedFinal, hRelOpen⟩
+      refine ⟨final, ?_, hStack, hReadyFinal, ?_, ?_⟩
+      · simpa using hRunBlock
+      · rw [hSource']
+        simpa [Locals.Source.State.restrictTo] using hSharedFinal
+      · rw [hSource']
+        exact
+          FrameStoreRel.restrictTo_env_of_lookup_preserved
+            hNames (hLookupPreserved hOpenCompile) hRelOpen
 
 theorem run_frameInitCode_append_compileStmtList?_atomic_block_frameStore_of_source_run_open_regular
     (hSpec : ZeroPaddingSpec)
