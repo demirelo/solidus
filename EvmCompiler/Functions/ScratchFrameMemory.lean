@@ -942,6 +942,84 @@ theorem run_compileExprSeqCode?_nil_frameStore
     intro query slot hLookup
     exact hRel hLookup
 
+theorem run_compileExprSeqCode?_cons_frameStore_of_parts
+    {compileState : CompileState} {store : Locals.Source.Store}
+    {base : Word} {words : Nat} {valuesAboveBase left right : Nat}
+    {head : Expr left} {tail : Locals.ExprSeq right}
+    {code : Structured.Code}
+    (hCompile :
+      compileExprSeqCode? compileState.env valuesAboveBase
+          (Locals.ExprSeq.cons (left := left) (right := right) head tail) =
+        some code)
+    (state : EVMState) (values rest : EvmYul.Stack Word)
+    (hHeadRun :
+      ∀ {headCode : Structured.Code},
+        compileExprCode? compileState.env valuesAboveBase head =
+          some headCode →
+          ∃ (headValues : List Word) (mid : EVMState),
+            headValues.length = left ∧
+            Structured.Code.run headCode
+                { state with stack := values ++ base :: rest } = .ok mid ∧
+            mid.stack = headValues.reverse ++ values ++ base :: rest ∧
+            ScratchRegionReady mid.toMachineState
+              (range base words).base (range base words).words ∧
+            FrameStoreRel compileState.env store mid.toMachineState base)
+    (hTailRun :
+      ∀ {tailCode : Structured.Code} {headValues : List Word}
+          {mid : EVMState},
+        compileExprSeqCode? compileState.env (valuesAboveBase + left) tail =
+          some tailCode →
+        headValues.length = left →
+        mid.stack = headValues.reverse ++ values ++ base :: rest →
+        ScratchRegionReady mid.toMachineState
+          (range base words).base (range base words).words →
+        FrameStoreRel compileState.env store mid.toMachineState base →
+          ∃ (tailValues : List Word) (final : EVMState),
+            tailValues.length = right ∧
+            Structured.Code.run tailCode mid = .ok final ∧
+            final.stack =
+              tailValues.reverse ++ headValues.reverse ++ values ++
+                base :: rest ∧
+            ScratchRegionReady final.toMachineState
+              (range base words).base (range base words).words ∧
+            FrameStoreRel compileState.env store final.toMachineState base) :
+    ∃ (resultValues : List Word) (final : EVMState),
+      resultValues.length = left + right ∧
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.stack = resultValues.reverse ++ values ++ base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      FrameStoreRel compileState.env store final.toMachineState base := by
+  simp [compileExprSeqCode?] at hCompile
+  cases hHeadCode :
+      compileExprCode? compileState.env valuesAboveBase head with
+  | none =>
+      simp [hHeadCode] at hCompile
+  | some headCode =>
+      cases hTailCode :
+          compileExprSeqCode? compileState.env (valuesAboveBase + left)
+            tail with
+      | none =>
+          simp [hHeadCode, hTailCode] at hCompile
+      | some tailCode =>
+          simp [hHeadCode, hTailCode] at hCompile
+          cases hCompile
+          rcases hHeadRun hHeadCode with
+            ⟨headValues, mid, hHeadLen, hHeadRunCode, hMidStack,
+              hReadyMid, hRelMid⟩
+          rcases
+              hTailRun hTailCode hHeadLen hMidStack hReadyMid hRelMid with
+            ⟨tailValues, final, hTailLen, hTailRunCode, hFinalStack,
+              hReadyFinal, hRelFinal⟩
+          refine
+            ⟨headValues ++ tailValues, final, ?_, ?_, ?_, hReadyFinal,
+              hRelFinal⟩
+          · simp [hHeadLen, hTailLen]
+          · rw [Structured.Preservation.Code.run_append, hHeadRunCode]
+            exact hTailRunCode
+          · simpa [List.reverse_append, List.append_assoc] using hFinalStack
+
 theorem run_storeTopSlotCode?_frameStore_assign
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
