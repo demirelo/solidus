@@ -4390,6 +4390,134 @@ theorem run_compileMain?_atomic_withPrelude_empty_frame_of_frameInit_ready_succ
       (hSharedInit initState hInitRun)
       FrameStoreRel.empty
 
+theorem run_compileMain?_atomic_withPrelude_empty_frame_of_full_source_run_frameInit_ready_succ
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx}
+    {startSlot slot : Nat} {stmts rest : List Stmt}
+    {prelude : List Expressions.Stmt} {mainPlan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source source' : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel blockFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState}
+    (hSplit : splitPrelude stmts = (prelude, rest))
+    (hCompile :
+      compileMain? ctx (slot + 1)
+          ({ env := [], nextSlot := startSlot } : CompileState)
+          { stmts := stmts } =
+        some mainPlan)
+    (hSafe : AtomicStmtListSafe stmts)
+    (hRun :
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtx sourceFuel { stmts := stmts } source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx'))
+    (hFrameWords : mainPlan.state.nextSlot ≤ slot + 1)
+    (hSharedStart : evmState.toSharedState = source.shared) :
+    ∃ sourceAfterPrelude sourceCtxAfterPrelude preludeEvm restFuel,
+      preludeEvm.toSharedState = sourceAfterPrelude.shared ∧
+      preludeEvm.stack = evmState.stack ∧
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtxAfterPrelude restFuel
+          { stmts := rest } sourceAfterPrelude =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx') ∧
+      (∀
+          (_hOffsetLtUInt :
+            (preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                32 * slot <
+              EvmYul.UInt256.size)
+          (_hPadNoOverflow :
+            (preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                32 * slot -
+                (frameBumpMachine (slot + 1)
+                  preludeEvm.toMachineState).memory.size <
+              USize.size)
+          (_hWithinAfter :
+            (preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                32 * (slot + 1) ≤
+              EvmYul.MachineState.M
+                (frameBumpMachine (slot + 1)
+                  preludeEvm.toMachineState).activeWords.toNat
+                ((preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                  32 * slot) 32 * 32)
+          (_hActiveAfter :
+            EvmYul.MachineState.M
+                (frameBumpMachine (slot + 1)
+                  preludeEvm.toMachineState).activeWords.toNat
+                ((preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                  32 * slot) 32 * 32 <
+              EvmYul.UInt256.size)
+          (_hSharedInit :
+            ∀ initState,
+              Structured.Code.run (frameInitCode (slot + 1)) preludeEvm =
+                  .ok initState →
+                SharedStateEqOutsideScratch
+                  (range (preludeEvm.toMachineState.mload freePtrWord).1
+                    (slot + 1)) sourceAfterPrelude.shared
+                  initState.toSharedState),
+        ∃ final,
+          Expressions.Block.run compiledProgram
+              ((blockFuel + 2 * rest.length + 2) + prelude.length)
+              mainPlan.block { runState with evm := evmState } =
+            .ok (Expressions.Outcome.regular
+              ({ runState with evm := final })) ∧
+          final.stack =
+            (preludeEvm.toMachineState.mload freePtrWord).1 ::
+              evmState.stack ∧
+          ScratchRegionReady final.toMachineState
+            (range (preludeEvm.toMachineState.mload freePtrWord).1
+              (slot + 1)).base
+            (range (preludeEvm.toMachineState.mload freePtrWord).1
+              (slot + 1)).words ∧
+          SharedStateEqOutsideScratch
+            (range (preludeEvm.toMachineState.mload freePtrWord).1
+              (slot + 1)) source'.shared final.toSharedState ∧
+          FrameStoreRel mainPlan.state.env source'.vars final.toMachineState
+            (preludeEvm.toMachineState.mload freePtrWord).1) := by
+  rcases
+      run_compileMain?_atomic_withPrelude_block_frameStore_of_full_source_run_open_regular
+        hSpec hWordBytes
+        (ctx := ctx)
+        (compileState := ({ env := [], nextSlot := startSlot } : CompileState))
+        (stmts := stmts)
+        (rest := rest)
+        (prelude := prelude)
+        (mainPlan := mainPlan)
+        (sourceProgram := sourceProgram)
+        (compiledProgram := compiledProgram)
+        (source := source)
+        (source' := source')
+        (sourceCtx := sourceCtx)
+        (sourceCtx' := sourceCtx')
+        (sourceFuel := sourceFuel)
+        (blockFuel := blockFuel)
+        (runState := runState)
+        (evmState := evmState)
+        (words := slot + 1)
+        hSplit hCompile hSafe hRun
+        (StateSlotsBounded.empty startSlot)
+        (StateSlotsNodup.empty startSlot)
+        hFrameWords hSharedStart with
+    ⟨sourceAfterPrelude, sourceCtxAfterPrelude, preludeEvm, restFuel,
+      hPreludeShared, hPreludeStack, hRestRun, hCont⟩
+  refine
+    ⟨sourceAfterPrelude, sourceCtxAfterPrelude, preludeEvm, restFuel,
+      hPreludeShared, hPreludeStack, hRestRun, ?_⟩
+  intro hOffsetLtUInt hPadNoOverflow hWithinAfter hActiveAfter hSharedInit
+  rcases
+      run_frameInitCode_ready_succ hSpec hWordBytes preludeEvm slot
+        hOffsetLtUInt hPadNoOverflow hWithinAfter hActiveAfter with
+    ⟨initState, hInitRun, hInitStack, _hInitMachine, hReady⟩
+  exact
+    hCont hInitRun hInitStack hReady
+      (hSharedInit initState hInitRun)
+      FrameStoreRel.empty
+
 theorem run_compileStmt?_expr_block_frameStore_of_source_run_regular
     {ctx : CompileCtx} {returns : List Name}
     {compileState : CompileState} {expr : Expr 0} {plan : Plan}
