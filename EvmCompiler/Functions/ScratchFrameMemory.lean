@@ -5625,6 +5625,260 @@ theorem run_compileMain?_atomic_withPrelude_empty_frame_of_full_source_run_frame
   exact
     hCont hInitRun hInitStack hReady hInitInvariant FrameStoreRel.empty
 
+theorem run_compileMain?_atomic_withPrelude_empty_frame_of_program_runState_regular_privateScratch
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx}
+    {startSlot slot : Nat} {stmts rest : List Stmt}
+    {prelude : List Expressions.Stmt} {mainPlan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source publicSource' : Locals.Source.State}
+    {sourceFuel blockFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState}
+    (hBody : sourceProgram.body = { stmts := stmts })
+    (hSplit : splitPrelude stmts = (prelude, rest))
+    (hCompile :
+      compileMain? ctx (slot + 1)
+          ({ env := [], nextSlot := startSlot } : CompileState)
+          { stmts := stmts } =
+        some mainPlan)
+    (hSafe : AtomicStmtListSafe stmts)
+    (hRun :
+      EvmCompiler.Functions.Source.Program.runState
+          Locals.Source.PrimitiveSemantics.structured
+          sourceFuel sourceProgram source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular publicSource'))
+    (hFrameWords : mainPlan.state.nextSlot ≤ slot + 1)
+    (hSharedStart : evmState.toSharedState = source.shared) :
+    ∃ innerSource innerCtx,
+      publicSource' =
+        innerSource.restrictTo EvmCompiler.Functions.Source.Ctx.initial.scope ∧
+      ∃ sourceAfterPrelude sourceCtxAfterPrelude,
+        ∃ preludeEvm : EVMState, ∃ restFuel,
+        preludeEvm.toSharedState = sourceAfterPrelude.shared ∧
+        preludeEvm.stack = evmState.stack ∧
+        EvmCompiler.Functions.Source.Block.runOpen
+            Locals.Source.PrimitiveSemantics.structured
+            sourceProgram sourceCtxAfterPrelude restFuel
+            { stmts := rest } sourceAfterPrelude =
+          .ok (EvmCompiler.Functions.Source.Outcome.regular innerSource,
+            innerCtx) ∧
+        (∀
+            (_hOffsetLtUInt :
+              (preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                  32 * slot <
+                EvmYul.UInt256.size)
+            (_hPadNoOverflow :
+              (preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                  32 * slot -
+                  (frameBumpMachine (slot + 1)
+                    preludeEvm.toMachineState).memory.size <
+                USize.size)
+            (_hWithinAfter :
+              (preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                  32 * (slot + 1) ≤
+                EvmYul.MachineState.M
+                  (frameBumpMachine (slot + 1)
+                    preludeEvm.toMachineState).activeWords.toNat
+                  ((preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                    32 * slot) 32 * 32)
+            (_hActiveAfter :
+              EvmYul.MachineState.M
+                  (frameBumpMachine (slot + 1)
+                    preludeEvm.toMachineState).activeWords.toNat
+                  ((preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                    32 * slot) 32 * 32 <
+                EvmYul.UInt256.size),
+          ∃ final,
+            Expressions.Block.run compiledProgram
+                ((blockFuel + 2 * rest.length + 2) + prelude.length)
+                mainPlan.block { runState with evm := evmState } =
+              .ok (Expressions.Outcome.regular
+                ({ runState with evm := final })) ∧
+            final.stack =
+              (preludeEvm.toMachineState.mload freePtrWord).1 ::
+                evmState.stack ∧
+            ScratchRegionReady final.toMachineState
+              (range (preludeEvm.toMachineState.mload freePtrWord).1
+                (slot + 1)).base
+              (range (preludeEvm.toMachineState.mload freePtrWord).1
+                (slot + 1)).words ∧
+            SharedStatePrivateScratchObservable publicSource'.shared
+              final.toSharedState ∧
+            FrameStoreRel mainPlan.state.env innerSource.vars
+              final.toMachineState
+              (preludeEvm.toMachineState.mload freePtrWord).1) := by
+  have hScoped :
+      EvmCompiler.Functions.Source.Block.runScoped
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram EvmCompiler.Functions.Source.Ctx.initial
+          sourceProgram.body sourceFuel source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular publicSource') := by
+    simpa [EvmCompiler.Functions.Source.Program.runState] using hRun
+  rcases
+      EvmCompiler.Functions.Source.Block.runScoped_regular_eq_restrict
+        hScoped with
+    ⟨innerSource, innerCtx, hOpen, hPublic⟩
+  have hOpenStmts :
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram EvmCompiler.Functions.Source.Ctx.initial
+          sourceFuel { stmts := stmts } source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular innerSource,
+          innerCtx) := by
+    simpa [hBody] using hOpen
+  rcases
+      run_compileMain?_atomic_withPrelude_empty_frame_of_full_source_run_frameInit_ready_succ_privateScratch
+        hSpec hWordBytes
+        (ctx := ctx)
+        (startSlot := startSlot)
+        (slot := slot)
+        (stmts := stmts)
+        (rest := rest)
+        (prelude := prelude)
+        (mainPlan := mainPlan)
+        (sourceProgram := sourceProgram)
+        (compiledProgram := compiledProgram)
+        (source := source)
+        (source' := innerSource)
+        (sourceCtx := EvmCompiler.Functions.Source.Ctx.initial)
+        (sourceCtx' := innerCtx)
+        (sourceFuel := sourceFuel)
+        (blockFuel := blockFuel)
+        (runState := runState)
+        (evmState := evmState)
+        hSplit hCompile hSafe hOpenStmts hFrameWords hSharedStart with
+    ⟨sourceAfterPrelude, sourceCtxAfterPrelude, preludeEvm, restFuel,
+      hPreludeShared, hPreludeStack, hRestRun, hCont⟩
+  refine ⟨innerSource, innerCtx, hPublic, ?_⟩
+  refine
+    ⟨sourceAfterPrelude, sourceCtxAfterPrelude, preludeEvm, restFuel,
+      hPreludeShared, hPreludeStack, hRestRun, ?_⟩
+  intro hOffsetLtUInt hPadNoOverflow hWithinAfter hActiveAfter
+  rcases hCont hOffsetLtUInt hPadNoOverflow hWithinAfter hActiveAfter with
+    ⟨final, hMainRun, hStack, hReady, hObservable, hRel⟩
+  have hSharedPublic :
+      publicSource'.shared = innerSource.shared := by
+    rw [hPublic]
+    rfl
+  exact
+    ⟨final, hMainRun, hStack, hReady,
+      by simpa [hSharedPublic] using hObservable, hRel⟩
+
+theorem run_compileMain?_atomic_withPrelude_empty_frame_of_program_run_regular_privateScratch
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx}
+    {startSlot slot : Nat} {stmts rest : List Stmt}
+    {prelude : List Expressions.Stmt} {mainPlan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {publicSource' : Locals.Source.State}
+    {sourceFuel blockFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState}
+    (hBody : sourceProgram.body = { stmts := stmts })
+    (hSplit : splitPrelude stmts = (prelude, rest))
+    (hCompile :
+      compileMain? ctx (slot + 1)
+          ({ env := [], nextSlot := startSlot } : CompileState)
+          { stmts := stmts } =
+        some mainPlan)
+    (hSafe : AtomicStmtListSafe stmts)
+    (hRun :
+      EvmCompiler.Functions.Source.Program.run
+          Locals.Source.PrimitiveSemantics.structured
+          sourceFuel sourceProgram evmState =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular publicSource'))
+    (hFrameWords : mainPlan.state.nextSlot ≤ slot + 1) :
+    ∃ innerSource innerCtx,
+      publicSource' =
+        innerSource.restrictTo EvmCompiler.Functions.Source.Ctx.initial.scope ∧
+      ∃ sourceAfterPrelude sourceCtxAfterPrelude,
+        ∃ preludeEvm : EVMState, ∃ restFuel,
+        preludeEvm.toSharedState = sourceAfterPrelude.shared ∧
+        preludeEvm.stack = evmState.stack ∧
+        EvmCompiler.Functions.Source.Block.runOpen
+            Locals.Source.PrimitiveSemantics.structured
+            sourceProgram sourceCtxAfterPrelude restFuel
+            { stmts := rest } sourceAfterPrelude =
+          .ok (EvmCompiler.Functions.Source.Outcome.regular innerSource,
+            innerCtx) ∧
+        (∀
+            (_hOffsetLtUInt :
+              (preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                  32 * slot <
+                EvmYul.UInt256.size)
+            (_hPadNoOverflow :
+              (preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                  32 * slot -
+                  (frameBumpMachine (slot + 1)
+                    preludeEvm.toMachineState).memory.size <
+                USize.size)
+            (_hWithinAfter :
+              (preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                  32 * (slot + 1) ≤
+                EvmYul.MachineState.M
+                  (frameBumpMachine (slot + 1)
+                    preludeEvm.toMachineState).activeWords.toNat
+                  ((preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                    32 * slot) 32 * 32)
+            (_hActiveAfter :
+              EvmYul.MachineState.M
+                  (frameBumpMachine (slot + 1)
+                    preludeEvm.toMachineState).activeWords.toNat
+                  ((preludeEvm.toMachineState.mload freePtrWord).1.toNat +
+                    32 * slot) 32 * 32 <
+                EvmYul.UInt256.size),
+          ∃ final,
+            Expressions.Block.run compiledProgram
+                ((blockFuel + 2 * rest.length + 2) + prelude.length)
+                mainPlan.block { runState with evm := evmState } =
+              .ok (Expressions.Outcome.regular
+                ({ runState with evm := final })) ∧
+            final.stack =
+              (preludeEvm.toMachineState.mload freePtrWord).1 ::
+                evmState.stack ∧
+            ScratchRegionReady final.toMachineState
+              (range (preludeEvm.toMachineState.mload freePtrWord).1
+                (slot + 1)).base
+              (range (preludeEvm.toMachineState.mload freePtrWord).1
+                (slot + 1)).words ∧
+            SharedStatePrivateScratchObservable publicSource'.shared
+              final.toSharedState ∧
+            FrameStoreRel mainPlan.state.env innerSource.vars
+              final.toMachineState
+              (preludeEvm.toMachineState.mload freePtrWord).1) := by
+  have hRunState :
+      EvmCompiler.Functions.Source.Program.runState
+          Locals.Source.PrimitiveSemantics.structured
+          sourceFuel sourceProgram
+          (EvmCompiler.Functions.Source.Program.initialState
+            evmState.toSharedState) =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular publicSource') := by
+    simpa [EvmCompiler.Functions.Source.Program.run] using hRun
+  exact
+    run_compileMain?_atomic_withPrelude_empty_frame_of_program_runState_regular_privateScratch
+      hSpec hWordBytes
+      (ctx := ctx)
+      (startSlot := startSlot)
+      (slot := slot)
+      (stmts := stmts)
+      (rest := rest)
+      (prelude := prelude)
+      (mainPlan := mainPlan)
+      (sourceProgram := sourceProgram)
+      (compiledProgram := compiledProgram)
+      (source :=
+        EvmCompiler.Functions.Source.Program.initialState
+          evmState.toSharedState)
+      (publicSource' := publicSource')
+      (sourceFuel := sourceFuel)
+      (blockFuel := blockFuel)
+      (runState := runState)
+      (evmState := evmState)
+      hBody hSplit hCompile hSafe hRunState hFrameWords rfl
+
 theorem run_compileStmt?_expr_block_frameStore_of_source_run_regular
     {ctx : CompileCtx} {returns : List Name}
     {compileState : CompileState} {expr : Expr 0} {plan : Plan}
