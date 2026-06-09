@@ -29,6 +29,9 @@ abbrev ZeroPaddingSpec :=
 abbrev WordByteEncodingSpec :=
   Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec
 
+abbrev SharedStateEqOutsideScratch :=
+  Locals.SourceLowering.StateRel.SpillScratch.SharedStateEqOutsideScratch
+
 def range (base : Word) (words : Nat) : ScratchRange :=
   { base := base.toNat, words := words }
 
@@ -1019,6 +1022,83 @@ theorem run_compileExprSeqCode?_cons_frameStore_of_parts
           · rw [Structured.Preservation.Code.run_append, hHeadRunCode]
             exact hTailRunCode
           · simpa [List.reverse_append, List.append_assoc] using hFinalStack
+
+theorem run_compileExprCode?_prim_frameStore_of_args
+    {compileState : CompileState} {store : Locals.Source.Store}
+    {base : Word} {words valuesAboveBase : Nat}
+    {op : Structured.BasicOp}
+    {args : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {code : Structured.Code}
+    {sourceShared sourceShared' : EvmYul.SharedState .EVM}
+    {argValues resultValues : List Word}
+    (hCompile :
+      compileExprCode? compileState.env valuesAboveBase (.prim op args) =
+        some code)
+    (hNoMem :
+      ¬ Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.BasicOpMemoryTouching
+          op)
+    (hPrimEval :
+      Locals.Source.PrimitiveSemantics.structured.eval op sourceShared
+          argValues =
+        .ok (sourceShared', resultValues))
+    (state : EVMState) (values rest : EvmYul.Stack Word)
+    (hArgsRun :
+      ∀ {argsCode : Structured.Code},
+        compileExprSeqCode? compileState.env valuesAboveBase args =
+          some argsCode →
+          ∃ mid,
+            Structured.Code.run argsCode
+                { state with stack := values ++ base :: rest } = .ok mid ∧
+            mid.stack = argValues.reverse ++ values ++ base :: rest ∧
+            ScratchRegionReady mid.toMachineState
+              (range base words).base (range base words).words ∧
+            SharedStateEqOutsideScratch (range base words) sourceShared
+              mid.toSharedState ∧
+            FrameStoreRel compileState.env store mid.toMachineState base) :
+    ∃ final,
+      resultValues.length = Expressions.Structured.BasicOp.outputs op ∧
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.stack = resultValues.reverse ++ values ++ base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) sourceShared'
+        final.toSharedState ∧
+      FrameStoreRel compileState.env store final.toMachineState base := by
+  simp [compileExprCode?] at hCompile
+  cases hArgsCode :
+      compileExprSeqCode? compileState.env valuesAboveBase args with
+  | none =>
+      simp [hArgsCode] at hCompile
+  | some argsCode =>
+      simp [hArgsCode] at hCompile
+      cases hCompile
+      rcases hArgsRun hArgsCode with
+        ⟨mid, hRunArgs, hMidStack, hReadyMid, hSharedMid, hRelMid⟩
+      rcases
+          Locals.SourceLowering.PrimitiveSemantics.structuredScratchSound.eval_step_exists
+            (range := range base words)
+            (op := op)
+            (sourceShared := sourceShared)
+            (sourceShared' := sourceShared')
+            (targetShared := mid.toSharedState)
+            (values := argValues)
+            (values' := resultValues)
+            (evm := mid)
+            (baseStack := values ++ base :: rest)
+            hNoMem hPrimEval hSharedMid hReadyMid rfl
+            (by simpa [List.append_assoc] using hMidStack) with
+        ⟨final, hStep, hSharedFinal, hReadyFinal, hMachineFinal,
+          hFinalStack⟩
+      refine ⟨final, ?_, ?_, ?_, hReadyFinal, hSharedFinal, ?_⟩
+      · exact
+          Locals.SourceLowering.PrimitiveSemantics.structuredScratchSound.eval_length
+            hPrimEval
+      · rw [Structured.Preservation.Code.run_append, hRunArgs]
+        simp [Structured.Code.run, Structured.BasicInstr.step, hStep]
+      · simpa [List.append_assoc] using hFinalStack
+      · rw [hMachineFinal]
+        exact hRelMid
 
 theorem run_storeTopSlotCode?_frameStore_assign
     (hSpec : ZeroPaddingSpec)
