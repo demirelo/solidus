@@ -4528,6 +4528,439 @@ theorem run_compileForLoop_false_frameStore_of_source_evalCondition
   · simpa [Locals.Source.State.restrictTo] using hSharedCond
   · exact FrameStoreRel.restrictTo hNames hRelCond
 
+theorem source_stmt_run_atomic_mode_regular
+    {stmt : Stmt} {program : Program}
+    {source : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat} {outcome : EvmCompiler.Functions.Source.Outcome}
+    (hSafe : AtomicStmtSafe stmt)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel stmt source =
+        .ok (outcome, sourceCtx')) :
+    outcome.mode = .regular := by
+  cases stmt with
+  | expr expr =>
+      unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+      cases hEval :
+          Locals.Source.Expr.eval
+            Locals.Source.PrimitiveSemantics.structured expr source with
+      | error err =>
+          simp [hEval] at hRun
+      | ok result =>
+          simp [hEval, EvmCompiler.Functions.Source.Outcome.regular] at hRun
+          cases hRun.1
+          rfl
+  | let_ name value =>
+      unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+      cases hEval :
+          Locals.Source.Expr.evalOne
+            Locals.Source.PrimitiveSemantics.structured value source with
+      | error err =>
+          simp [hEval] at hRun
+      | ok result =>
+          simp [hEval, EvmCompiler.Functions.Source.Outcome.regular] at hRun
+          cases hRun.1
+          rfl
+  | assign name value =>
+      unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+      cases hContains : source.vars.contains name with
+      | false =>
+          simp [hContains, EvmCompiler.Functions.Source.invalid,
+            Structured.invalid] at hRun
+      | true =>
+          cases hEval :
+              Locals.Source.Expr.evalOne
+                Locals.Source.PrimitiveSemantics.structured value source with
+          | error err =>
+              simp [hContains, hEval] at hRun
+          | ok result =>
+              simp [hContains, hEval,
+                EvmCompiler.Functions.Source.Outcome.regular] at hRun
+              cases hRun.1
+              rfl
+  | block body =>
+      simp [AtomicStmtSafe] at hSafe
+  | if_ cond body =>
+      simp [AtomicStmtSafe] at hSafe
+  | switch scrutinee cases defaultBody =>
+      simp [AtomicStmtSafe] at hSafe
+  | for_ init cond post body =>
+      simp [AtomicStmtSafe] at hSafe
+  | brk =>
+      simp [AtomicStmtSafe] at hSafe
+  | cont =>
+      simp [AtomicStmtSafe] at hSafe
+  | leave =>
+      simp [AtomicStmtSafe] at hSafe
+  | call targets functionName args =>
+      simp [AtomicStmtSafe] at hSafe
+  | terminal kind =>
+      simp [AtomicStmtSafe] at hSafe
+  | terminalArgs kind args =>
+      simp [AtomicStmtSafe] at hSafe
+
+theorem source_block_run_open_atomic_mode_regular :
+    ∀ {stmts : List Stmt} {program : Program}
+      {source : Locals.Source.State}
+      {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+      {fuel : Nat} {outcome : EvmCompiler.Functions.Source.Outcome},
+      AtomicStmtListSafe stmts →
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel { stmts := stmts } source =
+        .ok (outcome, sourceCtx') →
+      outcome.mode = .regular
+  | [], program, source, sourceCtx, sourceCtx', fuel, outcome, _hSafe,
+      hRun => by
+      cases fuel with
+      | zero =>
+          simp [EvmCompiler.Functions.Source.Block.runOpen,
+            EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+      | succ fuel' =>
+          simp [EvmCompiler.Functions.Source.Block.runOpen,
+            EvmCompiler.Functions.Source.Outcome.regular] at hRun
+          cases hRun.1
+          rfl
+  | stmt :: rest, program, source, sourceCtx, sourceCtx', fuel, outcome,
+      hSafe, hRun => by
+      rcases hSafe with ⟨hHeadSafe, hRestSafe⟩
+      cases fuel with
+      | zero =>
+          simp [EvmCompiler.Functions.Source.Block.runOpen,
+            EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+      | succ fuel' =>
+          cases hStmt :
+              EvmCompiler.Functions.Source.Stmt.run
+                Locals.Source.PrimitiveSemantics.structured
+                program sourceCtx fuel' stmt source with
+          | error err =>
+              simp [EvmCompiler.Functions.Source.Block.runOpen, hStmt] at hRun
+          | ok stmtResult =>
+              rcases stmtResult with ⟨stmtOutcome, headCtx⟩
+              have hStmtMode :
+                  stmtOutcome.mode = .regular :=
+                source_stmt_run_atomic_mode_regular hHeadSafe hStmt
+              cases stmtOutcome with
+              | mk sourceAfterHead mode =>
+                  cases mode with
+                  | regular =>
+                      have hTailRun :
+                          EvmCompiler.Functions.Source.Block.runOpen
+                              Locals.Source.PrimitiveSemantics.structured
+                              program headCtx fuel' { stmts := rest }
+                              sourceAfterHead =
+                            .ok (outcome, sourceCtx') := by
+                        simpa [EvmCompiler.Functions.Source.Block.runOpen,
+                          hStmt,
+                          EvmCompiler.Functions.Source.Outcome.regular]
+                          using hRun
+                      exact
+                        source_block_run_open_atomic_mode_regular hRestSafe
+                          hTailRun
+                  | brk =>
+                      simp at hStmtMode
+                  | cont =>
+                      simp at hStmtMode
+                  | leave =>
+                      simp at hStmtMode
+                  | halt kind =>
+                      simp at hStmtMode
+
+theorem source_block_run_scoped_atomic_mode_regular
+    {block : Block} {program : Program}
+    {source : Locals.Source.State}
+    {sourceCtx : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat} {outcome : EvmCompiler.Functions.Source.Outcome}
+    (hSafe : AtomicStmtListSafe block.stmts)
+    (hRun :
+      EvmCompiler.Functions.Source.Block.runScoped
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx block fuel source =
+        .ok outcome) :
+    outcome.mode = .regular := by
+  unfold EvmCompiler.Functions.Source.Block.runScoped at hRun
+  cases hOpen :
+      EvmCompiler.Functions.Source.Block.runOpen
+        Locals.Source.PrimitiveSemantics.structured
+        program sourceCtx fuel block source with
+  | error err =>
+      simp [hOpen] at hRun
+  | ok openResult =>
+      rcases openResult with ⟨openOutcome, openCtx⟩
+      have hOpenMode :
+          openOutcome.mode = .regular := by
+        cases block
+        exact source_block_run_open_atomic_mode_regular hSafe hOpen
+      cases openOutcome with
+      | mk openState openMode =>
+          cases openMode with
+          | regular =>
+              simp [hOpen, EvmCompiler.Functions.Source.Outcome.regular,
+                Locals.Source.Outcome.regular] at hRun
+              cases hRun
+              rfl
+          | brk =>
+              simp at hOpenMode
+          | cont =>
+              simp at hOpenMode
+          | leave =>
+              simp at hOpenMode
+          | halt kind =>
+              simp at hOpenMode
+
+theorem source_stmt_run_atomicOrBlock_mode_regular
+    {stmt : Stmt} {program : Program}
+    {source : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat} {outcome : EvmCompiler.Functions.Source.Outcome}
+    (hSafe : AtomicOrBlockStmtSafe stmt)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel stmt source =
+        .ok (outcome, sourceCtx')) :
+    outcome.mode = .regular := by
+  cases stmt with
+  | expr expr =>
+      exact
+        source_stmt_run_atomic_mode_regular
+          (stmt := .expr expr)
+          (by simpa [AtomicStmtSafe, AtomicOrBlockStmtSafe] using hSafe)
+          hRun
+  | let_ name value =>
+      exact
+        source_stmt_run_atomic_mode_regular
+          (stmt := .let_ name value)
+          (by simpa [AtomicStmtSafe, AtomicOrBlockStmtSafe] using hSafe)
+          hRun
+  | assign name value =>
+      exact
+        source_stmt_run_atomic_mode_regular
+          (stmt := .assign name value)
+          (by simpa [AtomicStmtSafe, AtomicOrBlockStmtSafe] using hSafe)
+          hRun
+  | block body =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+      unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+      cases hScoped :
+          EvmCompiler.Functions.Source.Block.runScoped
+            Locals.Source.PrimitiveSemantics.structured
+            program sourceCtx body fuel source with
+      | error err =>
+          simp [hScoped] at hRun
+      | ok scopedOutcome =>
+          have hMode :
+              scopedOutcome.mode = .regular :=
+            source_block_run_scoped_atomic_mode_regular hSafe hScoped
+          simp [hScoped] at hRun
+          cases hRun.1
+          exact hMode
+  | if_ cond body =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+      cases fuel with
+      | zero =>
+          simp [EvmCompiler.Functions.Source.Stmt.run,
+            EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+      | succ fuel' =>
+          unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+          cases hCond :
+              EvmCompiler.Functions.Source.Expr.evalCondition
+                Locals.Source.PrimitiveSemantics.structured cond source with
+          | error err =>
+              simp [hCond] at hRun
+          | ok condResult =>
+              rcases condResult with ⟨sourceAfterCond, condTrue⟩
+              cases condTrue with
+              | false =>
+                  simp [hCond,
+                    EvmCompiler.Functions.Source.Outcome.regular] at hRun
+                  cases hRun.1
+                  rfl
+              | true =>
+                  cases hScoped :
+                      EvmCompiler.Functions.Source.Block.runScoped
+                        Locals.Source.PrimitiveSemantics.structured
+                        program sourceCtx body fuel' sourceAfterCond with
+                  | error err =>
+                      simp [hCond, hScoped] at hRun
+                  | ok scopedOutcome =>
+                      have hMode :
+                          scopedOutcome.mode = .regular :=
+                        source_block_run_scoped_atomic_mode_regular hSafe.2
+                          hScoped
+                      simp [hCond, hScoped] at hRun
+                      cases hRun.1
+                      exact hMode
+  | switch scrutinee cases defaultBody =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+      cases fuel with
+      | zero =>
+          simp [EvmCompiler.Functions.Source.Stmt.run,
+            EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+      | succ fuel' =>
+          unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+          cases hEval :
+              Locals.Source.Expr.evalOne
+                Locals.Source.PrimitiveSemantics.structured scrutinee
+                source with
+          | error err =>
+              simp [hEval] at hRun
+          | ok scrutineeResult =>
+              rcases scrutineeResult with ⟨sourceAfterScrutinee, value⟩
+              cases hSelect :
+                  EvmCompiler.Functions.Source.Switch.select value cases
+                    defaultBody with
+              | none =>
+                  simp [hEval, hSelect,
+                    EvmCompiler.Functions.Source.Outcome.regular] at hRun
+                  cases hRun.1
+                  rfl
+              | some selectedBody =>
+                  cases hScoped :
+                      EvmCompiler.Functions.Source.Block.runScoped
+                        Locals.Source.PrimitiveSemantics.structured
+                        program sourceCtx selectedBody fuel'
+                        sourceAfterScrutinee with
+                  | error err =>
+                      simp [hEval, hSelect, hScoped] at hRun
+                  | ok scopedOutcome =>
+                      have hSelectedSafe :
+                          AtomicStmtListSafe selectedBody.stmts :=
+                        switchCaseBodiesAtomicSafe_select_some
+                          hSafe.2.1 hSafe.2.2 hSelect
+                      have hMode :
+                          scopedOutcome.mode = .regular :=
+                        source_block_run_scoped_atomic_mode_regular
+                          hSelectedSafe hScoped
+                      simp [hEval, hSelect, hScoped] at hRun
+                      cases hRun.1
+                      exact hMode
+  | for_ init cond post body =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | brk =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | cont =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | leave =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | call targets functionName args =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | terminal kind =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | terminalArgs kind args =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+
+theorem source_block_run_open_atomicOrBlock_mode_regular :
+    ∀ {stmts : List Stmt} {program : Program}
+      {source : Locals.Source.State}
+      {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+      {fuel : Nat} {outcome : EvmCompiler.Functions.Source.Outcome},
+      AtomicOrBlockStmtListSafe stmts →
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel { stmts := stmts } source =
+        .ok (outcome, sourceCtx') →
+      outcome.mode = .regular
+  | [], program, source, sourceCtx, sourceCtx', fuel, outcome, _hSafe,
+      hRun => by
+      cases fuel with
+      | zero =>
+          simp [EvmCompiler.Functions.Source.Block.runOpen,
+            EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+      | succ fuel' =>
+          simp [EvmCompiler.Functions.Source.Block.runOpen,
+            EvmCompiler.Functions.Source.Outcome.regular] at hRun
+          cases hRun.1
+          rfl
+  | stmt :: rest, program, source, sourceCtx, sourceCtx', fuel, outcome,
+      hSafe, hRun => by
+      rcases hSafe with ⟨hHeadSafe, hRestSafe⟩
+      cases fuel with
+      | zero =>
+          simp [EvmCompiler.Functions.Source.Block.runOpen,
+            EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+      | succ fuel' =>
+          cases hStmt :
+              EvmCompiler.Functions.Source.Stmt.run
+                Locals.Source.PrimitiveSemantics.structured
+                program sourceCtx fuel' stmt source with
+          | error err =>
+              simp [EvmCompiler.Functions.Source.Block.runOpen, hStmt] at hRun
+          | ok stmtResult =>
+              rcases stmtResult with ⟨stmtOutcome, headCtx⟩
+              have hStmtMode :
+                  stmtOutcome.mode = .regular :=
+                source_stmt_run_atomicOrBlock_mode_regular hHeadSafe hStmt
+              cases stmtOutcome with
+              | mk sourceAfterHead mode =>
+                  cases mode with
+                  | regular =>
+                      have hTailRun :
+                          EvmCompiler.Functions.Source.Block.runOpen
+                              Locals.Source.PrimitiveSemantics.structured
+                              program headCtx fuel' { stmts := rest }
+                              sourceAfterHead =
+                            .ok (outcome, sourceCtx') := by
+                        simpa [EvmCompiler.Functions.Source.Block.runOpen,
+                          hStmt,
+                          EvmCompiler.Functions.Source.Outcome.regular]
+                          using hRun
+                      exact
+                        source_block_run_open_atomicOrBlock_mode_regular
+                          hRestSafe hTailRun
+                  | brk =>
+                      simp at hStmtMode
+                  | cont =>
+                      simp at hStmtMode
+                  | leave =>
+                      simp at hStmtMode
+                  | halt kind =>
+                      simp at hStmtMode
+
+theorem source_block_run_scoped_atomicOrBlock_mode_regular
+    {block : Block} {program : Program}
+    {source : Locals.Source.State}
+    {sourceCtx : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat} {outcome : EvmCompiler.Functions.Source.Outcome}
+    (hSafe : AtomicOrBlockStmtListSafe block.stmts)
+    (hRun :
+      EvmCompiler.Functions.Source.Block.runScoped
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx block fuel source =
+        .ok outcome) :
+    outcome.mode = .regular := by
+  unfold EvmCompiler.Functions.Source.Block.runScoped at hRun
+  cases hOpen :
+      EvmCompiler.Functions.Source.Block.runOpen
+        Locals.Source.PrimitiveSemantics.structured
+        program sourceCtx fuel block source with
+  | error err =>
+      simp [hOpen] at hRun
+  | ok openResult =>
+      rcases openResult with ⟨openOutcome, openCtx⟩
+      have hOpenMode :
+          openOutcome.mode = .regular := by
+        cases block
+        exact source_block_run_open_atomicOrBlock_mode_regular hSafe hOpen
+      cases openOutcome with
+      | mk openState openMode =>
+          cases openMode with
+          | regular =>
+              simp [hOpen, EvmCompiler.Functions.Source.Outcome.regular,
+                Locals.Source.Outcome.regular] at hRun
+              cases hRun
+              rfl
+          | brk =>
+              simp at hOpenMode
+          | cont =>
+              simp at hOpenMode
+          | leave =>
+              simp at hOpenMode
+          | halt kind =>
+              simp at hOpenMode
+
 theorem source_stmt_run_atomic_privateScratchInvariant
     {stmt : Stmt} {program : Program}
     {source source' target : Locals.Source.State}
