@@ -60,6 +60,81 @@ def AtomicStmtListSafe : List Stmt → Prop
   | [] => True
   | stmt :: rest => AtomicStmtSafe stmt ∧ AtomicStmtListSafe rest
 
+def sourceExprSafe? {results : Nat} (expr : Expr results) : Bool :=
+  Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.expr? expr
+
+def sourceExprSeqSafe? {results : Nat}
+    (exprs : Locals.ExprSeq results) : Bool :=
+  Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.exprSeq?
+    exprs
+
+theorem sourceExprSafe?_sound {results : Nat} {expr : Expr results}
+    (hCheck : sourceExprSafe? expr = true) :
+    SourceExprSafe expr :=
+  Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.expr?_sound
+    hCheck
+
+theorem sourceExprSeqSafe?_sound {results : Nat}
+    {exprs : Locals.ExprSeq results}
+    (hCheck : sourceExprSeqSafe? exprs = true) :
+    SourceExprSeqSafe exprs :=
+  Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.exprSeq?_sound
+    hCheck
+
+def atomicStmtSafe? : Stmt → Bool
+  | .expr expr => sourceExprSafe? expr
+  | .let_ _name value => sourceExprSafe? value
+  | .assign _name value => sourceExprSafe? value
+  | _ => false
+
+def atomicStmtListSafe? : List Stmt → Bool
+  | [] => true
+  | stmt :: rest => atomicStmtSafe? stmt && atomicStmtListSafe? rest
+
+theorem atomicStmtSafe?_sound {stmt : Stmt}
+    (hCheck : atomicStmtSafe? stmt = true) :
+    AtomicStmtSafe stmt := by
+  cases stmt with
+  | expr expr =>
+      exact sourceExprSafe?_sound (by simpa [atomicStmtSafe?] using hCheck)
+  | let_ name value =>
+      exact sourceExprSafe?_sound (by simpa [atomicStmtSafe?] using hCheck)
+  | assign name value =>
+      exact sourceExprSafe?_sound (by simpa [atomicStmtSafe?] using hCheck)
+  | block body =>
+      simp [atomicStmtSafe?] at hCheck
+  | if_ cond body =>
+      simp [atomicStmtSafe?] at hCheck
+  | switch scrutinee cases defaultBody =>
+      simp [atomicStmtSafe?] at hCheck
+  | for_ init cond post body =>
+      simp [atomicStmtSafe?] at hCheck
+  | brk =>
+      simp [atomicStmtSafe?] at hCheck
+  | cont =>
+      simp [atomicStmtSafe?] at hCheck
+  | leave =>
+      simp [atomicStmtSafe?] at hCheck
+  | call targets functionName args =>
+      simp [atomicStmtSafe?] at hCheck
+  | terminal kind =>
+      simp [atomicStmtSafe?] at hCheck
+  | terminalArgs kind args =>
+      simp [atomicStmtSafe?] at hCheck
+
+theorem atomicStmtListSafe?_sound {stmts : List Stmt}
+    (hCheck : atomicStmtListSafe? stmts = true) :
+    AtomicStmtListSafe stmts := by
+  induction stmts with
+  | nil =>
+      trivial
+  | cons stmt rest ih =>
+      have hAnd :
+          atomicStmtSafe? stmt = true ∧
+            atomicStmtListSafe? rest = true := by
+        simpa [atomicStmtListSafe?] using hCheck
+      exact ⟨atomicStmtSafe?_sound hAnd.1, ih hAnd.2⟩
+
 def range (base : Word) (words : Nat) : ScratchRange :=
   { base := base.toNat, words := words }
 
