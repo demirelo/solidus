@@ -12781,6 +12781,244 @@ theorem run_compileBlockScoped?_atomicOrBlock_frameStore_of_source_run_scoped_re
           FrameStoreRel.restrictTo_env_of_lookup_preserved
             hNames hLookupPreserved hRelOpen
 
+theorem run_compileForLoop_true_regular_frameStore_of_source_step
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {loopState : CompileState} {cond : Expr 1}
+    {condCode : Structured.Code}
+    {post body : Block} {postPlan bodyPlan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source sourceAfterCond sourceAfterBody sourceAfterPost :
+      Locals.Source.State}
+    {postBase bodyBase : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel bodyFuel postFuel loopFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCondCompile :
+      compileExprCode? loopState.env 0 cond = some condCode)
+    (hPostCompile :
+      compileBlockScoped? ctx returns loopState post = some postPlan)
+    (hBodyCompile :
+      compileBlockScoped? ctx returns postPlan.state body = some bodyPlan)
+    (hCondSafe : SourceExprSafe cond)
+    (hPostSafe : AtomicOrBlockStmtListSafe post.stmts)
+    (hBodySafe : AtomicOrBlockStmtListSafe body.stmts)
+    (hPostScoped :
+      EvmCompiler.Functions.Scope.Block.Scoped postBase.scope post)
+    (hBodyScoped :
+      EvmCompiler.Functions.Scope.Block.Scoped bodyBase.scope body)
+    (hCondTrue :
+      Locals.Source.Expr.evalCondition
+          Locals.Source.PrimitiveSemantics.structured cond source =
+        .ok (sourceAfterCond, true))
+    (hBodyRun :
+      EvmCompiler.Functions.Source.Block.runScoped
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram bodyBase body sourceFuel sourceAfterCond =
+        .ok
+          (EvmCompiler.Functions.Source.Outcome.regular sourceAfterBody))
+    (hPostRun :
+      EvmCompiler.Functions.Source.Block.runScoped
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram postBase post sourceFuel sourceAfterBody =
+        .ok
+          (EvmCompiler.Functions.Source.Outcome.regular sourceAfterPost))
+    (hStateBound : StateSlotsBounded loopState)
+    (hStateNodup : StateSlotsNodup loopState)
+    (hPostNames : EnvNamesInScope loopState.env postBase.scope)
+    (hBodyNames : EnvNamesInScope postPlan.state.env bodyBase.scope)
+    (hFrameWords : bodyPlan.state.nextSlot ≤ words)
+    (hBodyFuel :
+      bodyFuel + atomicOrBlockStmtListFuel body.stmts + 1 ≤ loopFuel)
+    (hPostFuel :
+      postFuel + atomicOrBlockStmtListFuel post.stmts + 1 ≤ loopFuel)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel loopState.env source.vars
+      evmState.toMachineState base)
+    (restStack : EvmYul.Stack Word)
+    (hRec :
+      ∀ {postFinal : EVMState},
+        postFinal.stack = base :: restStack →
+        ScratchRegionReady postFinal.toMachineState
+          (range base words).base (range base words).words →
+        SharedStateEqOutsideScratch (range base words)
+          sourceAfterPost.shared postFinal.toSharedState →
+        FrameStoreRel loopState.env sourceAfterPost.vars
+          postFinal.toMachineState base →
+        ∃ final,
+          Expressions.Stmt.runForLoop compiledProgram loopFuel
+              (.code condCode) postPlan.block bodyPlan.block
+              { runState with evm := postFinal } =
+            .ok (Expressions.Outcome.regular ({ runState with evm := final })) ∧
+          final.stack = base :: restStack ∧
+          ScratchRegionReady final.toMachineState
+            (range base words).base (range base words).words ∧
+          SharedStateEqOutsideScratch (range base words)
+            sourceAfterPost.shared final.toSharedState ∧
+          FrameStoreRel loopState.env sourceAfterPost.vars
+            final.toMachineState base) :
+    ∃ final,
+      Expressions.Stmt.runForLoop compiledProgram (loopFuel + 1)
+          (.code condCode) postPlan.block bodyPlan.block
+          { runState with evm := { evmState with stack := base :: restStack } } =
+        .ok (Expressions.Outcome.regular ({ runState with evm := final })) ∧
+      final.stack = base :: restStack ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words)
+        sourceAfterPost.shared final.toSharedState ∧
+      FrameStoreRel loopState.env sourceAfterPost.vars
+        final.toMachineState base := by
+  have hPostEnv : postPlan.state.env = loopState.env :=
+    compileBlockScoped?_env_eq hPostCompile
+  have hBodyEnv : bodyPlan.state.env = postPlan.state.env :=
+    compileBlockScoped?_env_eq hBodyCompile
+  have hPostBound : StateSlotsBounded postPlan.state :=
+    compileBlockScoped?_stateSlotsBounded hStateBound hPostCompile
+  have hPostNodup : StateSlotsNodup postPlan.state :=
+    compileBlockScoped?_stateSlotsNodup hStateBound hStateNodup hPostCompile
+  have hPostFrameWords : postPlan.state.nextSlot ≤ words := by
+    have hMono :
+        postPlan.state.nextSlot ≤ bodyPlan.state.nextSlot :=
+      compileBlockScoped?_nextSlot_mono (plan := bodyPlan) hBodyCompile
+    exact Nat.le_trans hMono hFrameWords
+  have hLoopFrameWords : loopState.nextSlot ≤ words := by
+    have hMono :
+        loopState.nextSlot ≤ postPlan.state.nextSlot :=
+      compileBlockScoped?_nextSlot_mono (plan := postPlan) hPostCompile
+    exact Nat.le_trans hMono hPostFrameWords
+  rcases
+    run_compileExprCode?_condition_frameStore_of_source_evalCondition
+      (compileState := loopState)
+      (cond := cond)
+      (code := condCode)
+      (source := source)
+      (sourceAfterCond := sourceAfterCond)
+      (condTrue := true)
+      (evmState := evmState)
+      (base := base)
+      (words := words)
+      (runState := runState)
+      hCondCompile hCondSafe hCondTrue hStateBound hLoopFrameWords
+      hReady hShared hRel restStack with
+  ⟨condFinal, hCondTarget, hCondStack, hReadyCond, hSharedCond, hRelCond⟩
+  have hBodyRelStart :
+      FrameStoreRel postPlan.state.env sourceAfterCond.vars
+        condFinal.toMachineState base := by
+    intro name slot hLookup
+    have hLookupLoop : lookupSlot? name loopState.env = some slot := by
+      simpa [hPostEnv] using hLookup
+    exact hRelCond hLookupLoop
+  rcases
+    run_compileBlockScoped?_atomicOrBlock_frameStore_of_source_run_scoped_regular
+      hSpec hWordBytes
+      (ctx := ctx)
+      (returns := returns)
+      (compileState := postPlan.state)
+      (body := body)
+      (plan := bodyPlan)
+      (sourceProgram := sourceProgram)
+      (compiledProgram := compiledProgram)
+      (source := sourceAfterCond)
+      (source' := sourceAfterBody)
+      (sourceCtx := bodyBase)
+      (sourceFuel := sourceFuel)
+      (blockFuel := bodyFuel)
+      (runState := runState)
+      (evmState := condFinal)
+      (base := base)
+      (words := words)
+      hBodyCompile hBodySafe hBodyScoped hBodyRun hPostBound hPostNodup
+      hBodyNames hFrameWords hReadyCond hSharedCond hBodyRelStart restStack with
+  ⟨bodyFinal, hBodyTarget, hBodyStack, hReadyBody, hSharedBody,
+    hRelBody⟩
+  have hBodyTargetStart :
+      ({ runState with evm := { condFinal with stack := base :: restStack } } :
+        Expressions.RunState) =
+        ({ runState with evm := condFinal } : Expressions.RunState) := by
+    cases condFinal
+    simp at hCondStack ⊢
+    exact hCondStack.symm
+  have hBodyTarget' :
+      Expressions.Block.run compiledProgram
+          (bodyFuel + atomicOrBlockStmtListFuel body.stmts + 1)
+          bodyPlan.block ({ runState with evm := condFinal }) =
+        .ok (Expressions.Outcome.regular ({ runState with evm := bodyFinal })) := by
+    rw [← hBodyTargetStart]
+    exact hBodyTarget
+  have hBodyTargetLoop :
+      Expressions.Block.run compiledProgram loopFuel bodyPlan.block
+          ({ runState with evm := condFinal }) =
+        .ok (Expressions.Outcome.regular ({ runState with evm := bodyFinal })) :=
+    expressionsBlockRun_mono compiledProgram hBodyFuel hBodyTarget'
+  have hRelBodyLoop :
+      FrameStoreRel loopState.env sourceAfterBody.vars
+        bodyFinal.toMachineState base := by
+    intro name slot hLookup
+    have hLookupBody :
+        lookupSlot? name bodyPlan.state.env = some slot := by
+      simpa [hBodyEnv, hPostEnv] using hLookup
+    exact hRelBody hLookupBody
+  rcases
+    run_compileBlockScoped?_atomicOrBlock_frameStore_of_source_run_scoped_regular
+      hSpec hWordBytes
+      (ctx := ctx)
+      (returns := returns)
+      (compileState := loopState)
+      (body := post)
+      (plan := postPlan)
+      (sourceProgram := sourceProgram)
+      (compiledProgram := compiledProgram)
+      (source := sourceAfterBody)
+      (source' := sourceAfterPost)
+      (sourceCtx := postBase)
+      (sourceFuel := sourceFuel)
+      (blockFuel := postFuel)
+      (runState := runState)
+      (evmState := bodyFinal)
+      (base := base)
+      (words := words)
+      hPostCompile hPostSafe hPostScoped hPostRun hStateBound hStateNodup
+      hPostNames hPostFrameWords hReadyBody hSharedBody hRelBodyLoop
+      restStack with
+  ⟨postFinal, hPostTarget, hPostStack, hReadyPost, hSharedPost, hRelPost⟩
+  have hPostTargetStart :
+      ({ runState with evm := { bodyFinal with stack := base :: restStack } } :
+        Expressions.RunState) =
+        ({ runState with evm := bodyFinal } : Expressions.RunState) := by
+    cases bodyFinal
+    simp at hBodyStack ⊢
+    exact hBodyStack.symm
+  have hPostTarget' :
+      Expressions.Block.run compiledProgram
+          (postFuel + atomicOrBlockStmtListFuel post.stmts + 1)
+          postPlan.block ({ runState with evm := bodyFinal }) =
+        .ok (Expressions.Outcome.regular ({ runState with evm := postFinal })) := by
+    rw [← hPostTargetStart]
+    exact hPostTarget
+  have hPostTargetLoop :
+      Expressions.Block.run compiledProgram loopFuel postPlan.block
+          ({ runState with evm := bodyFinal }) =
+        .ok (Expressions.Outcome.regular ({ runState with evm := postFinal })) :=
+    expressionsBlockRun_mono compiledProgram hPostFuel hPostTarget'
+  have hRelPostLoop :
+      FrameStoreRel loopState.env sourceAfterPost.vars
+        postFinal.toMachineState base := by
+    intro name slot hLookup
+    have hLookupPost :
+        lookupSlot? name postPlan.state.env = some slot := by
+      simpa [hPostEnv] using hLookup
+    exact hRelPost hLookupPost
+  rcases hRec hPostStack hReadyPost hSharedPost hRelPostLoop with
+  ⟨final, hRecTarget, hFinalStack, hReadyFinal, hSharedFinal, hRelFinal⟩
+  refine ⟨final, ?_, hFinalStack, hReadyFinal, hSharedFinal, hRelFinal⟩
+  simp [Expressions.Stmt.runForLoop, hCondTarget, hBodyTargetLoop,
+    hPostTargetLoop, hRecTarget, Expressions.Outcome.regular]
+
 theorem run_frameInitCode_append_compileStmtList?_atomicOrBlock_block_frameStore_of_source_run_open_regular
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
