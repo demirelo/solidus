@@ -4467,6 +4467,67 @@ theorem run_compileExprCode?_condition_frameStore_of_source_evalCondition
         simpa [hCondMachine] using
           (hRelFinal (name := name) (slot := slot) hLookup)
 
+theorem run_compileForLoop_false_frameStore_of_source_evalCondition
+    {compileState : CompileState} {cond : Expr 1}
+    {condCode : Structured.Code}
+    {postBlock bodyBlock : Expressions.Block}
+    {source sourceAfterCond : Locals.Source.State}
+    {loopCtx : EvmCompiler.Functions.Source.Ctx}
+    {compiledProgram : Expressions.Program}
+    {fuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile : compileExprCode? compileState.env 0 cond = some condCode)
+    (hSafe : SourceExprSafe cond)
+    (hCondFalse :
+      Locals.Source.Expr.evalCondition
+          Locals.Source.PrimitiveSemantics.structured cond source =
+        .ok (sourceAfterCond, false))
+    (hStateBound : StateSlotsBounded compileState)
+    (hNames : EnvNamesInScope compileState.env loopCtx.scope)
+    (hFrameWords : compileState.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (restStack : EvmYul.Stack Word) :
+    ∃ final,
+      Expressions.Stmt.runForLoop compiledProgram (fuel + 1)
+          (.code condCode) postBlock bodyBlock
+          { runState with evm := { evmState with stack := base :: restStack } } =
+        .ok (Expressions.Outcome.regular ({ runState with evm := final })) ∧
+      final.stack = base :: restStack ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words)
+        (sourceAfterCond.restrictTo loopCtx.scope).shared
+        final.toSharedState ∧
+      FrameStoreRel compileState.env
+        (sourceAfterCond.restrictTo loopCtx.scope).vars
+        final.toMachineState base := by
+  rcases
+    run_compileExprCode?_condition_frameStore_of_source_evalCondition
+      (compileState := compileState)
+      (cond := cond)
+      (code := condCode)
+      (source := source)
+      (sourceAfterCond := sourceAfterCond)
+      (condTrue := false)
+      (evmState := evmState)
+      (base := base)
+      (words := words)
+      (runState := runState)
+      hCompile hSafe hCondFalse hStateBound hFrameWords hReady hShared hRel
+      restStack with
+  ⟨condFinal, hCondTarget, hCondStack, hReadyCond, hSharedCond, hRelCond⟩
+  refine ⟨condFinal, ?_, hCondStack, hReadyCond, ?_, ?_⟩
+  · simp [Expressions.Stmt.runForLoop, hCondTarget,
+      Expressions.Outcome.regular]
+  · simpa [Locals.Source.State.restrictTo] using hSharedCond
+  · exact FrameStoreRel.restrictTo hNames hRelCond
+
 theorem source_stmt_run_atomic_privateScratchInvariant
     {stmt : Stmt} {program : Program}
     {source source' target : Locals.Source.State}
