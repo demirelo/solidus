@@ -119,6 +119,10 @@ mutual
         atomicOrBlockStmtFuel stmt + atomicOrBlockStmtListFuel rest
 end
 
+def atomicOrBlockForLoopStepFuel (post body : Block) : Nat :=
+  max (atomicOrBlockStmtListFuel body.stmts)
+    (atomicOrBlockStmtListFuel post.stmts) + 1
+
 theorem atomicOrBlockStmtListFuel_of_atomic :
     ∀ {stmts : List Stmt},
       AtomicStmtListSafe stmts →
@@ -13222,7 +13226,7 @@ theorem run_compileForLoop_true_regular_frameStore_of_source_step
     {condCode : Structured.Code}
     {post body : Block} {postPlan bodyPlan : Plan}
     {sourceProgram : Program} {compiledProgram : Expressions.Program}
-    {source sourceAfterCond sourceAfterBody sourceAfterPost :
+    {source sourceAfterCond sourceAfterBody sourceAfterPost sourceFinal :
       Locals.Source.State}
     {postBase bodyBase : EvmCompiler.Functions.Source.Ctx}
     {sourceFuel bodyFuel postFuel loopFuel : Nat}
@@ -13291,8 +13295,8 @@ theorem run_compileForLoop_true_regular_frameStore_of_source_step
           ScratchRegionReady final.toMachineState
             (range base words).base (range base words).words ∧
           SharedStateEqOutsideScratch (range base words)
-            sourceAfterPost.shared final.toSharedState ∧
-          FrameStoreRel loopState.env sourceAfterPost.vars
+            sourceFinal.shared final.toSharedState ∧
+          FrameStoreRel loopState.env sourceFinal.vars
             final.toMachineState base) :
     ∃ final,
       Expressions.Stmt.runForLoop compiledProgram (loopFuel + 1)
@@ -13303,8 +13307,8 @@ theorem run_compileForLoop_true_regular_frameStore_of_source_step
       ScratchRegionReady final.toMachineState
         (range base words).base (range base words).words ∧
       SharedStateEqOutsideScratch (range base words)
-        sourceAfterPost.shared final.toSharedState ∧
-      FrameStoreRel loopState.env sourceAfterPost.vars
+        sourceFinal.shared final.toSharedState ∧
+      FrameStoreRel loopState.env sourceFinal.vars
         final.toMachineState base := by
   have hPostEnv : postPlan.state.env = loopState.env :=
     compileBlockScoped?_env_eq hPostCompile
@@ -13451,6 +13455,323 @@ theorem run_compileForLoop_true_regular_frameStore_of_source_step
   refine ⟨final, ?_, hFinalStack, hReadyFinal, hSharedFinal, hRelFinal⟩
   simp [Expressions.Stmt.runForLoop, hCondTarget, hBodyTargetLoop,
     hPostTargetLoop, hRecTarget, Expressions.Outcome.regular]
+
+theorem run_compileForLoop_regular_frameStore_of_source_run
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {loopState : CompileState} {cond : Expr 1}
+    {condCode : Structured.Code}
+    {post body : Block} {postPlan bodyPlan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source source' : Locals.Source.State}
+    {loopCtx postBase bodyBase : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCondCompile :
+      compileExprCode? loopState.env 0 cond = some condCode)
+    (hPostCompile :
+      compileBlockScoped? ctx returns loopState post = some postPlan)
+    (hBodyCompile :
+      compileBlockScoped? ctx returns postPlan.state body = some bodyPlan)
+    (hCondSafe : SourceExprSafe cond)
+    (hPostSafe : AtomicOrBlockStmtListSafe post.stmts)
+    (hBodySafe : AtomicOrBlockStmtListSafe body.stmts)
+    (hPostScoped :
+      EvmCompiler.Functions.Scope.Block.Scoped postBase.scope post)
+    (hBodyScoped :
+      EvmCompiler.Functions.Scope.Block.Scoped bodyBase.scope body)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.runForLoop
+          Locals.Source.PrimitiveSemantics.structured sourceProgram loopCtx
+          cond postBase post bodyBase body sourceFuel source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source'))
+    (hStateBound : StateSlotsBounded loopState)
+    (hStateNodup : StateSlotsNodup loopState)
+    (hLoopNames : EnvNamesInScope loopState.env loopCtx.scope)
+    (hPostNames : EnvNamesInScope loopState.env postBase.scope)
+    (hBodyNames : EnvNamesInScope postPlan.state.env bodyBase.scope)
+    (hFrameWords : bodyPlan.state.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel loopState.env source.vars
+      evmState.toMachineState base)
+    (restStack : EvmYul.Stack Word) :
+    ∃ final,
+      Expressions.Stmt.runForLoop compiledProgram
+          (sourceFuel * atomicOrBlockForLoopStepFuel post body + 1)
+          (.code condCode) postPlan.block bodyPlan.block
+          { runState with evm := { evmState with stack := base :: restStack } } =
+        .ok (Expressions.Outcome.regular ({ runState with evm := final })) ∧
+      final.stack = base :: restStack ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words)
+        source'.shared final.toSharedState ∧
+      FrameStoreRel loopState.env source'.vars final.toMachineState base := by
+  have hPostFrameWords : postPlan.state.nextSlot ≤ words := by
+    have hMono :
+        postPlan.state.nextSlot ≤ bodyPlan.state.nextSlot :=
+      compileBlockScoped?_nextSlot_mono (plan := bodyPlan) hBodyCompile
+    exact Nat.le_trans hMono hFrameWords
+  have hLoopFrameWords : loopState.nextSlot ≤ words := by
+    have hMono :
+        loopState.nextSlot ≤ postPlan.state.nextSlot :=
+      compileBlockScoped?_nextSlot_mono (plan := postPlan) hPostCompile
+    exact Nat.le_trans hMono hPostFrameWords
+  let step := atomicOrBlockForLoopStepFuel post body
+  have hStepPos : 1 ≤ step := by
+    simp [step, atomicOrBlockForLoopStepFuel]
+  have hBodyStep :
+      0 + atomicOrBlockStmtListFuel body.stmts + 1 ≤ step := by
+    have hMax :
+        atomicOrBlockStmtListFuel body.stmts ≤
+          max (atomicOrBlockStmtListFuel body.stmts)
+            (atomicOrBlockStmtListFuel post.stmts) :=
+      Nat.le_max_left _ _
+    simp [step, atomicOrBlockForLoopStepFuel]
+  have hPostStep :
+      0 + atomicOrBlockStmtListFuel post.stmts + 1 ≤ step := by
+    have hMax :
+        atomicOrBlockStmtListFuel post.stmts ≤
+          max (atomicOrBlockStmtListFuel body.stmts)
+            (atomicOrBlockStmtListFuel post.stmts) :=
+      Nat.le_max_right _ _
+    simp [step, atomicOrBlockForLoopStepFuel]
+  induction sourceFuel generalizing source evmState with
+  | zero =>
+      simp [EvmCompiler.Functions.Source.Stmt.runForLoop,
+        EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+  | succ fuel ih =>
+      unfold EvmCompiler.Functions.Source.Stmt.runForLoop at hRun
+      cases hCond :
+          EvmCompiler.Functions.Source.Expr.evalCondition
+            Locals.Source.PrimitiveSemantics.structured cond source with
+      | error err =>
+          simp [hCond] at hRun
+      | ok condResult =>
+          rcases condResult with ⟨sourceAfterCond, condTrue⟩
+          cases condTrue with
+          | false =>
+              simp [hCond, EvmCompiler.Functions.Source.Outcome.regular]
+                at hRun
+              have hSource' :
+                  source' = sourceAfterCond.restrictTo loopCtx.scope := by
+                cases hRun
+                rfl
+              rcases
+                run_compileForLoop_false_frameStore_of_source_evalCondition
+                  (compileState := loopState)
+                  (cond := cond)
+                  (condCode := condCode)
+                  (postBlock := postPlan.block)
+                  (bodyBlock := bodyPlan.block)
+                  (source := source)
+                  (sourceAfterCond := sourceAfterCond)
+                  (loopCtx := loopCtx)
+                  (compiledProgram := compiledProgram)
+                  (fuel := fuel * step + step)
+                  (runState := runState)
+                  (evmState := evmState)
+                  (base := base)
+                  (words := words)
+                  hCondCompile hCondSafe (by simpa using hCond)
+                  hStateBound hLoopNames hLoopFrameWords hReady hShared hRel
+                  restStack with
+              ⟨final, hTarget, hStack, hReadyFinal, hSharedFinal,
+                hRelFinal⟩
+              refine ⟨final, ?_, hStack, hReadyFinal, ?_, ?_⟩
+              · have hFuel :
+                    (fuel + 1) *
+                          atomicOrBlockForLoopStepFuel post body + 1 =
+                        fuel * step + step + 1 := by
+                    simp [step, Nat.succ_mul, Nat.add_comm]
+                simpa [hFuel] using hTarget
+              · rw [hSource']
+                exact hSharedFinal
+              · rw [hSource']
+                exact hRelFinal
+          | true =>
+              cases hBody :
+                  EvmCompiler.Functions.Source.Block.runScoped
+                    Locals.Source.PrimitiveSemantics.structured sourceProgram
+                    bodyBase body fuel sourceAfterCond with
+              | error err =>
+                  simp [hCond, hBody] at hRun
+              | ok bodyOutcome =>
+                  have hBodyMode :
+                      bodyOutcome.mode = .regular :=
+                    source_block_run_scoped_atomicOrBlock_mode_regular
+                      hBodySafe hBody
+                  cases bodyOutcome with
+                  | mk sourceAfterBody bodyMode =>
+                      cases bodyMode with
+                      | regular =>
+                          cases hPost :
+                              EvmCompiler.Functions.Source.Block.runScoped
+                                Locals.Source.PrimitiveSemantics.structured
+                                sourceProgram postBase post fuel
+                                sourceAfterBody with
+                          | error err =>
+                              simp [hCond, hBody, hPost] at hRun
+                          | ok postOutcome =>
+                              have hPostMode :
+                                  postOutcome.mode = .regular :=
+                                source_block_run_scoped_atomicOrBlock_mode_regular
+                                  hPostSafe hPost
+                              cases postOutcome with
+                              | mk sourceAfterPost postMode =>
+                                  cases postMode with
+                                  | regular =>
+                                      have hLoopRun :
+                                          EvmCompiler.Functions.Source.Stmt.runForLoop
+                                              Locals.Source.PrimitiveSemantics.structured
+                                              sourceProgram loopCtx cond
+                                              postBase post bodyBase body fuel
+                                              sourceAfterPost =
+                                            .ok
+                                              (EvmCompiler.Functions.Source.Outcome.regular
+                                                source') := by
+                                        simpa [hCond, hBody, hPost,
+                                          EvmCompiler.Functions.Source.Outcome.regular]
+                                          using hRun
+                                      rcases
+                                        run_compileForLoop_true_regular_frameStore_of_source_step
+                                          hSpec hWordBytes
+                                          (ctx := ctx)
+                                          (returns := returns)
+                                          (loopState := loopState)
+                                          (cond := cond)
+                                          (condCode := condCode)
+                                          (post := post)
+                                          (body := body)
+                                          (postPlan := postPlan)
+                                          (bodyPlan := bodyPlan)
+                                          (sourceProgram := sourceProgram)
+                                          (compiledProgram := compiledProgram)
+                                          (source := source)
+                                          (sourceAfterCond := sourceAfterCond)
+                                          (sourceAfterBody := sourceAfterBody)
+                                          (sourceAfterPost := sourceAfterPost)
+                                          (sourceFinal := source')
+                                          (postBase := postBase)
+                                          (bodyBase := bodyBase)
+                                          (sourceFuel := fuel)
+                                          (bodyFuel := 0)
+                                          (postFuel := 0)
+                                          (loopFuel := fuel * step + step)
+                                          (runState := runState)
+                                          (evmState := evmState)
+                                          (base := base)
+                                          (words := words)
+                                          hCondCompile hPostCompile
+                                          hBodyCompile hCondSafe hPostSafe
+                                          hBodySafe hPostScoped hBodyScoped
+                                          (by simpa using hCond)
+                                          (by
+                                            simpa [EvmCompiler.Functions.Source.Outcome.regular]
+                                              using hBody)
+                                          (by
+                                            simpa [EvmCompiler.Functions.Source.Outcome.regular]
+                                              using hPost)
+                                          hStateBound hStateNodup hPostNames
+                                          hBodyNames hFrameWords
+                                          (by
+                                            exact
+                                              Nat.le_trans hBodyStep
+                                                (by omega))
+                                          (by
+                                            exact
+                                              Nat.le_trans hPostStep
+                                                (by omega))
+                                          hReady hShared hRel restStack
+                                          (fun {postFinal} hPostStack
+                                              hReadyPost hSharedPost
+                                              hRelPost => by
+                                            rcases
+                                              ih
+                                                (source := sourceAfterPost)
+                                                (evmState := postFinal)
+                                                hLoopRun hReadyPost
+                                                hSharedPost hRelPost with
+                                            ⟨recFinal, hRecTarget,
+                                              hRecStack, hReadyRec,
+                                              hSharedRec, hRelRec⟩
+                                            have hStart :
+                                                ({ runState with
+                                                  evm :=
+                                                    { postFinal with
+                                                      stack :=
+                                                        base :: restStack } } :
+                                                  Expressions.RunState) =
+                                                ({ runState with
+                                                  evm := postFinal } :
+                                                  Expressions.RunState) := by
+                                              cases postFinal
+                                              simp at hPostStack ⊢
+                                              exact hPostStack.symm
+                                            have hRecTarget' :
+                                                Expressions.Stmt.runForLoop
+                                                    compiledProgram
+                                                    (fuel *
+                                                        atomicOrBlockForLoopStepFuel
+                                                          post body + 1)
+                                                    (.code condCode)
+                                                    postPlan.block
+                                                    bodyPlan.block
+                                                    { runState with
+                                                      evm := postFinal } =
+                                                  .ok
+                                                    (Expressions.Outcome.regular
+                                                      ({ runState with
+                                                        evm := recFinal })) := by
+                                              simpa [hStart] using hRecTarget
+                                            refine
+                                              ⟨recFinal, ?_, hRecStack,
+                                                hReadyRec, hSharedRec,
+                                                hRelRec⟩
+                                            have hLe :
+                                                fuel *
+                                                    atomicOrBlockForLoopStepFuel
+                                                      post body + 1 ≤
+                                                  fuel * step + step := by
+                                              simp [step]
+                                              omega
+                                            exact
+                                              expressionsStmtRunForLoop_mono
+                                                compiledProgram hLe
+                                                hRecTarget') with
+                                      ⟨final, hTarget, hStack, hReadyFinal,
+                                        hSharedFinal, hRelFinal⟩
+                                      refine
+                                        ⟨final, ?_, hStack, hReadyFinal,
+                                          hSharedFinal, hRelFinal⟩
+                                      have hFuel :
+                                          (fuel + 1) *
+                                                atomicOrBlockForLoopStepFuel
+                                                  post body + 1 =
+                                            fuel * step + step + 1 := by
+                                        simp [step, Nat.succ_mul, Nat.add_comm]
+                                      simpa [hFuel] using hTarget
+                                  | brk =>
+                                      simp at hPostMode
+                                  | cont =>
+                                      simp at hPostMode
+                                  | leave =>
+                                      simp at hPostMode
+                                  | halt kind =>
+                                      simp at hPostMode
+                      | brk =>
+                          simp at hBodyMode
+                      | cont =>
+                          simp at hBodyMode
+                      | leave =>
+                          simp at hBodyMode
+                      | halt kind =>
+                          simp at hBodyMode
 
 theorem run_frameInitCode_append_compileStmtList?_atomicOrBlock_block_frameStore_of_source_run_open_regular
     (hSpec : ZeroPaddingSpec)
