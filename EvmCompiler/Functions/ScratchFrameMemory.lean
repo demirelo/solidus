@@ -2851,6 +2851,207 @@ theorem splitPrelude_atomic_source_safe_compileExprCode_nil :
                   splitPrelude_atomic_source_safe_compileExprCode_nil
                     hTailSafe hTail query hTailMem
 
+theorem stackStoreRel_nil_any {store : Locals.Source.Store} :
+    Locals.SourceLowering.StackStoreRel [] store [] := by
+  simp [Locals.SourceLowering.StackStoreRel]
+
+mutual
+  theorem compileNoVarExprCode?_eq_locals_compileCode_initial_of_source_safe :
+      ∀ {results : Nat} (expr : Expr results) (offset : Nat),
+        SourceExprSafe expr →
+          compileNoVarExprCode? expr =
+            Locals.Expr.compileCode Locals.Ctx.initial offset expr := by
+    intro results expr offset hSafe
+    cases expr with
+    | lit value =>
+        rfl
+    | var name =>
+        simp [compileNoVarExprCode?, Locals.Expr.compileCode,
+          Locals.Ctx.initial, Locals.Layout.lookupDepth?,
+          Locals.Layout.lookupDepthFrom]
+    | code raw =>
+        simp [SourceExprSafe,
+          Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.ExprSafe]
+          at hSafe
+    | prim op args =>
+        simp [SourceExprSafe] at hSafe
+        rcases hSafe with ⟨_hOpSafe, hArgsSafe⟩
+        have hArgs :=
+          compileNoVarExprSeqCode?_eq_locals_compileCode_initial_of_source_safe
+            args offset hArgsSafe
+        simp [compileNoVarExprCode?, Locals.Expr.compileCode, hArgs]
+
+  theorem compileNoVarExprSeqCode?_eq_locals_compileCode_initial_of_source_safe :
+      ∀ {results : Nat} (exprs : Locals.ExprSeq results) (offset : Nat),
+        SourceExprSeqSafe exprs →
+          compileNoVarExprSeqCode? exprs =
+            Locals.ExprSeq.compileCode Locals.Ctx.initial offset exprs := by
+    intro results exprs offset hSafe
+    cases exprs with
+    | nil =>
+        rfl
+    | @cons left right head tail =>
+        simp [SourceExprSeqSafe] at hSafe
+        rcases hSafe with ⟨hHeadSafe, hTailSafe⟩
+        have hHead :=
+          compileNoVarExprCode?_eq_locals_compileCode_initial_of_source_safe
+            head offset hHeadSafe
+        have hTail :=
+          compileNoVarExprSeqCode?_eq_locals_compileCode_initial_of_source_safe
+            tail (offset + left) hTailSafe
+        simp [compileNoVarExprSeqCode?, Locals.ExprSeq.compileCode, hHead,
+          hTail]
+end
+
+mutual
+  theorem compileNoVarExprCode?_accessible_nil_of_source_safe :
+      ∀ {results : Nat} (expr : Expr results) (offset : Nat)
+        {code : Structured.Code},
+        SourceExprSafe expr →
+        compileNoVarExprCode? expr = some code →
+          Locals.SourceLowering.Expr.Accessible [] offset expr := by
+    intro results expr offset code hSafe hCompile
+    cases expr with
+    | lit value =>
+        simp [Locals.SourceLowering.Expr.Accessible]
+    | var name =>
+        simp [compileNoVarExprCode?] at hCompile
+    | code raw =>
+        simp [SourceExprSafe,
+          Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.ExprSafe]
+          at hSafe
+    | prim op args =>
+        simp [SourceExprSafe] at hSafe
+        rcases hSafe with ⟨_hOpSafe, hArgsSafe⟩
+        simp [compileNoVarExprCode?] at hCompile
+        cases hArgs : compileNoVarExprSeqCode? args with
+        | none =>
+            simp [hArgs] at hCompile
+        | some argsCode =>
+            simp [hArgs] at hCompile
+            exact
+              compileNoVarExprSeqCode?_accessible_nil_of_source_safe
+                args offset hArgsSafe hArgs
+
+  theorem compileNoVarExprSeqCode?_accessible_nil_of_source_safe :
+      ∀ {results : Nat} (exprs : Locals.ExprSeq results) (offset : Nat)
+        {code : Structured.Code},
+        SourceExprSeqSafe exprs →
+        compileNoVarExprSeqCode? exprs = some code →
+          Locals.SourceLowering.ExprSeq.Accessible [] offset exprs := by
+    intro results exprs offset code hSafe hCompile
+    cases exprs with
+    | nil =>
+        simp [Locals.SourceLowering.ExprSeq.Accessible]
+    | @cons left right head tail =>
+        simp [SourceExprSeqSafe] at hSafe
+        rcases hSafe with ⟨hHeadSafe, hTailSafe⟩
+        simp [compileNoVarExprSeqCode?] at hCompile
+        cases hHead : compileNoVarExprCode? head with
+        | none =>
+            simp [hHead] at hCompile
+        | some headCode =>
+            cases hTail : compileNoVarExprSeqCode? tail with
+            | none =>
+                simp [hHead, hTail] at hCompile
+            | some tailCode =>
+                simp [hHead, hTail] at hCompile
+                exact
+                  ⟨compileNoVarExprCode?_accessible_nil_of_source_safe
+                      head offset hHeadSafe hHead,
+                    compileNoVarExprSeqCode?_accessible_nil_of_source_safe
+                      tail (offset + left) hTailSafe hTail⟩
+end
+
+theorem run_compileNoVarExprCode?_of_source_eval_source_safe
+    {results : Nat} {expr : Expr results} {code : Structured.Code}
+    {source source' : Locals.Source.State} {values : List Word}
+    {evm : EVMState}
+    (hSafe : SourceExprSafe expr)
+    (hCompile : compileNoVarExprCode? expr = some code)
+    (hShared : evm.toSharedState = source.shared)
+    (hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+          expr source = .ok (source', values)) :
+    ∃ evm',
+      Structured.Code.run code evm = .ok evm' ∧
+        evm'.toSharedState = source'.shared ∧
+        evm'.stack = values.reverse ++ evm.stack := by
+  have hOwned :
+      Locals.Source.Expr.SourceOwned expr :=
+    Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.exprSafe_sourceOwned
+      hSafe
+  have hAccess :
+      Locals.SourceLowering.Expr.Accessible [] evm.stack.length expr :=
+    compileNoVarExprCode?_accessible_nil_of_source_safe
+      expr evm.stack.length hSafe hCompile
+  have hLocalCompile :
+      Locals.Expr.compileCode Locals.Ctx.initial evm.stack.length expr =
+        some code := by
+    have hEq :=
+      compileNoVarExprCode?_eq_locals_compileCode_initial_of_source_safe
+        expr evm.stack.length hSafe
+    rw [hCompile] at hEq
+    exact hEq.symm
+  have hPrefix :
+      Locals.SourceLowering.StackPrefixRel [] source evm.stack evm := by
+    exact ⟨hShared, [], by simp,
+      stackStoreRel_nil_any (store := source.vars)⟩
+  rcases
+      Locals.SourceLowering.Expr.runCode_of_eval_sourceOwned
+        Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
+        (layout := []) (ctx := Locals.Ctx.initial)
+        (offset := evm.stack.length) (source := source)
+        (source' := source') (values := values) (evm := evm)
+        (stackPrefix := evm.stack)
+        rfl (by simp) hOwned hAccess rfl hPrefix hEval with
+    ⟨evm', hRunDirect, hRelFinal⟩
+  have hRunEq :=
+    Locals.Direct.Expr.runCode_eq_compileCode Locals.Ctx.initial
+      evm.stack.length expr code evm hLocalCompile
+  rw [hRunEq] at hRunDirect
+  rcases hRelFinal with ⟨hSharedFinal, baseStack, hStack, hStackRel⟩
+  have hBaseNil : baseStack = [] := by
+    exact List.eq_nil_of_length_eq_zero hStackRel.1
+  refine ⟨evm', hRunDirect, hSharedFinal, ?_⟩
+  simpa [hBaseNil, List.append_assoc] using hStack
+
+theorem run_compilePreludeStmt?_expr_block_of_source_eval_source_safe
+    {program : Expressions.Program} {fuel : Nat}
+    {expr : Expr 0} {compiled : Expressions.Stmt}
+    {source source' : Locals.Source.State} {values : List Word}
+    {runState : Expressions.RunState} {evm : EVMState}
+    (hSafe : SourceExprSafe expr)
+    (hCompile : compilePreludeStmt? (.expr expr) = some compiled)
+    (hShared : evm.toSharedState = source.shared)
+    (hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+          expr source = .ok (source', values)) :
+    ∃ evm',
+      Expressions.Block.run program (fuel + 2) { stmts := [compiled] }
+          { runState with evm := evm } =
+        .ok (Expressions.Outcome.regular
+          ({ runState with evm := evm' })) ∧
+      evm'.toSharedState = source'.shared ∧
+      evm'.stack = values.reverse ++ evm.stack := by
+  unfold compilePreludeStmt? at hCompile
+  cases hNoVar : compileNoVarExprCode? expr with
+  | none =>
+      simp [hNoVar] at hCompile
+  | some code =>
+      simp [hNoVar] at hCompile
+      cases hCompile
+      rcases
+          run_compileNoVarExprCode?_of_source_eval_source_safe
+            hSafe hNoVar hShared hEval with
+        ⟨evm', hRun, hSharedFinal, hStackFinal⟩
+      refine ⟨evm', ?_, hSharedFinal, hStackFinal⟩
+      simpa [Block.ofCode] using
+        (run_blockOfCode_regular_of_code_run
+          (program := program) (fuel := fuel)
+          (code := code) (state := { runState with evm := evm })
+          (final := evm') hRun)
+
 theorem run_compileStmtList?_nil_block_frameStore_of_source_run_open_regular
     {ctx : CompileCtx} {returns : List Name}
     {compileState : CompileState} {plan : Plan}
