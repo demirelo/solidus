@@ -1137,6 +1137,47 @@ def EnvLookupPreserved (outer inner : SlotEnv) : Prop :=
   ∀ {name slot}, lookupSlot? name outer = some slot →
     lookupSlot? name inner = some slot
 
+theorem EnvLookupPreserved.refl {env : SlotEnv} :
+    EnvLookupPreserved env env := by
+  intro name slot hLookup
+  exact hLookup
+
+theorem EnvNamesInScope.cons {env : SlotEnv} {scope : List Name}
+    {fresh : Name}
+    (hNames : EnvNamesInScope env scope) :
+    EnvNamesInScope env (fresh :: scope) := by
+  intro name slot hLookup
+  exact List.mem_cons_of_mem fresh (hNames hLookup)
+
+theorem lookupSlot?_none_of_not_mem_scope
+    {env : SlotEnv} {scope : List Name} {name : Name}
+    (hNames : EnvNamesInScope env scope)
+    (hFresh : name ∉ scope) :
+    lookupSlot? name env = none := by
+  cases hLookup : lookupSlot? name env with
+  | none =>
+      rfl
+  | some slot =>
+      exact False.elim (hFresh (hNames hLookup))
+
+theorem EnvLookupPreserved.allocateName_of_fresh_scope
+    {outer : SlotEnv} {state : CompileState} {scope : List Name}
+    {name : Name}
+    (hNames : EnvNamesInScope outer scope)
+    (hFresh : name ∉ scope)
+    (hPreserved : EnvLookupPreserved outer state.env) :
+    EnvLookupPreserved outer (allocateName name state).2.env := by
+  intro other slot hLookup
+  have hNameNone : lookupSlot? name outer = none :=
+    lookupSlot?_none_of_not_mem_scope hNames hFresh
+  have hInnerLookup : lookupSlot? other state.env = some slot :=
+    hPreserved hLookup
+  change lookupSlot? other ((name, state.nextSlot) :: state.env) = some slot
+  by_cases hEq : name = other
+  · cases hEq
+    simp [hLookup] at hNameNone
+  · simpa [lookupSlot?, hEq] using hInnerLookup
+
 theorem mload_generated_slot_machine_eq
     {machine : EvmYul.MachineState} {base : Word} {words slot : Nat}
     (hReady : ScratchRegionReady machine (range base words).base
@@ -1261,6 +1302,138 @@ theorem FrameStoreRel.restrictTo_of_compileBlockScoped?
       simp [hOpen] at hCompile
       cases hCompile
       exact FrameStoreRel.restrictTo hNames hRel
+
+theorem compileStmtList?_atomic_envLookupPreserved_of_scoped :
+    ∀ {ctx : CompileCtx} {returns : List Name}
+      {outer : SlotEnv} {scope : List Name}
+      {state : CompileState} {stmts : List Stmt} {plan : Plan},
+      EvmCompiler.Functions.Scope.StmtList.Scoped scope stmts →
+      AtomicStmtListSafe stmts →
+      EnvNamesInScope outer scope →
+      EnvLookupPreserved outer state.env →
+      compileStmtList? ctx returns state stmts = some plan →
+        EnvLookupPreserved outer plan.state.env
+  | ctx, returns, outer, scope, state, [], plan,
+      _hScoped, _hSafe, _hNames, hPreserved, hCompile => by
+      simp [compileStmtList?] at hCompile
+      cases hCompile
+      exact hPreserved
+  | ctx, returns, outer, scope, state, stmt :: rest, plan,
+      hScoped, hSafe, hNames, hPreserved, hCompile => by
+      unfold compileStmtList? at hCompile
+      cases hHead : compileStmt? ctx returns state stmt with
+      | none =>
+          simp [hHead] at hCompile
+      | some head =>
+          cases hTail :
+              compileStmtList? ctx returns head.state rest with
+          | none =>
+              simp [hHead, hTail] at hCompile
+          | some tailPlan =>
+              simp [hHead, hTail] at hCompile
+              cases hCompile
+              rcases hScoped with ⟨hStmtScoped, hRestScoped⟩
+              rcases hSafe with ⟨hStmtSafe, hRestSafe⟩
+              cases stmt with
+              | expr expr =>
+                  have hHeadPreserved :
+                      EnvLookupPreserved outer head.state.env := by
+                    unfold compileStmt? at hHead
+                    cases hCode : compileExprCode? state.env 0 expr with
+                    | none =>
+                        simp [hCode] at hHead
+                    | some code =>
+                        simp [hCode] at hHead
+                        cases hHead
+                        exact hPreserved
+                  exact
+                    compileStmtList?_atomic_envLookupPreserved_of_scoped
+                      hRestScoped hRestSafe hNames hHeadPreserved hTail
+              | let_ name value =>
+                  have hFresh : name ∉ scope := by
+                    simpa [EvmCompiler.Functions.Scope.Stmt.Scoped]
+                      using hStmtScoped.1
+                  have hHeadPreserved :
+                      EnvLookupPreserved outer head.state.env := by
+                    unfold compileStmt? at hHead
+                    cases hCode : compileExprCode? state.env 0 value with
+                    | none =>
+                        simp [hCode] at hHead
+                    | some code =>
+                        simp [hCode] at hHead
+                        cases hStore :
+                            storeTopSlotCode? 1 (allocateName name state).1 with
+                        | none =>
+                            simp [hStore] at hHead
+                        | some store =>
+                            simp [hStore] at hHead
+                            cases hHead
+                            exact
+                              EnvLookupPreserved.allocateName_of_fresh_scope
+                                hNames hFresh hPreserved
+                  exact
+                    compileStmtList?_atomic_envLookupPreserved_of_scoped
+                      hRestScoped hRestSafe (EnvNamesInScope.cons hNames)
+                      hHeadPreserved hTail
+              | assign name value =>
+                  have hHeadPreserved :
+                      EnvLookupPreserved outer head.state.env := by
+                    unfold compileStmt? at hHead
+                    cases hSlot : lookupSlot? name state.env with
+                    | none =>
+                        simp [hSlot] at hHead
+                    | some slot =>
+                        cases hCode : compileExprCode? state.env 0 value with
+                        | none =>
+                            simp [hSlot, hCode] at hHead
+                        | some code =>
+                            cases hStore : storeTopSlotCode? 1 slot with
+                            | none =>
+                                simp [hSlot, hCode, hStore] at hHead
+                            | some store =>
+                                simp [hSlot, hCode, hStore] at hHead
+                                cases hHead
+                                exact hPreserved
+                  exact
+                    compileStmtList?_atomic_envLookupPreserved_of_scoped
+                      hRestScoped hRestSafe hNames hHeadPreserved hTail
+              | block body =>
+                  simp [AtomicStmtSafe] at hStmtSafe
+              | if_ cond body =>
+                  simp [AtomicStmtSafe] at hStmtSafe
+              | switch scrutinee cases defaultBody =>
+                  simp [AtomicStmtSafe] at hStmtSafe
+              | for_ init cond post body =>
+                  simp [AtomicStmtSafe] at hStmtSafe
+              | brk =>
+                  simp [AtomicStmtSafe] at hStmtSafe
+              | cont =>
+                  simp [AtomicStmtSafe] at hStmtSafe
+              | leave =>
+                  simp [AtomicStmtSafe] at hStmtSafe
+              | call targets functionName args =>
+                  simp [AtomicStmtSafe] at hStmtSafe
+              | terminal kind =>
+                  simp [AtomicStmtSafe] at hStmtSafe
+              | terminalArgs kind args =>
+                  simp [AtomicStmtSafe] at hStmtSafe
+
+theorem compileBlockOpen?_atomic_envLookupPreserved_of_scoped
+    {ctx : CompileCtx} {returns : List Name}
+    {outer : SlotEnv} {scope : List Name}
+    {state : CompileState} {block : Block} {plan : Plan}
+    (hScoped : EvmCompiler.Functions.Scope.Block.Scoped scope block)
+    (hSafe : AtomicStmtListSafe block.stmts)
+    (hNames : EnvNamesInScope outer scope)
+    (hPreserved : EnvLookupPreserved outer state.env)
+    (hCompile :
+      compileBlockOpen? ctx returns state block = some plan) :
+    EnvLookupPreserved outer plan.state.env := by
+  cases block
+  exact
+    compileStmtList?_atomic_envLookupPreserved_of_scoped
+      hScoped hSafe hNames hPreserved (by
+        simpa [compileBlockOpen?] using hCompile)
 
 theorem StateSlotsBounded.empty (nextSlot : Nat) :
     StateSlotsBounded
@@ -4821,6 +4994,80 @@ theorem run_compileStmt?_block_frameStore_of_source_run_regular
         exact
           FrameStoreRel.restrictTo_env_of_lookup_preserved
             hNames (hLookupPreserved hOpenCompile) hRelOpen
+
+theorem run_compileStmt?_block_frameStore_of_source_run_regular_scoped
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {body : Block} {plan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source source' : Locals.Source.State}
+    {sourceCtx : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel blockFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmt? ctx returns compileState (.block body) = some plan)
+    (hSafe : AtomicStmtListSafe body.stmts)
+    (hScoped :
+      EvmCompiler.Functions.Scope.Block.Scoped sourceCtx.scope body)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtx sourceFuel (.block body) source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx))
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hNames : EnvNamesInScope compileState.env sourceCtx.scope)
+    (hFrameWords : plan.state.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (restStack : EvmYul.Stack Word) :
+    ∃ final,
+      Expressions.Block.run compiledProgram
+          (blockFuel + 2 * body.stmts.length + 1) plan.block
+          { runState with evm := { evmState with stack := base :: restStack } } =
+        .ok (Expressions.Outcome.regular ({ runState with evm := final })) ∧
+      final.stack = base :: restStack ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) source'.shared
+        final.toSharedState ∧
+      FrameStoreRel plan.state.env source'.vars final.toMachineState base := by
+  exact
+    run_compileStmt?_block_frameStore_of_source_run_regular
+      hSpec hWordBytes
+      (ctx := ctx)
+      (returns := returns)
+      (compileState := compileState)
+      (body := body)
+      (plan := plan)
+      (sourceProgram := sourceProgram)
+      (compiledProgram := compiledProgram)
+      (source := source)
+      (source' := source')
+      (sourceCtx := sourceCtx)
+      (sourceFuel := sourceFuel)
+      (blockFuel := blockFuel)
+      (runState := runState)
+      (evmState := evmState)
+      (base := base)
+      (words := words)
+      hCompile hSafe hRun hStateBound hStateNodup hNames
+      (fun {openPlan} hOpen =>
+        compileBlockOpen?_atomic_envLookupPreserved_of_scoped
+          (outer := compileState.env)
+          (scope := sourceCtx.scope)
+          (state := compileState)
+          (block := body)
+          (plan := openPlan)
+          hScoped hSafe hNames EnvLookupPreserved.refl hOpen)
+      hFrameWords hReady hShared hRel restStack
 
 theorem run_frameInitCode_append_compileStmtList?_atomic_block_frameStore_of_source_run_open_regular
     (hSpec : ZeroPaddingSpec)
