@@ -1538,6 +1538,239 @@ theorem compileCases?_select_none
               · simp [hEq]
                 exact ih hTail hDefault (by simpa [hEq] using hSelect)
 
+theorem compileDefault?_select_some
+    {ctx : CompileCtx} {returns : List Name}
+    {state state' : CompileState}
+    {defaultBody : Option Block}
+    {compiledDefault : Option Expressions.Block}
+    {value : Word} {selectedBody : Block}
+    (hCompile :
+      compileDefault? ctx returns state defaultBody =
+        some (compiledDefault, state'))
+    (hSelect :
+      EvmCompiler.Functions.Source.Switch.select value [] defaultBody =
+        some selectedBody) :
+    ∃ selectedPlan,
+      compileBlockScoped? ctx returns state selectedBody = some selectedPlan ∧
+      Expressions.Switch.select value [] compiledDefault =
+        some selectedPlan.block ∧
+      selectedPlan.state.nextSlot ≤ state'.nextSlot ∧
+      selectedPlan.state.env = state.env := by
+  cases defaultBody with
+  | none =>
+      simp [EvmCompiler.Functions.Source.Switch.select] at hSelect
+  | some body =>
+      unfold compileDefault? at hCompile
+      cases hBody : compileBlockScoped? ctx returns state body with
+      | none =>
+          simp [hBody] at hCompile
+      | some bodyPlan =>
+          simp [hBody] at hCompile
+          rcases hCompile with ⟨hCompiledDefault, hState'⟩
+          cases hCompiledDefault
+          cases hState'
+          unfold EvmCompiler.Functions.Source.Switch.select at hSelect
+          cases hSelect
+          refine ⟨bodyPlan, hBody, ?_, le_rfl, ?_⟩
+          · rfl
+          · unfold compileBlockScoped? at hBody
+            cases hOpen : compileBlockOpen? ctx returns state selectedBody with
+            | none =>
+                simp [hOpen] at hBody
+            | some openPlan =>
+                simp [hOpen] at hBody
+                cases hBody
+                rfl
+
+theorem compileCases?_select_some
+    {ctx : CompileCtx} {returns : List Name}
+    {state stateAfterCases stateAfterDefault : CompileState}
+    {cases : List (Word × Block)}
+    {compiledCases : List (Word × Expressions.Block)}
+    {defaultBody : Option Block}
+    {compiledDefault : Option Expressions.Block}
+    {value : Word} {selectedBody : Block}
+    (hCases :
+      compileCases? ctx returns state cases =
+        some (compiledCases, stateAfterCases))
+    (hDefault :
+      compileDefault? ctx returns stateAfterCases defaultBody =
+        some (compiledDefault, stateAfterDefault))
+    (hSelect :
+      EvmCompiler.Functions.Source.Switch.select value cases defaultBody =
+        some selectedBody) :
+    ∃ selectedState selectedPlan,
+      selectedState.env = state.env ∧
+      compileBlockScoped? ctx returns selectedState selectedBody =
+        some selectedPlan ∧
+      Expressions.Switch.select value compiledCases compiledDefault =
+        some selectedPlan.block ∧
+      selectedPlan.state.nextSlot ≤ stateAfterDefault.nextSlot := by
+  induction cases generalizing state compiledCases stateAfterCases
+      stateAfterDefault with
+  | nil =>
+      simp [compileCases?] at hCases
+      rcases hCases with ⟨hCompiledCases, hStateAfterCases⟩
+      cases hCompiledCases
+      cases hStateAfterCases
+      rcases compileDefault?_select_some hDefault hSelect with
+        ⟨selectedPlan, hSelectedCompile, hTargetSelect,
+          hSelectedLe, _hSelectedEnv⟩
+      exact
+        ⟨state, selectedPlan, rfl,
+          hSelectedCompile, hTargetSelect, hSelectedLe⟩
+  | cons head rest ih =>
+      rcases head with ⟨caseValue, body⟩
+      unfold compileCases? at hCases
+      cases hBody : compileBlockScoped? ctx returns state body with
+      | none =>
+          simp [hBody] at hCases
+      | some bodyPlan =>
+          cases hTail :
+              compileCases? ctx returns bodyPlan.state rest with
+          | none =>
+              simp [hBody, hTail] at hCases
+          | some tailResult =>
+              rcases tailResult with ⟨tailCases, tailState⟩
+              simp [hBody, hTail] at hCases
+              rcases hCases with ⟨hCompiledCases, hStateAfterCases⟩
+              cases hCompiledCases
+              cases hStateAfterCases
+              unfold EvmCompiler.Functions.Source.Switch.select at hSelect
+              unfold Expressions.Switch.select
+              by_cases hEq : caseValue = value
+              · simp [hEq] at hSelect
+                cases hSelect
+                refine ⟨state, bodyPlan, rfl, hBody, ?_, ?_⟩
+                · simp [hEq]
+                · exact Nat.le_trans
+                    (compileCases?_nextSlot_mono
+                      (cases := rest) (compiled := tailCases)
+                      (state' := stateAfterCases) hTail)
+                    (compileDefault?_nextSlot_mono
+                      (defaultBody := defaultBody)
+                      (compiled := compiledDefault)
+                      (state' := stateAfterDefault) hDefault)
+              · simp [hEq] at hSelect
+                rcases ih hTail hDefault hSelect with
+                  ⟨selectedState, selectedPlan, hSelectedEnv,
+                    hSelectedCompile, hTargetTail, hSelectedLe⟩
+                have hBodyEnv : bodyPlan.state.env = state.env := by
+                  unfold compileBlockScoped? at hBody
+                  cases hOpen : compileBlockOpen? ctx returns state body with
+                  | none =>
+                      simp [hOpen] at hBody
+                  | some openPlan =>
+                      simp [hOpen] at hBody
+                      cases hBody
+                      rfl
+                refine
+                  ⟨selectedState, selectedPlan,
+                    hSelectedEnv.trans hBodyEnv, hSelectedCompile, ?_,
+                    hSelectedLe⟩
+                simpa [hEq] using hTargetTail
+
+theorem compileCases?_select_some_stateSlots
+    {ctx : CompileCtx} {returns : List Name}
+    {state stateAfterCases stateAfterDefault : CompileState}
+    {cases : List (Word × Block)}
+    {compiledCases : List (Word × Expressions.Block)}
+    {defaultBody : Option Block}
+    {compiledDefault : Option Expressions.Block}
+    {value : Word} {selectedBody : Block}
+    (hStateBound : StateSlotsBounded state)
+    (hStateNodup : StateSlotsNodup state)
+    (hCases :
+      compileCases? ctx returns state cases =
+        some (compiledCases, stateAfterCases))
+    (hDefault :
+      compileDefault? ctx returns stateAfterCases defaultBody =
+        some (compiledDefault, stateAfterDefault))
+    (hSelect :
+      EvmCompiler.Functions.Source.Switch.select value cases defaultBody =
+        some selectedBody) :
+    ∃ selectedState selectedPlan,
+      selectedState.env = state.env ∧
+      StateSlotsBounded selectedState ∧
+      StateSlotsNodup selectedState ∧
+      compileBlockScoped? ctx returns selectedState selectedBody =
+        some selectedPlan ∧
+      Expressions.Switch.select value compiledCases compiledDefault =
+        some selectedPlan.block ∧
+      selectedPlan.state.nextSlot ≤ stateAfterDefault.nextSlot := by
+  induction cases generalizing state compiledCases stateAfterCases
+      stateAfterDefault with
+  | nil =>
+      simp [compileCases?] at hCases
+      rcases hCases with ⟨hCompiledCases, hStateAfterCases⟩
+      cases hCompiledCases
+      cases hStateAfterCases
+      rcases compileDefault?_select_some hDefault hSelect with
+        ⟨selectedPlan, hSelectedCompile, hTargetSelect,
+          hSelectedLe, _hSelectedEnv⟩
+      exact
+        ⟨state, selectedPlan, rfl, hStateBound, hStateNodup,
+          hSelectedCompile, hTargetSelect, hSelectedLe⟩
+  | cons head rest ih =>
+      rcases head with ⟨caseValue, body⟩
+      unfold compileCases? at hCases
+      cases hBody : compileBlockScoped? ctx returns state body with
+      | none =>
+          simp [hBody] at hCases
+      | some bodyPlan =>
+          cases hTail :
+              compileCases? ctx returns bodyPlan.state rest with
+          | none =>
+              simp [hBody, hTail] at hCases
+          | some tailResult =>
+              rcases tailResult with ⟨tailCases, tailState⟩
+              simp [hBody, hTail] at hCases
+              rcases hCases with ⟨hCompiledCases, hStateAfterCases⟩
+              cases hCompiledCases
+              cases hStateAfterCases
+              have hBodyBound : StateSlotsBounded bodyPlan.state :=
+                compileBlockScoped?_stateSlotsBounded hStateBound hBody
+              have hBodyNodup : StateSlotsNodup bodyPlan.state :=
+                compileBlockScoped?_stateSlotsNodup
+                  hStateBound hStateNodup hBody
+              unfold EvmCompiler.Functions.Source.Switch.select at hSelect
+              unfold Expressions.Switch.select
+              by_cases hEq : caseValue = value
+              · simp [hEq] at hSelect
+                cases hSelect
+                refine
+                  ⟨state, bodyPlan, rfl, hStateBound, hStateNodup,
+                    hBody, ?_, ?_⟩
+                · simp [hEq]
+                · exact Nat.le_trans
+                    (compileCases?_nextSlot_mono
+                      (cases := rest) (compiled := tailCases)
+                      (state' := stateAfterCases) hTail)
+                    (compileDefault?_nextSlot_mono
+                      (defaultBody := defaultBody)
+                      (compiled := compiledDefault)
+                      (state' := stateAfterDefault) hDefault)
+              · simp [hEq] at hSelect
+                rcases
+                    ih hBodyBound hBodyNodup hTail hDefault hSelect with
+                  ⟨selectedState, selectedPlan, hSelectedEnv,
+                    hSelectedBound, hSelectedNodup, hSelectedCompile,
+                    hTargetTail, hSelectedLe⟩
+                have hBodyEnv : bodyPlan.state.env = state.env := by
+                  unfold compileBlockScoped? at hBody
+                  cases hOpen : compileBlockOpen? ctx returns state body with
+                  | none =>
+                      simp [hOpen] at hBody
+                  | some openPlan =>
+                      simp [hOpen] at hBody
+                      cases hBody
+                      rfl
+                refine
+                  ⟨selectedState, selectedPlan,
+                    hSelectedEnv.trans hBodyEnv, hSelectedBound,
+                    hSelectedNodup, hSelectedCompile, ?_, hSelectedLe⟩
+                simpa [hEq] using hTargetTail
+
 theorem FrameStoreRel.restrictTo
     {env : SlotEnv} {scope : List Name}
     {store : Locals.Source.Store} {machine : EvmYul.MachineState}
@@ -7014,6 +7247,242 @@ theorem run_compileStmt?_switch_none_frameStore_of_source_evalOne
                 simpa [hFinalMachine] using
                   (hRelAfterScrutinee (name := name) (slot := slot)
                     hLookupOuter)
+
+theorem run_compileStmt?_switch_some_frameStore_of_source_evalOne_run_regular_scoped
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {scrutinee : Expr 1}
+    {cases : List (Word × Block)} {defaultBody : Option Block}
+    {selectedBody : Block} {plan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source sourceAfterScrutinee source' : Locals.Source.State}
+    {sourceCtx : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel blockFuel : Nat}
+    {value : Word}
+    {runState : Expressions.RunState}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmt? ctx returns compileState
+          (.switch scrutinee cases defaultBody) = some plan)
+    (hScrutineeSafe : SourceExprSafe scrutinee)
+    (hSelectedSafe : AtomicStmtListSafe selectedBody.stmts)
+    (hSelectedScoped :
+      EvmCompiler.Functions.Scope.Block.Scoped sourceCtx.scope selectedBody)
+    (hEvalOne :
+      Locals.Source.Expr.evalOne
+          Locals.Source.PrimitiveSemantics.structured scrutinee source =
+        .ok (sourceAfterScrutinee, value))
+    (hSelectSome :
+      EvmCompiler.Functions.Source.Switch.select value cases defaultBody =
+        some selectedBody)
+    (hSelectedRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtx sourceFuel (.block selectedBody)
+          sourceAfterScrutinee =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx))
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hNames : EnvNamesInScope compileState.env sourceCtx.scope)
+    (hFrameWords : plan.state.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (restStack : EvmYul.Stack Word) :
+    ∃ final,
+      Expressions.Block.run compiledProgram
+          (blockFuel + 2 * selectedBody.stmts.length + 3) plan.block
+          { runState with evm := { evmState with stack := base :: restStack } } =
+        .ok (Expressions.Outcome.regular ({ runState with evm := final })) ∧
+      final.stack = base :: restStack ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) source'.shared
+        final.toSharedState ∧
+      FrameStoreRel plan.state.env source'.vars
+        final.toMachineState base := by
+  unfold compileStmt? at hCompile
+  cases hScrutineeCode :
+      compileExprCode? compileState.env 0 scrutinee with
+  | none =>
+      simp [hScrutineeCode] at hCompile
+  | some scrutineeCode =>
+      cases hCases :
+          compileCases? ctx returns compileState cases with
+      | none =>
+          simp [hScrutineeCode, hCases] at hCompile
+      | some casesResult =>
+          rcases casesResult with ⟨compiledCases, stateAfterCases⟩
+          cases hDefault :
+              compileDefault? ctx returns stateAfterCases defaultBody with
+          | none =>
+              simp [hScrutineeCode, hCases, hDefault] at hCompile
+          | some defaultResult =>
+              rcases defaultResult with
+                ⟨compiledDefault, stateAfterDefault⟩
+              simp [hScrutineeCode, hCases, hDefault] at hCompile
+              cases hCompile
+              rcases
+                  compileCases?_select_some_stateSlots
+                    hStateBound hStateNodup hCases hDefault hSelectSome with
+                ⟨selectedState, selectedPlan, hSelectedStateEnv,
+                  hSelectedStateBound, hSelectedStateNodup,
+                  hSelectedCompile, hTargetSelectSome,
+                  hSelectedNextSlot⟩
+              have hSelectedStmtCompile :
+                  compileStmt? ctx returns selectedState
+                      (.block selectedBody) = some selectedPlan := by
+                simp [compileStmt?, hSelectedCompile]
+              have hSelectedPlanEnv :
+                  selectedPlan.state.env = selectedState.env := by
+                unfold compileBlockScoped? at hSelectedCompile
+                cases hOpen :
+                    compileBlockOpen? ctx returns selectedState
+                      selectedBody with
+                | none =>
+                    simp [hOpen] at hSelectedCompile
+                | some openPlan =>
+                    simp [hOpen] at hSelectedCompile
+                    cases hSelectedCompile
+                    rfl
+              have hCasesEnv :
+                  stateAfterCases.env = compileState.env :=
+                compileCases?_env_eq hCases
+              have hDefaultEnv :
+                  stateAfterDefault.env = stateAfterCases.env :=
+                compileDefault?_env_eq hDefault
+              have hStateFrameWords :
+                  compileState.nextSlot ≤ words := by
+                exact
+                  Nat.le_trans
+                    (compileStmt?_nextSlot_mono
+                      (plan :=
+                        { state := stateAfterDefault
+                          block :=
+                            { stmts :=
+                                [Expressions.Stmt.switch
+                                  (.code scrutineeCode)
+                                  compiledCases compiledDefault] } })
+                      (stmt := .switch scrutinee cases defaultBody)
+                      (ctx := ctx) (returns := returns)
+                      (state := compileState)
+                      (by
+                        simp [compileStmt?, hScrutineeCode, hCases,
+                          hDefault]))
+                    hFrameWords
+              have hSelectedFrameWords :
+                  selectedPlan.state.nextSlot ≤ words := by
+                exact Nat.le_trans hSelectedNextSlot hFrameWords
+              have hExprEval :
+                  Locals.Source.Expr.eval
+                      Locals.Source.PrimitiveSemantics.structured
+                      scrutinee source =
+                    .ok (sourceAfterScrutinee, [value]) :=
+                source_evalOne_eq_eval_singleton hEvalOne
+              rcases
+                run_compileExprCode?_frameStore_of_source_eval
+                  (expr := scrutinee)
+                  (compileState := compileState)
+                  (source := source)
+                  (source' := sourceAfterScrutinee)
+                  (state := evmState)
+                  (base := base)
+                  (words := words)
+                  (valuesAboveBase := 0)
+                  (front := [])
+                  (rest := restStack)
+                  (resultValues := [value])
+                  (code := scrutineeCode)
+                  hScrutineeSafe hExprEval hScrutineeCode hStateBound
+                  hStateFrameWords hReady hShared hRel (by simp) with
+              ⟨afterScrutinee, _hResultLen, hRunScrutinee,
+                hScrutineeStack, hReadyAfterScrutinee,
+                hSharedAfterScrutinee, hRelAfterScrutinee⟩
+              let afterPop : EVMState :=
+                { afterScrutinee with stack := base :: restStack }
+              have hRunScrutineeBase :
+                  Structured.Code.run scrutineeCode
+                      { evmState with stack := base :: restStack } =
+                    .ok afterScrutinee := by
+                simpa using hRunScrutinee
+              have hScrutineeStack' :
+                  afterScrutinee.stack = value :: base :: restStack := by
+                simpa using hScrutineeStack
+              have hSelectedNames :
+                  EnvNamesInScope selectedState.env sourceCtx.scope := by
+                intro name slot hLookup
+                have hLookupOuter :
+                    lookupSlot? name compileState.env = some slot := by
+                  simpa [hSelectedStateEnv] using hLookup
+                exact hNames hLookupOuter
+              have hSelectedRel :
+                  FrameStoreRel selectedState.env
+                    sourceAfterScrutinee.vars afterPop.toMachineState
+                    base := by
+                intro name slot hLookup
+                have hLookupOuter :
+                    lookupSlot? name compileState.env = some slot := by
+                  simpa [hSelectedStateEnv] using hLookup
+                have hAfterPopMachine :
+                    afterPop.toMachineState =
+                      afterScrutinee.toMachineState := by
+                  simp [afterPop]
+                simpa [hAfterPopMachine] using
+                  (hRelAfterScrutinee (name := name) (slot := slot)
+                    hLookupOuter)
+              rcases
+                run_compileStmt?_block_frameStore_of_source_run_regular_scoped
+                  hSpec hWordBytes
+                  (ctx := ctx)
+                  (returns := returns)
+                  (compileState := selectedState)
+                  (body := selectedBody)
+                  (plan := selectedPlan)
+                  (sourceProgram := sourceProgram)
+                  (compiledProgram := compiledProgram)
+                  (source := sourceAfterScrutinee)
+                  (source' := source')
+                  (sourceCtx := sourceCtx)
+                  (sourceFuel := sourceFuel)
+                  (blockFuel := blockFuel)
+                  (runState := runState)
+                  (evmState := afterPop)
+                  (base := base)
+                  (words := words)
+                  hSelectedStmtCompile hSelectedSafe hSelectedScoped
+                  hSelectedRun hSelectedStateBound hSelectedStateNodup
+                  hSelectedNames hSelectedFrameWords
+                  (by simpa [afterPop] using hReadyAfterScrutinee)
+                  (by simpa [afterPop] using hSharedAfterScrutinee)
+                  hSelectedRel restStack with
+              ⟨final, hBodyRun, hFinalStack, hReadyFinal,
+                hSharedFinal, hRelFinalSelected⟩
+              refine
+                ⟨final, ?_, hFinalStack, hReadyFinal, hSharedFinal, ?_⟩
+              · have hFuel :
+                    blockFuel + 2 * selectedBody.stmts.length + 3 =
+                      (blockFuel + 2 * selectedBody.stmts.length + 2) + 1 := by
+                  omega
+                rw [hFuel]
+                simp [Expressions.Block.run, Expressions.Stmt.run,
+                  Expressions.Expr.run, hRunScrutineeBase,
+                  hScrutineeStack', EvmYul.Stack.pop, hTargetSelectSome,
+                  Structured.RunState.withEVM]
+                rw [hBodyRun]
+                simp [Expressions.Outcome.regular]
+              · intro name slot hLookup
+                have hLookupSelected :
+                    lookupSlot? name selectedPlan.state.env = some slot := by
+                  simpa [hSelectedPlanEnv, hSelectedStateEnv, hDefaultEnv,
+                    hCasesEnv] using hLookup
+                exact
+                  hRelFinalSelected (name := name) (slot := slot)
+                    hLookupSelected
 
 set_option maxHeartbeats 1200000 in
 theorem run_compileStmtList?_cons_block_atomic_tail_frameStore_of_source_run_open_regular
