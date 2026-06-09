@@ -41,6 +41,13 @@ def compileCallAwareSpillFallback? (program : Program) :
       callAwareSpillFallbackScratchWords program.toFunctions
   some target
 
+def compileCallAwareSpillWithSwitchFallback? (program : Program) :
+    Option Assembly.TargetProgram := do
+  let (_range, _plan, _exprProgram, target) ←
+    Functions.CallAwareSpill.compileTargetPlannedPreallocWithSwitchFallback?
+      callAwareSpillFallbackScratchWords program.toFunctions
+  some target
+
 def compileScratchFrameSpillFallback? (program : Program) :
     Option Assembly.TargetProgram :=
   Functions.ScratchFrameSpill.compileTarget?
@@ -53,7 +60,10 @@ def compile? (program : Program) :
   | none =>
       match compileCallAwareSpillFallback? program with
       | some target => some target
-      | none => compileScratchFrameSpillFallback? program
+      | none =>
+          match compileCallAwareSpillWithSwitchFallback? program with
+          | some target => some target
+          | none => compileScratchFrameSpillFallback? program
 
 def Accepted (program : Program) : Prop :=
   program.WF ∧ Functions.Inline.Program.Accepted program.toFunctions

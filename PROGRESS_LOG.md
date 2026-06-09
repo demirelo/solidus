@@ -1,5 +1,25 @@
 # Progress Log
 
+## 2026-06-09 08:24 PDT - compaction-resume/call-aware-switch-runtime-status
+Resumed after context compaction on the spill fallback integration goal; Aave is
+passing through the call-aware switch route, while the immediate checkpoint is
+refreshing the latest direct let/assign spill fallback and rechecking Permit2.
+
+- 2026-06-09 08:39 PDT - validation/call-aware-switch-real-smokes - threaded
+  loop-control handlers through the checked executable call-aware switch spill
+  fallback, added stack-free `for` fallback plus `break`/`continue` spill
+  exits, and refreshed the backend-check diagnostics for the new arity. Aave v3
+  Interest and Permit2 Hash now both pass with
+  `call_aware_switch_spill_to_expressions=some` and
+  `call_aware_switch_spill_compile=some` on the formerly failing runtime
+  objects; Permit2 helper procs and main are all `some`. Verification passed:
+  `lake build EvmCompiler.Functions.CallAwareSpill`;
+  `lake build EvmCompiler.Yul.Compiler EvmCompiler.Solidity.Frontend
+  EvmCompiler.Solidity.BridgeJson`; the single-result user-call compiler smoke;
+  Aave v3 bridge smoke; Permit2 bridge smoke; and `git diff --check`. Proof
+  status remains honest: this is a checked executable compiler route, not yet
+  the public preservation theorem for the new recursive spill fallback.
+
 ## 2026-06-08 16:20 PDT - compaction-resume/spill-goal-status
 Resumed after context compaction to answer how close the spill-aware compiler
 goal is to completion, checking the current scratch-frame proof checkpoint and
