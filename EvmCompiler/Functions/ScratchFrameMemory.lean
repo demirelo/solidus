@@ -2852,6 +2852,117 @@ theorem source_block_run_open_atomic_privateScratchInvariant
                       rcases hRun with ⟨hOutcome, _hCtx⟩
                       cases hOutcome
 
+theorem source_block_run_open_atomic_privateScratchInvariant_block
+    {block : Block} {program : Program}
+    {source source' target : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat}
+    (hSafe : AtomicStmtListSafe block.stmts)
+    (hRel : SourceStatePrivateScratchInvariant source target)
+    (hRun :
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel block source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx')) :
+    ∃ target',
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel block target =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular target',
+          sourceCtx') ∧
+      SourceStatePrivateScratchInvariant source' target' := by
+  cases block
+  exact
+    source_block_run_open_atomic_privateScratchInvariant
+      hSafe hRel hRun
+
+theorem source_stmt_run_block_atomic_privateScratchInvariant
+    {body : Block} {program : Program}
+    {source source' target : Locals.Source.State}
+    {sourceCtx : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat}
+    (hSafe : AtomicStmtListSafe body.stmts)
+    (hRel : SourceStatePrivateScratchInvariant source target)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel (.block body) source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx)) :
+    ∃ target',
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel (.block body) target =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular target',
+          sourceCtx) ∧
+      SourceStatePrivateScratchInvariant source' target' := by
+  have hScopedSource :
+      EvmCompiler.Functions.Source.Block.runScoped
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx body fuel source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source') := by
+    unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+    cases hScoped :
+        EvmCompiler.Functions.Source.Block.runScoped
+            Locals.Source.PrimitiveSemantics.structured
+            program sourceCtx body fuel source with
+    | error err =>
+        simp [hScoped] at hRun
+    | ok outcome =>
+        cases outcome with
+        | mk scopedState scopedMode =>
+            cases scopedMode
+            · simp [hScoped, EvmCompiler.Functions.Source.Outcome.regular]
+                at hRun
+              simpa [hScoped, EvmCompiler.Functions.Source.Outcome.regular]
+            · simp [hScoped, EvmCompiler.Functions.Source.Outcome.regular]
+                at hRun
+              cases hRun
+            · simp [hScoped, EvmCompiler.Functions.Source.Outcome.regular]
+                at hRun
+              cases hRun
+            · simp [hScoped, EvmCompiler.Functions.Source.Outcome.regular]
+                at hRun
+              cases hRun
+            · simp [hScoped, EvmCompiler.Functions.Source.Outcome.regular]
+                at hRun
+              cases hRun
+  rcases
+    EvmCompiler.Functions.Source.Block.runScoped_regular_eq_restrict
+      hScopedSource with
+    ⟨innerSource, finalCtx, hOpenSource, hSource'⟩
+  rcases
+    source_block_run_open_atomic_privateScratchInvariant_block
+      (program := program)
+      (source := source)
+      (source' := innerSource)
+      (target := target)
+      (sourceCtx := sourceCtx)
+      (sourceCtx' := finalCtx)
+      (fuel := fuel)
+      hSafe hRel hOpenSource with
+    ⟨innerTarget, hOpenTarget, hInnerRel⟩
+  let target' := innerTarget.restrictTo sourceCtx.scope
+  refine ⟨target', ?_, ?_⟩
+  · have hScopedTarget :
+        EvmCompiler.Functions.Source.Block.runScoped
+            Locals.Source.PrimitiveSemantics.structured
+            program sourceCtx body fuel target =
+          .ok (EvmCompiler.Functions.Source.Outcome.regular target') := by
+      unfold EvmCompiler.Functions.Source.Block.runScoped
+      simp [hOpenTarget, target',
+        EvmCompiler.Functions.Source.Outcome.regular,
+        Locals.Source.Outcome.regular]
+    unfold EvmCompiler.Functions.Source.Stmt.run
+    simp [hScopedTarget,
+      EvmCompiler.Functions.Source.Outcome.regular,
+      Locals.Source.Outcome.regular]
+  · rw [hSource']
+    exact
+      Locals.SourceLowering.StateRel.SpillScratch.SourceStatePrivateScratchInvariant.restrictTo
+        hInnerRel sourceCtx.scope
+
 theorem run_compileStmt?_assign_frameStore_of_value_code
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
