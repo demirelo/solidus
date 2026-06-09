@@ -1369,6 +1369,213 @@ theorem FrameStoreRel.restrictTo_of_compileBlockScoped?
       cases hCompile
       exact FrameStoreRel.restrictTo hNames hRel
 
+theorem compileStmt?_atomicOrBlock_envNamesInScope_of_scoped
+    {ctx : CompileCtx} {returns : List Name}
+    {state : CompileState} {stmt : Stmt} {plan : Plan} {scope : List Name}
+    (hScoped : EvmCompiler.Functions.Scope.Stmt.Scoped scope stmt)
+    (hSafe : AtomicOrBlockStmtSafe stmt)
+    (hNames : EnvNamesInScope state.env scope)
+    (hCompile : compileStmt? ctx returns state stmt = some plan) :
+    EnvNamesInScope plan.state.env
+      (EvmCompiler.Functions.Scope.Stmt.outEnv scope stmt) := by
+  cases stmt with
+  | expr expr =>
+      unfold compileStmt? at hCompile
+      cases hCode : compileExprCode? state.env 0 expr with
+      | none =>
+          simp [hCode] at hCompile
+        | some code =>
+            simp [hCode] at hCompile
+            cases hCompile
+            intro other slot hLookup
+            exact hNames hLookup
+  | let_ name value =>
+      have hNamesTail :
+          EnvNamesInScope state.env (name :: scope) :=
+        EnvNamesInScope.cons hNames
+      unfold compileStmt? at hCompile
+      cases hCode : compileExprCode? state.env 0 value with
+      | none =>
+          simp [hCode] at hCompile
+      | some code =>
+          cases hStore :
+              storeTopSlotCode? 1 (allocateName name state).1 with
+          | none =>
+              simp [hCode, hStore] at hCompile
+            | some store =>
+                simp [hCode, hStore] at hCompile
+                cases hCompile
+                change
+                  EnvNamesInScope (allocateName name state).2.env
+                    (name :: scope)
+                exact
+                  EnvNamesInScope.allocateName
+                    (scope := name :: scope)
+                  (name := name)
+                  (by simp)
+                  hNamesTail
+  | assign name value =>
+      unfold compileStmt? at hCompile
+      cases hSlot : lookupSlot? name state.env with
+      | none =>
+          simp [hSlot] at hCompile
+      | some slot =>
+          cases hCode : compileExprCode? state.env 0 value with
+          | none =>
+              simp [hSlot, hCode] at hCompile
+          | some code =>
+              cases hStore : storeTopSlotCode? 1 slot with
+              | none =>
+                  simp [hSlot, hCode, hStore] at hCompile
+                | some store =>
+                    simp [hSlot, hCode, hStore] at hCompile
+                    cases hCompile
+                    intro other slot' hLookup
+                    exact hNames hLookup
+    | block body =>
+        unfold compileStmt? at hCompile
+        change EnvNamesInScope plan.state.env scope
+        exact EnvNamesInScope.of_compileBlockScoped hNames hCompile
+  | if_ cond body =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | switch scrutinee cases defaultBody =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | for_ init cond post body =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | brk =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | cont =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | leave =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | call targets functionName args =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | terminal kind =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | terminalArgs kind args =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+
+theorem source_stmt_run_regular_scope_eq_outEnv_of_atomicOrBlock
+    {sourceProgram : Program} {ctx ctx' : EvmCompiler.Functions.Source.Ctx}
+    {stmt : Stmt} {source source' : Locals.Source.State} {fuel : Nat}
+    (hSafe : AtomicOrBlockStmtSafe stmt)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram ctx fuel stmt source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source', ctx')) :
+    ctx'.scope = EvmCompiler.Functions.Scope.Stmt.outEnv ctx.scope stmt := by
+  cases stmt with
+  | expr expr =>
+      unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+      cases hEval :
+          Locals.Source.Expr.eval
+            Locals.Source.PrimitiveSemantics.structured expr source with
+      | error err =>
+          simp [hEval] at hRun
+        | ok result =>
+            simp [hEval, EvmCompiler.Functions.Source.Outcome.regular] at hRun
+            simpa [EvmCompiler.Functions.Scope.Stmt.outEnv] using
+              (congrArg (fun c => c.scope) hRun.2).symm
+  | let_ name value =>
+      unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+      cases hEval :
+          Locals.Source.Expr.evalOne
+            Locals.Source.PrimitiveSemantics.structured value source with
+      | error err =>
+          simp [hEval] at hRun
+        | ok result =>
+            simp [hEval, EvmCompiler.Functions.Source.Outcome.regular] at hRun
+            simpa [EvmCompiler.Functions.Scope.Stmt.outEnv] using
+              (congrArg (fun c => c.scope) hRun.2).symm
+  | assign name value =>
+      unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+      cases hContains : source.vars.contains name with
+      | false =>
+          simp [hContains, EvmCompiler.Functions.Source.invalid,
+            Structured.invalid] at hRun
+      | true =>
+          cases hEval :
+              Locals.Source.Expr.evalOne
+                Locals.Source.PrimitiveSemantics.structured value source with
+          | error err =>
+              simp [hContains, hEval] at hRun
+            | ok result =>
+                simp [hContains, hEval,
+                  EvmCompiler.Functions.Source.Outcome.regular] at hRun
+                simpa [EvmCompiler.Functions.Scope.Stmt.outEnv] using
+                  (congrArg (fun c => c.scope) hRun.2).symm
+  | block body =>
+      unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+      cases hScoped :
+          EvmCompiler.Functions.Source.Block.runScoped
+            Locals.Source.PrimitiveSemantics.structured
+            sourceProgram ctx body fuel source with
+      | error err =>
+          simp [hScoped] at hRun
+        | ok outcome =>
+            simp [hScoped, EvmCompiler.Functions.Source.Outcome.regular] at hRun
+            simpa [EvmCompiler.Functions.Scope.Stmt.outEnv] using
+              (congrArg (fun c => c.scope) hRun.2).symm
+  | if_ cond body =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | switch scrutinee cases defaultBody =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | for_ init cond post body =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | brk =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | cont =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | leave =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | call targets functionName args =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | terminal kind =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+  | terminalArgs kind args =>
+      simp [AtomicOrBlockStmtSafe] at hSafe
+
+theorem compileStmtList?_atomicOrBlock_envNamesInScope_of_scoped :
+    ∀ {ctx : CompileCtx} {returns : List Name}
+      {scope : List Name}
+      {state : CompileState} {stmts : List Stmt} {plan : Plan},
+      EvmCompiler.Functions.Scope.StmtList.Scoped scope stmts →
+      AtomicOrBlockStmtListSafe stmts →
+      EnvNamesInScope state.env scope →
+      compileStmtList? ctx returns state stmts = some plan →
+        EnvNamesInScope plan.state.env
+          (EvmCompiler.Functions.Scope.StmtList.outEnv scope stmts)
+  | ctx, returns, scope, state, [], plan,
+      _hScoped, _hSafe, hNames, hCompile => by
+      simp [compileStmtList?] at hCompile
+      cases hCompile
+      simpa [EvmCompiler.Functions.Scope.StmtList.outEnv] using hNames
+  | ctx, returns, scope, state, stmt :: rest, plan,
+      hScoped, hSafe, hNames, hCompile => by
+      unfold compileStmtList? at hCompile
+      cases hHead : compileStmt? ctx returns state stmt with
+      | none =>
+          simp [hHead] at hCompile
+      | some head =>
+          cases hTail :
+              compileStmtList? ctx returns head.state rest with
+          | none =>
+              simp [hHead, hTail] at hCompile
+          | some tailPlan =>
+              simp [hHead, hTail] at hCompile
+              cases hCompile
+              rcases hScoped with ⟨hStmtScoped, hRestScoped⟩
+              rcases hSafe with ⟨hStmtSafe, hRestSafe⟩
+              have hHeadNames :
+                  EnvNamesInScope head.state.env
+                    (EvmCompiler.Functions.Scope.Stmt.outEnv scope stmt) :=
+                compileStmt?_atomicOrBlock_envNamesInScope_of_scoped
+                  hStmtScoped hStmtSafe hNames hHead
+              exact
+                compileStmtList?_atomicOrBlock_envNamesInScope_of_scoped
+                  hRestScoped hRestSafe hHeadNames hTail
+
 theorem compileStmtList?_atomic_envLookupPreserved_of_scoped :
     ∀ {ctx : CompileCtx} {returns : List Name}
       {outer : SlotEnv} {scope : List Name}
