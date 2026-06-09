@@ -3052,6 +3052,197 @@ theorem run_compilePreludeStmt?_expr_block_of_source_eval_source_safe
           (code := code) (state := { runState with evm := evm })
           (final := evm') hRun)
 
+theorem run_compilePreludeStmt?_expr_stmt_of_source_eval_source_safe
+    {program : Expressions.Program} {fuel : Nat}
+    {expr : Expr 0} {compiled : Expressions.Stmt}
+    {source source' : Locals.Source.State} {values : List Word}
+    {runState : Expressions.RunState} {evm : EVMState}
+    (hSafe : SourceExprSafe expr)
+    (hCompile : compilePreludeStmt? (.expr expr) = some compiled)
+    (hShared : evm.toSharedState = source.shared)
+    (hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+          expr source = .ok (source', values)) :
+    ∃ evm',
+      Expressions.Stmt.run program fuel compiled { runState with evm := evm } =
+        .ok (Expressions.Outcome.regular
+          ({ runState with evm := evm' })) ∧
+      evm'.toSharedState = source'.shared ∧
+      evm'.stack = evm.stack := by
+  unfold compilePreludeStmt? at hCompile
+  cases hNoVar : compileNoVarExprCode? expr with
+  | none =>
+      simp [hNoVar] at hCompile
+  | some code =>
+      simp [hNoVar] at hCompile
+      cases hCompile
+      rcases
+          run_compileNoVarExprCode?_of_source_eval_source_safe
+            hSafe hNoVar hShared hEval with
+        ⟨evm', hRun, hSharedFinal, hStackFinal⟩
+      have hOwned :
+          Locals.Source.Expr.SourceOwned expr :=
+        Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.exprSafe_sourceOwned
+          hSafe
+      have hValuesLen :
+          values.length = 0 :=
+        Locals.SourceLowering.Expr.eval_length_of_sourceOwned
+          Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
+          hOwned hEval
+      have hValuesNil : values = [] :=
+        List.eq_nil_of_length_eq_zero hValuesLen
+      refine ⟨evm', ?_, hSharedFinal, ?_⟩
+      · simp [Expressions.Stmt.run, Structured.Code.runState,
+          Structured.RunState.withEVM, hRun]
+      · simpa [hValuesNil] using hStackFinal
+
+theorem run_splitPrelude_atomic_source_safe_prelude_block_of_source_run_open_regular :
+    ∀ {stmts : List Stmt} {prelude : List Expressions.Stmt}
+      {restSourceStmts : List Stmt}
+      {sourceProgram : Program} {compiledProgram : Expressions.Program}
+      {source finalSource : Locals.Source.State}
+      {sourceCtx finalCtx : EvmCompiler.Functions.Source.Ctx}
+      {sourceFuel targetFuel : Nat}
+      {runState : Expressions.RunState} {evm : EVMState},
+      AtomicStmtListSafe stmts →
+      splitPrelude stmts = (prelude, restSourceStmts) →
+      evm.toSharedState = source.shared →
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtx sourceFuel { stmts := stmts } source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular finalSource,
+          finalCtx) →
+      ∃ sourceAfter sourceCtxAfter preludeEvm restFuel,
+        Expressions.Block.run compiledProgram
+            (targetFuel + prelude.length + 1)
+            { stmts := prelude } { runState with evm := evm } =
+          .ok (Expressions.Outcome.regular
+            ({ runState with evm := preludeEvm })) ∧
+        preludeEvm.toSharedState = sourceAfter.shared ∧
+        preludeEvm.stack = evm.stack ∧
+        EvmCompiler.Functions.Source.Block.runOpen
+            Locals.Source.PrimitiveSemantics.structured
+            sourceProgram sourceCtxAfter restFuel
+            { stmts := restSourceStmts } sourceAfter =
+          .ok (EvmCompiler.Functions.Source.Outcome.regular finalSource,
+            finalCtx)
+  | [], prelude, restSourceStmts, sourceProgram, compiledProgram,
+      source, finalSource, sourceCtx, finalCtx, sourceFuel, targetFuel,
+      runState, evm, _hSafe, hSplit, hShared, hRun => by
+      simp [splitPrelude] at hSplit
+      rcases hSplit with ⟨rfl, rfl⟩
+      refine ⟨source, sourceCtx, evm, sourceFuel, ?_, hShared, rfl, hRun⟩
+      cases targetFuel with
+      | zero =>
+          simp [Expressions.Block.run, Expressions.Outcome.regular]
+      | succ targetFuel =>
+          simp [Expressions.Block.run, Expressions.Outcome.regular]
+  | stmt :: stmts, prelude, restSourceStmts, sourceProgram,
+      compiledProgram, source, finalSource, sourceCtx, finalCtx, sourceFuel,
+      targetFuel, runState, evm, hSafe, hSplit, hShared, hRun => by
+      unfold splitPrelude at hSplit
+      cases hPrelude : compilePreludeStmt? stmt with
+      | none =>
+          simp [hPrelude] at hSplit
+          rcases hSplit with ⟨rfl, rfl⟩
+          refine ⟨source, sourceCtx, evm, sourceFuel, ?_, hShared, rfl, hRun⟩
+          cases targetFuel with
+          | zero =>
+              simp [Expressions.Block.run, Expressions.Outcome.regular]
+          | succ targetFuel =>
+              simp [Expressions.Block.run, Expressions.Outcome.regular]
+      | some compiled =>
+          cases hTail : splitPrelude stmts with
+          | mk tailPrelude tailRest =>
+              simp [hPrelude, hTail] at hSplit
+              rcases hSplit with ⟨rfl, rfl⟩
+              cases stmt with
+              | expr expr =>
+                  simp [AtomicStmtListSafe, AtomicStmtSafe] at hSafe
+                  rcases hSafe with ⟨hHeadSafe, hTailSafe⟩
+                  cases sourceFuel with
+                  | zero =>
+                      simp [EvmCompiler.Functions.Source.Block.runOpen,
+                        EvmCompiler.Functions.Source.invalid,
+                        Structured.invalid] at hRun
+                  | succ sourceFuel' =>
+                      simp [EvmCompiler.Functions.Source.Block.runOpen] at hRun
+                      cases hEval :
+                          Locals.Source.Expr.eval
+                            Locals.Source.PrimitiveSemantics.structured
+                            expr source with
+                      | error err =>
+                          simp [EvmCompiler.Functions.Source.Stmt.run, hEval]
+                            at hRun
+                      | ok evalResult =>
+                          rcases evalResult with ⟨sourceAfterHead, values⟩
+                          simp [EvmCompiler.Functions.Source.Stmt.run, hEval,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases
+                              run_compilePreludeStmt?_expr_stmt_of_source_eval_source_safe
+                                (program := compiledProgram)
+                                (fuel := targetFuel + tailPrelude.length + 1)
+                                (runState := runState) (evm := evm)
+                                hHeadSafe hPrelude hShared hEval with
+                            ⟨evmAfterHead, hRunHead, hSharedHead,
+                              hStackHead⟩
+                          rcases
+                              run_splitPrelude_atomic_source_safe_prelude_block_of_source_run_open_regular
+                                (stmts := stmts) (prelude := tailPrelude)
+                                (restSourceStmts := tailRest)
+                                (sourceProgram := sourceProgram)
+                                (compiledProgram := compiledProgram)
+                                (source := sourceAfterHead)
+                                (finalSource := finalSource)
+                                (sourceCtx := sourceCtx)
+                                (finalCtx := finalCtx)
+                                (sourceFuel := sourceFuel')
+                                (targetFuel := targetFuel)
+                                (runState := runState)
+                                (evm := evmAfterHead)
+                                hTailSafe hTail hSharedHead hRun with
+                            ⟨sourceAfterPrelude, sourceCtxAfter,
+                              preludeEvm, restFuel, hRunTail,
+                              hSharedPrelude, hStackPrelude, hRunRest⟩
+                          refine
+                            ⟨sourceAfterPrelude, sourceCtxAfter, preludeEvm,
+                              restFuel, ?_, hSharedPrelude, ?_, hRunRest⟩
+                          · have hFuel :
+                                targetFuel +
+                                    (compiled :: tailPrelude).length + 1 =
+                                  (targetFuel + tailPrelude.length + 1) + 1 := by
+                              simp
+                              omega
+                            rw [hFuel]
+                            simp [Expressions.Block.run, hRunHead,
+                              Expressions.Outcome.regular, hRunTail]
+                          · simpa [hStackHead] using hStackPrelude
+              | let_ name value =>
+                  simp [compilePreludeStmt?] at hPrelude
+              | assign name value =>
+                  simp [compilePreludeStmt?] at hPrelude
+              | block body =>
+                  simp [compilePreludeStmt?] at hPrelude
+              | if_ cond body =>
+                  simp [compilePreludeStmt?] at hPrelude
+              | switch scrutinee cases defaultBody =>
+                  simp [compilePreludeStmt?] at hPrelude
+              | for_ init cond post body =>
+                  simp [compilePreludeStmt?] at hPrelude
+              | brk =>
+                  simp [compilePreludeStmt?] at hPrelude
+              | cont =>
+                  simp [compilePreludeStmt?] at hPrelude
+              | leave =>
+                  simp [compilePreludeStmt?] at hPrelude
+              | call targets functionName args =>
+                  simp [compilePreludeStmt?] at hPrelude
+              | terminal kind =>
+                  simp [compilePreludeStmt?] at hPrelude
+              | terminalArgs kind args =>
+                  simp [compilePreludeStmt?] at hPrelude
+
 theorem run_compileStmtList?_nil_block_frameStore_of_source_run_open_regular
     {ctx : CompileCtx} {returns : List Name}
     {compileState : CompileState} {plan : Plan}
