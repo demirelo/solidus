@@ -14312,6 +14312,520 @@ theorem run_compileStmt?_for_false_atomicOrBlock_init_frameStore_of_source_run_r
     rw [hDoubleRestrictVars]
     exact hStore
 
+theorem run_compileStmt?_for_atomicOrBlock_frameStore_of_source_run_regular
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {init post body : Block} {cond : Expr 1}
+    {plan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source source' : Locals.Source.State}
+    {sourceCtx : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel blockFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmt? ctx returns compileState (.for_ init cond post body) =
+        some plan)
+    (hInitSafe : AtomicOrBlockStmtListSafe init.stmts)
+    (hPostSafe : AtomicOrBlockStmtListSafe post.stmts)
+    (hBodySafe : AtomicOrBlockStmtListSafe body.stmts)
+    (hScoped :
+      EvmCompiler.Functions.Scope.Stmt.Scoped sourceCtx.scope
+        (.for_ init cond post body))
+    (hCondSafe : SourceExprSafe cond)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtx (sourceFuel + 1)
+          (.for_ init cond post body) source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx))
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hNames : EnvNamesInScope compileState.env sourceCtx.scope)
+    (hFrameWords : plan.state.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (restStack : EvmYul.Stack Word) :
+    ∃ final,
+      Expressions.Block.run compiledProgram
+          (blockFuel + atomicOrBlockStmtListFuel init.stmts +
+            sourceFuel * atomicOrBlockForLoopStepFuel post body + 3)
+          plan.block
+          { runState with evm := { evmState with stack := base :: restStack } } =
+        .ok (Expressions.Outcome.regular ({ runState with evm := final })) ∧
+      final.stack = base :: restStack ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) source'.shared
+        final.toSharedState ∧
+      FrameStoreRel plan.state.env source'.vars final.toMachineState base := by
+  unfold compileStmt? at hCompile
+  cases hInitCompile : compileBlockOpen? ctx returns compileState init with
+  | none =>
+      simp [hInitCompile] at hCompile
+  | some initPlan =>
+      cases hCondCode :
+          compileExprCode? initPlan.state.env 0 cond with
+      | none =>
+          simp [hInitCompile, hCondCode] at hCompile
+      | some condCode =>
+          cases hPostCompile :
+              compileBlockScoped? ctx returns initPlan.state post with
+          | none =>
+              simp [hInitCompile, hCondCode, hPostCompile] at hCompile
+          | some postPlan =>
+              cases hBodyCompile :
+                  compileBlockScoped? ctx returns postPlan.state body with
+              | none =>
+                  simp [hInitCompile, hCondCode, hPostCompile, hBodyCompile]
+                    at hCompile
+              | some bodyPlan =>
+                  simp [hInitCompile, hCondCode, hPostCompile, hBodyCompile]
+                    at hCompile
+                  cases hCompile
+                  have hInitScoped :
+                      EvmCompiler.Functions.Scope.Block.Scoped
+                        sourceCtx.scope init := by
+                    simpa [EvmCompiler.Functions.Scope.Stmt.Scoped]
+                      using hScoped.1
+                  have hPostScopedOut :
+                      EvmCompiler.Functions.Scope.Block.Scoped
+                        (EvmCompiler.Functions.Scope.Block.outEnv
+                          sourceCtx.scope init) post := by
+                    simpa [EvmCompiler.Functions.Scope.Stmt.Scoped]
+                      using hScoped.2.2.1
+                  have hBodyScopedOut :
+                      EvmCompiler.Functions.Scope.Block.Scoped
+                        (EvmCompiler.Functions.Scope.Block.outEnv
+                          sourceCtx.scope init) body := by
+                    simpa [EvmCompiler.Functions.Scope.Stmt.Scoped]
+                      using hScoped.2.2.2
+                  have hInitStmtListCompile :
+                      compileStmtList? ctx returns compileState init.stmts =
+                        some initPlan := by
+                    cases init
+                    simpa [compileBlockOpen?] using hInitCompile
+                  have hInitStmtListScoped :
+                      EvmCompiler.Functions.Scope.StmtList.Scoped
+                        sourceCtx.withoutLoopControl.scope init.stmts := by
+                    cases init
+                    simpa [EvmCompiler.Functions.Source.Ctx.withoutLoopControl]
+                      using hInitScoped
+                  have hInitNames :
+                      EnvNamesInScope compileState.env
+                        sourceCtx.withoutLoopControl.scope := by
+                    intro name slot hLookup
+                    simpa [EvmCompiler.Functions.Source.Ctx.withoutLoopControl]
+                      using hNames hLookup
+                  have hInitBound :
+                      StateSlotsBounded initPlan.state :=
+                    compileBlockOpen?_stateSlotsBounded
+                      (plan := initPlan) hStateBound hInitCompile
+                  have hInitNodup :
+                      StateSlotsNodup initPlan.state :=
+                    compileBlockOpen?_stateSlotsNodup
+                      (plan := initPlan) hStateBound hStateNodup
+                      hInitCompile
+                  have hPostBound :
+                      StateSlotsBounded postPlan.state :=
+                    compileBlockScoped?_stateSlotsBounded hInitBound
+                      hPostCompile
+                  have hPostNodup :
+                      StateSlotsNodup postPlan.state :=
+                    compileBlockScoped?_stateSlotsNodup hInitBound hInitNodup
+                      hPostCompile
+                  have hPostEnv :
+                      postPlan.state.env = initPlan.state.env :=
+                    compileBlockScoped?_env_eq hPostCompile
+                  have hInitPreserved :
+                      EnvLookupPreserved compileState.env
+                        initPlan.state.env :=
+                    compileBlockOpen?_atomicOrBlock_envLookupPreserved_of_scoped
+                      hInitScoped hInitSafe hNames EnvLookupPreserved.refl
+                      hInitCompile
+                  have hInitFrameWords : initPlan.state.nextSlot ≤ words := by
+                    have hInitPost :
+                        initPlan.state.nextSlot ≤ postPlan.state.nextSlot :=
+                      compileBlockScoped?_nextSlot_mono
+                        (plan := postPlan) hPostCompile
+                    have hPostBody :
+                        postPlan.state.nextSlot ≤ bodyPlan.state.nextSlot :=
+                      compileBlockScoped?_nextSlot_mono
+                        (plan := bodyPlan) hBodyCompile
+                    exact Nat.le_trans hInitPost
+                      (Nat.le_trans hPostBody hFrameWords)
+                  have hBodyFrameWords :
+                      bodyPlan.state.nextSlot ≤ words := by
+                    simpa using hFrameWords
+                  cases hInitRun :
+                      EvmCompiler.Functions.Source.Block.runOpen
+                        Locals.Source.PrimitiveSemantics.structured
+                        sourceProgram sourceCtx.withoutLoopControl sourceFuel
+                        init source with
+                  | error err =>
+                      simp [EvmCompiler.Functions.Source.Stmt.run,
+                        hInitRun] at hRun
+                  | ok initResult =>
+                      rcases initResult with ⟨initOutcome, initCtx⟩
+                      cases initOutcome with
+                      | mk sourceAfterInit initMode =>
+                          cases initMode with
+                          | regular =>
+                              have hInitRunRegular :
+                                  EvmCompiler.Functions.Source.Block.runOpen
+                                      Locals.Source.PrimitiveSemantics.structured
+                                      sourceProgram
+                                      sourceCtx.withoutLoopControl sourceFuel
+                                      init source =
+                                    .ok
+                                      (EvmCompiler.Functions.Source.Outcome.regular
+                                        sourceAfterInit, initCtx) := by
+                                simpa [EvmCompiler.Functions.Source.Outcome.regular]
+                                  using hInitRun
+                              have hInitScope :
+                                  initCtx.scope =
+                                    EvmCompiler.Functions.Scope.Block.outEnv
+                                      sourceCtx.scope init := by
+                                have hScope :=
+                                  source_block_run_open_regular_scope_eq_outEnv_of_atomicOrBlock
+                                    (sourceProgram := sourceProgram)
+                                    (ctx := sourceCtx.withoutLoopControl)
+                                    (ctx' := initCtx)
+                                    (stmts := init.stmts)
+                                    (source := source)
+                                    (source' := sourceAfterInit)
+                                    (fuel := sourceFuel)
+                                    hInitSafe
+                                    (by
+                                      cases init
+                                      simpa using hInitRunRegular)
+                                cases init
+                                simpa
+                                  [EvmCompiler.Functions.Source.Ctx.withoutLoopControl,
+                                    EvmCompiler.Functions.Scope.Block.outEnv]
+                                  using hScope
+                              have hInitNamesOut :
+                                  EnvNamesInScope initPlan.state.env
+                                    (EvmCompiler.Functions.Scope.Block.outEnv
+                                      sourceCtx.scope init) := by
+                                cases init
+                                exact
+                                  compileStmtList?_atomicOrBlock_envNamesInScope_of_scoped
+                                    hInitStmtListScoped hInitSafe hInitNames
+                                    hInitStmtListCompile
+                              have hLoopNames :
+                                  EnvNamesInScope initPlan.state.env
+                                    initCtx.scope := by
+                                intro name slot hLookup
+                                rw [hInitScope]
+                                exact hInitNamesOut hLookup
+                              have hPostScoped :
+                                  EvmCompiler.Functions.Scope.Block.Scoped
+                                    initCtx.withoutLoopControl.scope post := by
+                                simpa
+                                  [EvmCompiler.Functions.Source.Ctx.withoutLoopControl,
+                                    hInitScope]
+                                  using hPostScopedOut
+                              have hBodyScoped :
+                                  EvmCompiler.Functions.Scope.Block.Scoped
+                                    (initCtx.withLoopControl initCtx.scope
+                                      initCtx.scope).scope body := by
+                                simpa
+                                  [EvmCompiler.Functions.Source.Ctx.withLoopControl,
+                                    hInitScope]
+                                  using hBodyScopedOut
+                              have hPostNames :
+                                  EnvNamesInScope initPlan.state.env
+                                    initCtx.withoutLoopControl.scope := by
+                                intro name slot hLookup
+                                simpa
+                                  [EvmCompiler.Functions.Source.Ctx.withoutLoopControl]
+                                  using hLoopNames hLookup
+                              have hBodyNames :
+                                  EnvNamesInScope postPlan.state.env
+                                    (initCtx.withLoopControl initCtx.scope
+                                      initCtx.scope).scope := by
+                                intro name slot hLookup
+                                have hLookupInit :
+                                    lookupSlot? name initPlan.state.env =
+                                      some slot := by
+                                  simpa [hPostEnv] using hLookup
+                                simpa
+                                  [EvmCompiler.Functions.Source.Ctx.withLoopControl]
+                                  using hLoopNames hLookupInit
+                              cases hLoop :
+                                  EvmCompiler.Functions.Source.Stmt.runForLoop
+                                    Locals.Source.PrimitiveSemantics.structured
+                                    sourceProgram initCtx cond
+                                    initCtx.withoutLoopControl post
+                                    (initCtx.withLoopControl initCtx.scope
+                                      initCtx.scope)
+                                    body sourceFuel sourceAfterInit with
+                              | error err =>
+                                  simp [EvmCompiler.Functions.Source.Stmt.run,
+                                    hInitRun, hLoop] at hRun
+                              | ok loopOutcome =>
+                                  cases loopOutcome with
+                                  | mk loopSource loopMode =>
+                                      cases loopMode with
+                                      | regular =>
+                                          have hLoopRunRegular :
+                                              EvmCompiler.Functions.Source.Stmt.runForLoop
+                                                  Locals.Source.PrimitiveSemantics.structured
+                                                  sourceProgram initCtx cond
+                                                  initCtx.withoutLoopControl
+                                                  post
+                                                  (initCtx.withLoopControl
+                                                    initCtx.scope
+                                                    initCtx.scope)
+                                                  body sourceFuel
+                                                  sourceAfterInit =
+                                                .ok
+                                                  (EvmCompiler.Functions.Source.Outcome.regular
+                                                    loopSource) := by
+                                            simpa
+                                              [EvmCompiler.Functions.Source.Outcome.regular]
+                                              using hLoop
+                                          have hFinalSource :
+                                              source' =
+                                                loopSource.restrictTo
+                                                  sourceCtx.scope := by
+                                            have hPair :
+                                                (EvmCompiler.Functions.Source.Outcome.regular
+                                                    (loopSource.restrictTo
+                                                      sourceCtx.scope),
+                                                  sourceCtx) =
+                                                (EvmCompiler.Functions.Source.Outcome.regular
+                                                    source',
+                                                  sourceCtx) := by
+                                              simpa
+                                                [EvmCompiler.Functions.Source.Stmt.run,
+                                                  hInitRun, hLoop,
+                                                  EvmCompiler.Functions.Source.Outcome.regular,
+                                                  Locals.Source.Outcome.regular]
+                                                using hRun
+                                            cases hPair
+                                            rfl
+                                          let step :=
+                                            atomicOrBlockForLoopStepFuel post body
+                                          rcases
+                                            run_compileStmtList?_atomicOrBlock_block_frameStore_of_source_run_open_regular
+                                              hSpec hWordBytes
+                                              (ctx := ctx)
+                                              (returns := returns)
+                                              (compileState := compileState)
+                                              (stmts := init.stmts)
+                                              (plan := initPlan)
+                                              (sourceProgram := sourceProgram)
+                                              (compiledProgram :=
+                                                compiledProgram)
+                                              (source := source)
+                                              (source' := sourceAfterInit)
+                                              (sourceCtx :=
+                                                sourceCtx.withoutLoopControl)
+                                              (sourceCtx' := initCtx)
+                                              (sourceFuel := sourceFuel)
+                                              (blockFuel :=
+                                                blockFuel + sourceFuel * step)
+                                              (runState := runState)
+                                              (evmState := evmState)
+                                              (base := base)
+                                              (words := words)
+                                              hInitStmtListCompile
+                                              hInitStmtListScoped hInitSafe
+                                              (by
+                                                cases init
+                                                simpa using hInitRunRegular)
+                                              hStateBound hStateNodup
+                                              hInitNames hInitFrameWords
+                                              hReady hShared hRel restStack with
+                                          ⟨initFinal, hInitTarget,
+                                            hInitStack, hReadyInit,
+                                            hSharedInit, hRelInit⟩
+                                          rcases
+                                            run_compileForLoop_regular_frameStore_of_source_run
+                                              hSpec hWordBytes
+                                              (ctx := ctx)
+                                              (returns := returns)
+                                              (loopState := initPlan.state)
+                                              (cond := cond)
+                                              (condCode := condCode)
+                                              (post := post)
+                                              (body := body)
+                                              (postPlan := postPlan)
+                                              (bodyPlan := bodyPlan)
+                                              (sourceProgram := sourceProgram)
+                                              (compiledProgram :=
+                                                compiledProgram)
+                                              (source := sourceAfterInit)
+                                              (source' := loopSource)
+                                              (loopCtx := initCtx)
+                                              (postBase :=
+                                                initCtx.withoutLoopControl)
+                                              (bodyBase :=
+                                                initCtx.withLoopControl
+                                                  initCtx.scope
+                                                  initCtx.scope)
+                                              (sourceFuel := sourceFuel)
+                                              (runState := runState)
+                                              (evmState := initFinal)
+                                              (base := base)
+                                              (words := words)
+                                              hCondCode hPostCompile
+                                              hBodyCompile hCondSafe hPostSafe
+                                              hBodySafe hPostScoped
+                                              hBodyScoped hLoopRunRegular
+                                              hInitBound hInitNodup hLoopNames
+                                              hPostNames hBodyNames
+                                              hBodyFrameWords hReadyInit
+                                              hSharedInit hRelInit restStack with
+                                          ⟨loopFinal, hLoopTarget,
+                                            hLoopStack, hReadyLoop,
+                                            hSharedLoop, hRelLoop⟩
+                                          have hLoopStart :
+                                              ({ runState with
+                                                evm :=
+                                                  { initFinal with
+                                                    stack :=
+                                                      base :: restStack } } :
+                                                Expressions.RunState) =
+                                              ({ runState with
+                                                evm := initFinal } :
+                                                Expressions.RunState) := by
+                                            cases initFinal
+                                            simp at hInitStack ⊢
+                                            exact hInitStack.symm
+                                          have hLoopTargetStart :
+                                              Expressions.Stmt.runForLoop
+                                                  compiledProgram
+                                                  (sourceFuel *
+                                                      atomicOrBlockForLoopStepFuel
+                                                        post body + 1)
+                                                  (.code condCode)
+                                                  postPlan.block
+                                                  bodyPlan.block
+                                                  ({ runState with
+                                                    evm := initFinal } :
+                                                    Expressions.RunState) =
+                                                .ok
+                                                  (Expressions.Outcome.regular
+                                                    ({ runState with
+                                                      evm := loopFinal })) := by
+                                            simpa [hLoopStart] using
+                                              hLoopTarget
+                                          have hLoopTargetWide :
+                                              Expressions.Stmt.runForLoop
+                                                  compiledProgram
+                                                  ((blockFuel +
+                                                        sourceFuel * step) +
+                                                      atomicOrBlockStmtListFuel
+                                                        init.stmts + 1)
+                                                  (.code condCode)
+                                                  postPlan.block
+                                                  bodyPlan.block
+                                                  ({ runState with
+                                                    evm := initFinal } :
+                                                    Expressions.RunState) =
+                                                .ok
+                                                  (Expressions.Outcome.regular
+                                                    ({ runState with
+                                                      evm := loopFinal })) := by
+                                            have hLe :
+                                                sourceFuel *
+                                                      atomicOrBlockForLoopStepFuel
+                                                        post body + 1 ≤
+                                                  (blockFuel +
+                                                        sourceFuel * step) +
+                                                      atomicOrBlockStmtListFuel
+                                                        init.stmts + 1 := by
+                                              simp [step]
+                                              omega
+                                            exact
+                                              expressionsStmtRunForLoop_mono
+                                                compiledProgram hLe
+                                                hLoopTargetStart
+                                          refine
+                                            ⟨loopFinal, ?_, hLoopStack,
+                                              hReadyLoop, ?_, ?_⟩
+                                          · have hFuel :
+                                                blockFuel +
+                                                      atomicOrBlockStmtListFuel
+                                                        init.stmts +
+                                                    sourceFuel *
+                                                      atomicOrBlockForLoopStepFuel
+                                                        post body + 3 =
+                                                  ((blockFuel +
+                                                        sourceFuel * step) +
+                                                      atomicOrBlockStmtListFuel
+                                                        init.stmts + 2) + 1 := by
+                                              simp [step]
+                                              omega
+                                            rw [hFuel]
+                                            simp [Expressions.Block.run,
+                                              Expressions.Stmt.run,
+                                              hInitTarget, hLoopTargetWide,
+                                              Expressions.Outcome.regular]
+                                          · rw [hFinalSource]
+                                            simpa
+                                              [Locals.Source.State.restrictTo]
+                                              using hSharedLoop
+                                          · rw [hFinalSource]
+                                            exact
+                                              FrameStoreRel.restrictTo_env_of_lookup_preserved
+                                                hNames hInitPreserved hRelLoop
+                                      | brk =>
+                                          simp
+                                            [EvmCompiler.Functions.Source.Stmt.run,
+                                              hInitRun, hLoop,
+                                              EvmCompiler.Functions.Source.invalid,
+                                              Structured.invalid] at hRun
+                                      | cont =>
+                                          simp
+                                            [EvmCompiler.Functions.Source.Stmt.run,
+                                              hInitRun, hLoop,
+                                              EvmCompiler.Functions.Source.invalid,
+                                              Structured.invalid] at hRun
+                                      | leave =>
+                                          simp
+                                            [EvmCompiler.Functions.Source.Stmt.run,
+                                              hInitRun, hLoop,
+                                              EvmCompiler.Functions.Source.Outcome.regular]
+                                            at hRun
+                                          cases hRun
+                                      | halt kind =>
+                                          simp
+                                            [EvmCompiler.Functions.Source.Stmt.run,
+                                              hInitRun, hLoop,
+                                              EvmCompiler.Functions.Source.Outcome.regular]
+                                            at hRun
+                                          cases hRun
+                          | brk =>
+                              simp [EvmCompiler.Functions.Source.Stmt.run,
+                                hInitRun, EvmCompiler.Functions.Source.invalid,
+                                Structured.invalid] at hRun
+                          | cont =>
+                              simp [EvmCompiler.Functions.Source.Stmt.run,
+                                hInitRun, EvmCompiler.Functions.Source.invalid,
+                                Structured.invalid] at hRun
+                          | leave =>
+                              simp [EvmCompiler.Functions.Source.Stmt.run,
+                                hInitRun,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                at hRun
+                              cases hRun
+                          | halt kind =>
+                              simp [EvmCompiler.Functions.Source.Stmt.run,
+                                hInitRun,
+                                EvmCompiler.Functions.Source.Outcome.regular]
+                                at hRun
+                              cases hRun
+
 theorem run_compileMain?_atomicOrBlock_noPrelude_block_frameStore_of_source_run_open_regular
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
