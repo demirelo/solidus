@@ -60,6 +60,15 @@ def AtomicStmtListSafe : List Stmt → Prop
   | [] => True
   | stmt :: rest => AtomicStmtSafe stmt ∧ AtomicStmtListSafe rest
 
+def SwitchCaseBodiesAtomicSafe : List (Word × Block) → Prop
+  | [] => True
+  | (_value, body) :: rest =>
+      AtomicStmtListSafe body.stmts ∧ SwitchCaseBodiesAtomicSafe rest
+
+def SwitchDefaultBodyAtomicSafe : Option Block → Prop
+  | none => True
+  | some body => AtomicStmtListSafe body.stmts
+
 def AtomicOrBlockStmtSafe : Stmt → Prop
   | .expr expr => SourceExprSafe expr
   | .let_ _name value => SourceExprSafe value
@@ -127,6 +136,48 @@ theorem atomicOrBlockStmtListFuel_of_atomic :
           simp [AtomicStmtSafe] at hHeadSafe
       | terminalArgs kind args =>
           simp [AtomicStmtSafe] at hHeadSafe
+
+theorem switchDefaultBodyAtomicSafe_select_some
+    {value : Word} {defaultBody : Option Block} {selectedBody : Block}
+    (hSafe : SwitchDefaultBodyAtomicSafe defaultBody)
+    (hSelect :
+      EvmCompiler.Functions.Source.Switch.select value [] defaultBody =
+        some selectedBody) :
+    AtomicStmtListSafe selectedBody.stmts := by
+  cases defaultBody with
+  | none =>
+      simp [EvmCompiler.Functions.Source.Switch.select] at hSelect
+  | some body =>
+      unfold EvmCompiler.Functions.Source.Switch.select at hSelect
+      cases hSelect
+      simpa [SwitchDefaultBodyAtomicSafe] using hSafe
+
+theorem switchCaseBodiesAtomicSafe_select_some
+    {value : Word} {cases : List (Word × Block)}
+    {defaultBody : Option Block} {selectedBody : Block}
+    (hCasesSafe : SwitchCaseBodiesAtomicSafe cases)
+    (hDefaultSafe : SwitchDefaultBodyAtomicSafe defaultBody)
+    (hSelect :
+      EvmCompiler.Functions.Source.Switch.select value cases defaultBody =
+        some selectedBody) :
+    AtomicStmtListSafe selectedBody.stmts := by
+  induction cases with
+  | nil =>
+      exact
+        switchDefaultBodyAtomicSafe_select_some hDefaultSafe hSelect
+  | cons head rest ih =>
+      rcases head with ⟨caseValue, body⟩
+      have hHeadSafe : AtomicStmtListSafe body.stmts := by
+        simpa [SwitchCaseBodiesAtomicSafe] using hCasesSafe.1
+      have hRestSafe : SwitchCaseBodiesAtomicSafe rest := by
+        simpa [SwitchCaseBodiesAtomicSafe] using hCasesSafe.2
+      unfold EvmCompiler.Functions.Source.Switch.select at hSelect
+      by_cases hEq : caseValue = value
+      · simp [hEq] at hSelect
+        cases hSelect
+        exact hHeadSafe
+      · simp [hEq] at hSelect
+        exact ih hRestSafe hSelect
 
 def sourceExprSafe? {results : Nat} (expr : Expr results) : Bool :=
   Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.expr? expr
@@ -4207,6 +4258,152 @@ theorem source_stmt_run_if_atomic_privateScratchInvariant
               simp [EvmCompiler.Functions.Source.Expr.evalCondition,
                 Locals.Source.Expr.evalCondition, hTargetEvalOne, hCondBool,
                 EvmCompiler.Functions.Source.Outcome.regular]
+
+theorem source_stmt_run_switch_atomic_privateScratchInvariant
+    {scrutinee : Expr 1} {cases : List (Word × Block)}
+    {defaultBody : Option Block} {program : Program}
+    {source source' target : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat}
+    (hScrutineeSafe : SourceExprSafe scrutinee)
+    (hCasesSafe : SwitchCaseBodiesAtomicSafe cases)
+    (hDefaultSafe : SwitchDefaultBodyAtomicSafe defaultBody)
+    (hRel : SourceStatePrivateScratchInvariant source target)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel (.switch scrutinee cases defaultBody) source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx')) :
+    ∃ target',
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel (.switch scrutinee cases defaultBody) target =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular target',
+          sourceCtx') ∧
+      SourceStatePrivateScratchInvariant source' target' := by
+  cases fuel with
+  | zero =>
+      simp [EvmCompiler.Functions.Source.Stmt.run,
+        EvmCompiler.Functions.Source.invalid, Structured.invalid] at hRun
+  | succ fuel' =>
+      unfold EvmCompiler.Functions.Source.Stmt.run at hRun ⊢
+      cases hEvalOne :
+          Locals.Source.Expr.evalOne
+            Locals.Source.PrimitiveSemantics.structured scrutinee source with
+      | error err =>
+          simp [hEvalOne] at hRun
+      | ok scrutineeResult =>
+          rcases scrutineeResult with ⟨sourceAfterScrutinee, value⟩
+          rcases
+            Locals.SourceLowering.PrimitiveSemantics.sourceExpr_evalOne_privateScratchInvariant
+              hScrutineeSafe hRel hEvalOne with
+          ⟨targetAfterScrutinee, hTargetEvalOne, hScrutineeRel⟩
+          cases hSelect :
+              EvmCompiler.Functions.Source.Switch.select value cases
+                defaultBody with
+          | none =>
+              simp [hEvalOne, hSelect,
+                EvmCompiler.Functions.Source.Outcome.regular] at hRun
+              rcases hRun with ⟨hOutcome, hCtx⟩
+              cases hOutcome
+              cases hCtx
+              refine ⟨targetAfterScrutinee, ?_, hScrutineeRel⟩
+              simp [hTargetEvalOne, hSelect,
+                EvmCompiler.Functions.Source.Outcome.regular]
+          | some selectedBody =>
+              cases hScopedSource :
+                  EvmCompiler.Functions.Source.Block.runScoped
+                    Locals.Source.PrimitiveSemantics.structured
+                    program sourceCtx selectedBody fuel'
+                    sourceAfterScrutinee with
+              | error err =>
+                  simp [hEvalOne, hSelect, hScopedSource] at hRun
+              | ok outcome =>
+                  cases outcome with
+                  | mk scopedSource mode =>
+                      cases mode with
+                      | regular =>
+                          simp [hEvalOne, hSelect, hScopedSource,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, hCtx⟩
+                          cases hOutcome
+                          cases hCtx
+                          have hScopedSourceRegular :
+                              EvmCompiler.Functions.Source.Block.runScoped
+                                  Locals.Source.PrimitiveSemantics.structured
+                                  program sourceCtx selectedBody fuel'
+                                  sourceAfterScrutinee =
+                                .ok
+                                  (EvmCompiler.Functions.Source.Outcome.regular
+                                    source') := by
+                            simpa [EvmCompiler.Functions.Source.Outcome.regular]
+                              using hScopedSource
+                          have hSelectedSafe :
+                              AtomicStmtListSafe selectedBody.stmts :=
+                            switchCaseBodiesAtomicSafe_select_some
+                              hCasesSafe hDefaultSafe hSelect
+                          rcases
+                              EvmCompiler.Functions.Source.Block.runScoped_regular_eq_restrict
+                                hScopedSourceRegular with
+                            ⟨innerSource, innerCtx, hOpenSource, hSource'⟩
+                          rcases
+                            source_block_run_open_atomic_privateScratchInvariant_block
+                              (program := program)
+                              (source := sourceAfterScrutinee)
+                              (source' := innerSource)
+                              (target := targetAfterScrutinee)
+                              (sourceCtx := sourceCtx)
+                              (sourceCtx' := innerCtx)
+                              (fuel := fuel')
+                              hSelectedSafe hScrutineeRel hOpenSource with
+                          ⟨innerTarget, hOpenTarget, hInnerRel⟩
+                          let target' := innerTarget.restrictTo
+                            sourceCtx.scope
+                          have hScopedTarget :
+                              EvmCompiler.Functions.Source.Block.runScoped
+                                  Locals.Source.PrimitiveSemantics.structured
+                                  program sourceCtx selectedBody fuel'
+                                  targetAfterScrutinee =
+                                .ok
+                                  (EvmCompiler.Functions.Source.Outcome.regular
+                                    target') := by
+                            unfold EvmCompiler.Functions.Source.Block.runScoped
+                            simp [hOpenTarget, target',
+                              EvmCompiler.Functions.Source.Outcome.regular,
+                              Locals.Source.Outcome.regular]
+                          refine ⟨target', ?_, ?_⟩
+                          · simp [hTargetEvalOne, hSelect, hScopedTarget,
+                              EvmCompiler.Functions.Source.Outcome.regular]
+                          · rw [hSource']
+                            exact
+                              Locals.SourceLowering.StateRel.SpillScratch.SourceStatePrivateScratchInvariant.restrictTo
+                                hInnerRel sourceCtx.scope
+                      | brk =>
+                          simp [hEvalOne, hSelect, hScopedSource,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
+                      | cont =>
+                          simp [hEvalOne, hSelect, hScopedSource,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
+                      | leave =>
+                          simp [hEvalOne, hSelect, hScopedSource,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
+                      | halt kind =>
+                          simp [hEvalOne, hSelect, hScopedSource,
+                            EvmCompiler.Functions.Source.Outcome.regular]
+                            at hRun
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome
 
 theorem source_stmt_run_atomicOrBlock_privateScratchInvariant
     {stmt : Stmt} {program : Program}
