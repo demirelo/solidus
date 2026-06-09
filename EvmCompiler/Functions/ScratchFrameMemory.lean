@@ -1,4 +1,5 @@
 import EvmCompiler.Functions.ScratchFrameSpill
+import EvmCompiler.Functions.SourceSemantics
 import EvmCompiler.Locals.SourceLowering
 
 /-!
@@ -2387,6 +2388,202 @@ theorem run_compileStmt?_let_frameStore_of_source_evalOne
                 rw [Structured.Preservation.Code.run_append, hRunValueStart]
                 simpa [hMidStart] using hRunStore
               · simpa using hFinalStack
+
+theorem run_compileStmt?_expr_frameStore_of_source_run_regular
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {expr : Expr 0} {plan : Plan}
+    {program : Program}
+    {source source' : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmt? ctx returns compileState (.expr expr) = some plan)
+    (hSafe : SourceExprSafe expr)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel (.expr expr) source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx'))
+    (hStateBound : StateSlotsBounded compileState)
+    (hFrameWords : compileState.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (rest : EvmYul.Stack Word) :
+    ∃ final code,
+      plan.state = compileState ∧
+      plan.block = Block.ofCode code ∧
+      Structured.Code.run code { evmState with stack := base :: rest } =
+        .ok final ∧
+      final.stack = base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) source'.shared
+        final.toSharedState ∧
+      FrameStoreRel compileState.env source'.vars final.toMachineState base := by
+  unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+  cases hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+        expr source with
+  | error err =>
+      simp [hEval] at hRun
+  | ok result =>
+      rcases result with ⟨sourceAfterExpr, resultValues⟩
+      simp [hEval, EvmCompiler.Functions.Source.Outcome.regular] at hRun
+      rcases hRun with ⟨hOutcome, _hCtx⟩
+      cases hOutcome
+      exact
+        run_compileStmt?_expr_frameStore_of_source_eval
+          hCompile hSafe hEval hStateBound hFrameWords hReady hShared
+          hRel rest
+
+theorem run_compileStmt?_let_frameStore_of_source_run_regular
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {name : Name} {valueExpr : Expr 1}
+    {plan : Plan} {program : Program}
+    {source source' : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmt? ctx returns compileState (.let_ name valueExpr) =
+        some plan)
+    (hSafe : SourceExprSafe valueExpr)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel (.let_ name valueExpr) source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx'))
+    (hStateBound : StateSlotsBounded compileState)
+    (hFrameWords : plan.state.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (rest : EvmYul.Stack Word) :
+    ∃ final code,
+      plan.block = Block.ofCode code ∧
+      Structured.Code.run code { evmState with stack := base :: rest } =
+        .ok final ∧
+      final.stack = base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) source'.shared
+        final.toSharedState ∧
+      FrameStoreRel plan.state.env source'.vars final.toMachineState base := by
+  unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+  cases hEvalOne :
+      Locals.Source.Expr.evalOne Locals.Source.PrimitiveSemantics.structured
+        valueExpr source with
+  | error err =>
+      simp [hEvalOne] at hRun
+  | ok result =>
+      rcases result with ⟨sourceAfterValue, value⟩
+      simp [hEvalOne, EvmCompiler.Functions.Source.Outcome.regular] at hRun
+      rcases hRun with ⟨hOutcome, _hCtx⟩
+      cases hOutcome
+      rcases
+          run_compileStmt?_let_frameStore_of_source_evalOne
+            hSpec hWordBytes hCompile hSafe hEvalOne hStateBound
+            hFrameWords hReady hShared hRel rest with
+        ⟨final, code, hBlock, hRunCode, hStack, hReadyFinal,
+          hSharedFinal, hRelFinal⟩
+      refine
+        ⟨final, code, hBlock, hRunCode, hStack, hReadyFinal, ?_, ?_⟩
+      · change
+          SharedStateEqOutsideScratch (range base words)
+            sourceAfterValue.shared final.toSharedState
+        exact hSharedFinal
+      · change
+          FrameStoreRel plan.state.env
+            (Locals.Source.Store.insert sourceAfterValue.vars name value)
+            final.toMachineState base
+        exact hRelFinal
+
+theorem run_compileStmt?_assign_frameStore_of_source_run_regular
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {name : Name} {valueExpr : Expr 1}
+    {plan : Plan} {program : Program}
+    {source source' : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {fuel : Nat}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmt? ctx returns compileState (.assign name valueExpr) =
+        some plan)
+    (hSafe : SourceExprSafe valueExpr)
+    (hRun :
+      EvmCompiler.Functions.Source.Stmt.run
+          Locals.Source.PrimitiveSemantics.structured
+          program sourceCtx fuel (.assign name valueExpr) source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx'))
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hFrameWords : compileState.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (rest : EvmYul.Stack Word) :
+    ∃ final code,
+      plan.block = Block.ofCode code ∧
+      Structured.Code.run code { evmState with stack := base :: rest } =
+        .ok final ∧
+      final.stack = base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) source'.shared
+        final.toSharedState ∧
+      FrameStoreRel compileState.env source'.vars final.toMachineState base := by
+  unfold EvmCompiler.Functions.Source.Stmt.run at hRun
+  cases hContains : source.vars.contains name with
+  | false =>
+      simp [hContains, EvmCompiler.Functions.Source.invalid,
+        Structured.invalid] at hRun
+  | true =>
+      cases hEvalOne :
+          Locals.Source.Expr.evalOne
+            Locals.Source.PrimitiveSemantics.structured valueExpr source with
+      | error err =>
+          simp [hContains, hEvalOne] at hRun
+      | ok result =>
+          rcases result with ⟨sourceAfterValue, value⟩
+          simp [hContains, hEvalOne,
+            EvmCompiler.Functions.Source.Outcome.regular] at hRun
+          rcases hRun with ⟨hOutcome, _hCtx⟩
+          cases hOutcome
+          rcases
+              run_compileStmt?_assign_frameStore_of_source_evalOne
+                hSpec hWordBytes hCompile hSafe hEvalOne hStateBound
+                hStateNodup hFrameWords hReady hShared hRel rest with
+            ⟨final, code, hBlock, hRunCode, hStack, hReadyFinal,
+              hSharedFinal, hRelFinal⟩
+          refine
+            ⟨final, code, hBlock, hRunCode, hStack, hReadyFinal, ?_, ?_⟩
+          · change
+              SharedStateEqOutsideScratch (range base words)
+                sourceAfterValue.shared final.toSharedState
+            exact hSharedFinal
+          · change
+              FrameStoreRel compileState.env
+                (Locals.Source.Store.insert sourceAfterValue.vars name value)
+                final.toMachineState base
+            exact hRelFinal
 
 end FrameMemory
 
