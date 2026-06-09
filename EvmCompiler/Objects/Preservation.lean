@@ -794,6 +794,216 @@ theorem compileCheckedWithScratchFrameSpill?_program_run_main_privateScratch_con
         simpa [hExprBody] using hMainRun
       exact ⟨final, hRunBody, hStack, hReadyFinal, hObservable, hRel⟩
 
+theorem compileCheckedWithScratchFrameSpill?_program_run_main_atomicOrBlock_privateScratch_cont
+    (hSpec :
+      Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {maxFrameWords : Nat} {program : Objects.Program}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    {publicSource' : Functions.Source.State}
+    {sourceFuel blockFuel : Nat}
+    {initial : EVMState} {runState : Expressions.RunState}
+    (hCompile :
+      compileCheckedWithScratchFrameSpill? maxFrameWords program =
+        some (exprProgram, asm))
+    (hScoped :
+      Functions.Scope.StmtList.Scoped Functions.Source.Ctx.initial.scope
+        program.toFunctions.body.stmts)
+    (hSafe :
+      Functions.ScratchFrameSpill.FrameMemory.AtomicOrBlockStmtListSafe
+        program.toFunctions.body.stmts)
+    (hRun :
+      Source.Program.run Locals.Source.PrimitiveSemantics.structured
+          sourceFuel program initial =
+        .ok (Functions.Source.Outcome.regular publicSource')) :
+    ∃ mainProbe : Functions.ScratchFrameSpill.Plan,
+    ∃ main : Functions.ScratchFrameSpill.Plan,
+    ∃ prelude : List Expressions.Stmt,
+    ∃ rest : List Functions.Stmt,
+    ∃ innerSource : Functions.Source.State,
+    ∃ innerCtx : Functions.Source.Ctx,
+    ∃ sourceAfterPrelude : Functions.Source.State,
+    ∃ sourceCtxAfterPrelude : Functions.Source.Ctx,
+    ∃ preludeEvm : EVMState, ∃ restFuel : Nat,
+      main.state = mainProbe.state ∧
+      mainProbe.state.nextSlot ≤ maxFrameWords ∧
+      exprProgram.body = main.block ∧
+      Functions.ScratchFrameSpill.splitPrelude
+          program.toFunctions.body.stmts = (prelude, rest) ∧
+      publicSource' =
+        innerSource.restrictTo EvmCompiler.Functions.Source.Ctx.initial.scope ∧
+      preludeEvm.toSharedState = sourceAfterPrelude.shared ∧
+      preludeEvm.stack = initial.stack ∧
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          program.toFunctions sourceCtxAfterPrelude restFuel
+          { stmts := rest } sourceAfterPrelude =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular innerSource,
+          innerCtx) ∧
+      (∀ {initState : EVMState} {base : Word},
+        Structured.Code.run
+            (Functions.ScratchFrameSpill.frameInitCode
+              mainProbe.state.nextSlot) preludeEvm =
+          .ok initState →
+        initState.stack = base :: preludeEvm.stack →
+        Functions.ScratchFrameSpill.FrameMemory.ScratchRegionReady
+          initState.toMachineState
+          (Functions.ScratchFrameSpill.FrameMemory.range base
+            mainProbe.state.nextSlot).base
+          (Functions.ScratchFrameSpill.FrameMemory.range base
+            mainProbe.state.nextSlot).words →
+        Functions.ScratchFrameSpill.FrameMemory.SharedStatePrivateScratchInvariant
+          sourceAfterPrelude.shared initState.toSharedState →
+        ∃ final,
+          Expressions.Block.run exprProgram
+              ((blockFuel +
+                  Functions.ScratchFrameSpill.FrameMemory.atomicOrBlockStmtListFuel
+                    rest + 2) + prelude.length)
+              exprProgram.body { runState with evm := initial } =
+            .ok (Expressions.Outcome.regular
+              ({ runState with evm := final })) ∧
+          final.stack = base :: initial.stack ∧
+          Functions.ScratchFrameSpill.FrameMemory.ScratchRegionReady
+            final.toMachineState
+            (Functions.ScratchFrameSpill.FrameMemory.range base
+              mainProbe.state.nextSlot).base
+            (Functions.ScratchFrameSpill.FrameMemory.range base
+              mainProbe.state.nextSlot).words ∧
+          Functions.ScratchFrameSpill.FrameMemory.SharedStatePrivateScratchObservable
+            publicSource'.shared final.toSharedState ∧
+          Functions.ScratchFrameSpill.FrameMemory.FrameStoreRel
+            main.state.env innerSource.vars final.toMachineState base) := by
+  rcases compileCheckedWithScratchFrameSpill?_bounded_passes_state_eq
+      hCompile with
+    ⟨functionSlots, stateAfterSignatures, probeProcs,
+      stateAfterFunctions, mainProbe, procs, stateAfterFunctionsFinal, main,
+      _hSignatures, _hFunctionSlotsBound, _hSignatureStateBound,
+      _hProbeFunctions, _hProbeFunctionsBound, _hMainProbe,
+      _hMainProbeBound, hMainProbeBound, _hFinalFunctions,
+      _hFinalFunctionsState, _hFinalFunctionsBound, hMain,
+      hMainState, _hMainBound, hExprProgram⟩
+  cases hSplit :
+      Functions.ScratchFrameSpill.splitPrelude
+        program.toFunctions.body.stmts with
+  | mk prelude rest =>
+      have hFrameWords :
+          main.state.nextSlot ≤ mainProbe.state.nextSlot := by
+        simp [hMainState]
+      have hFunctionRun :
+          Functions.Source.Program.run
+              Locals.Source.PrimitiveSemantics.structured
+              sourceFuel program.toFunctions initial =
+            .ok (Functions.Source.Outcome.regular publicSource') := by
+        cases program with
+        | mk root =>
+            cases root with
+            | mk name code data objects =>
+                simpa [Source.Program.run, Source.Object.run,
+                  Objects.Program.toFunctions, Objects.Object.toFunctions]
+                  using hRun
+      have hFunctionRunState :
+          Functions.Source.Program.runState
+              Locals.Source.PrimitiveSemantics.structured
+              sourceFuel program.toFunctions
+              (Functions.Source.Program.initialState
+                initial.toSharedState) =
+            .ok (Functions.Source.Outcome.regular publicSource') := by
+        simpa [Functions.Source.Program.run] using hFunctionRun
+      have hScopedRun :
+          EvmCompiler.Functions.Source.Block.runScoped
+              Locals.Source.PrimitiveSemantics.structured
+              program.toFunctions EvmCompiler.Functions.Source.Ctx.initial
+              program.toFunctions.body sourceFuel
+              (Functions.Source.Program.initialState initial.toSharedState) =
+            .ok (EvmCompiler.Functions.Source.Outcome.regular
+              publicSource') := by
+        simpa [EvmCompiler.Functions.Source.Program.runState]
+          using hFunctionRunState
+      rcases
+          EvmCompiler.Functions.Source.Block.runScoped_regular_eq_restrict
+            hScopedRun with
+        ⟨innerSource, innerCtx, hOpen, hPublic⟩
+      rcases
+          Functions.ScratchFrameSpill.FrameMemory.run_compileMain?_atomicOrBlock_withPrelude_block_frameStore_of_full_source_run_open_regular_privateScratch
+            hSpec hWordBytes
+            (ctx :=
+              { functions := functionSlots,
+                frameWords := mainProbe.state.nextSlot })
+            (compileState :=
+              ({ env := [], nextSlot := stateAfterFunctions.nextSlot } :
+                Functions.ScratchFrameSpill.CompileState))
+            (stmts := program.toFunctions.body.stmts)
+            (rest := rest)
+            (prelude := prelude)
+            (mainPlan := main)
+            (sourceProgram := program.toFunctions)
+            (compiledProgram := exprProgram)
+            (source :=
+              Functions.Source.Program.initialState initial.toSharedState)
+            (source' := innerSource)
+            (sourceCtx := EvmCompiler.Functions.Source.Ctx.initial)
+            (sourceCtx' := innerCtx)
+            (sourceFuel := sourceFuel)
+            (blockFuel := blockFuel)
+            (runState := runState)
+            (evmState := initial)
+            (words := mainProbe.state.nextSlot)
+            hSplit
+            (by
+              cases program with
+              | mk root =>
+                  cases root with
+                  | mk name code data objects =>
+                      cases code with
+                      | mk functions body =>
+                          cases body with
+                          | mk bodyStmts =>
+                              simpa [Objects.Program.toFunctions,
+                                Objects.Object.toFunctions] using hMain)
+            hScoped hSafe
+            (by
+              cases hBody : program.toFunctions.body with
+              | mk bodyStmts =>
+                  rw [hBody] at hOpen
+                  simpa [hBody] using hOpen)
+            (Functions.ScratchFrameSpill.FrameMemory.StateSlotsBounded.empty
+              stateAfterFunctions.nextSlot)
+            (Functions.ScratchFrameSpill.FrameMemory.StateSlotsNodup.empty
+              stateAfterFunctions.nextSlot)
+            Functions.ScratchFrameSpill.FrameMemory.EnvNamesInScope.empty
+            hFrameWords rfl with
+        ⟨sourceAfterPrelude, sourceCtxAfterPrelude, preludeEvm, restFuel,
+          hPreludeShared, hPreludeStack, _hCtxAfter, hRestRun, hCont⟩
+      have hExprBody : exprProgram.body = main.block := by
+        simp [hExprProgram]
+      refine
+        ⟨mainProbe, main, prelude, rest, innerSource, innerCtx,
+          sourceAfterPrelude, sourceCtxAfterPrelude, preludeEvm, restFuel,
+          hMainState, hMainProbeBound, hExprBody, rfl, hPublic,
+          hPreludeShared, hPreludeStack, hRestRun, ?_⟩
+      intro initState base hInitRun hInitStack hReady hInitInvariant
+      rcases
+          hCont hInitRun hInitStack hReady hInitInvariant
+            Functions.ScratchFrameSpill.FrameMemory.FrameStoreRel.empty with
+        ⟨final, hMainRun, hStack, hReadyFinal, hObservable, hRel⟩
+      have hRunBody :
+          Expressions.Block.run exprProgram
+              ((blockFuel +
+                  Functions.ScratchFrameSpill.FrameMemory.atomicOrBlockStmtListFuel
+                    rest + 2) + prelude.length)
+              exprProgram.body { runState with evm := initial } =
+            .ok (Expressions.Outcome.regular
+              ({ runState with evm := final })) := by
+        simpa [hExprBody] using hMainRun
+      have hSharedPublic :
+          publicSource'.shared = innerSource.shared := by
+        rw [hPublic]
+        rfl
+      exact
+        ⟨final, hRunBody, hStack, hReadyFinal,
+          by simpa [hSharedPublic] using hObservable, hRel⟩
+
 theorem compileCheckedWithScratchFrameSpill?_program_run_assembly_privateScratch_cont
     (hSpec :
       Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
