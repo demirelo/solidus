@@ -32,6 +32,14 @@ abbrev WordByteEncodingSpec :=
 abbrev SharedStateEqOutsideScratch :=
   Locals.SourceLowering.StateRel.SpillScratch.SharedStateEqOutsideScratch
 
+abbrev SourceExprSafe {results : Nat} (expr : Expr results) : Prop :=
+  Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.ExprSafe expr
+
+abbrev SourceExprSeqSafe {results : Nat}
+    (exprs : Locals.ExprSeq results) : Prop :=
+  Locals.SourceLowering.StateRel.SpillScratch.SourceNoMemoryTouch.ExprSeqSafe
+    exprs
+
 def range (base : Word) (words : Nat) : ScratchRange :=
   { base := base.toNat, words := words }
 
@@ -1378,6 +1386,273 @@ theorem run_compileExprCode?_prim_frameStore_of_args
       · simpa [List.append_assoc] using hFinalStack
       · rw [hMachineFinal]
         exact hRelMid
+
+mutual
+  theorem run_compileExprCode?_frameStore_of_source_eval :
+      ∀ {results : Nat} {expr : Expr results}
+        {compileState : CompileState}
+        {source source' : Locals.Source.State}
+        {state : EVMState} {base : Word} {words valuesAboveBase : Nat}
+        {front rest : EvmYul.Stack Word}
+        {resultValues : List Word} {code : Structured.Code},
+        SourceExprSafe expr →
+        Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+          expr source = .ok (source', resultValues) →
+        compileExprCode? compileState.env valuesAboveBase expr = some code →
+        StateSlotsBounded compileState →
+        compileState.nextSlot ≤ words →
+        ScratchRegionReady state.toMachineState
+          (range base words).base (range base words).words →
+        SharedStateEqOutsideScratch (range base words) source.shared
+          state.toSharedState →
+        FrameStoreRel compileState.env source.vars state.toMachineState base →
+        front.length = valuesAboveBase →
+          ∃ final,
+            resultValues.length = results ∧
+            Structured.Code.run code
+                { state with stack := front ++ base :: rest } = .ok final ∧
+            final.stack = resultValues.reverse ++ front ++ base :: rest ∧
+            ScratchRegionReady final.toMachineState
+              (range base words).base (range base words).words ∧
+            SharedStateEqOutsideScratch (range base words) source'.shared
+              final.toSharedState ∧
+            FrameStoreRel compileState.env source'.vars
+              final.toMachineState base := by
+    intro results expr compileState source source' state base words
+      valuesAboveBase front rest resultValues code hSafe hEval hCompile
+      hStateBound hFrameWords hReady hShared hRel hPrefixLen
+    cases expr with
+    | lit value =>
+        simp [Locals.Source.Expr.eval] at hEval
+        rcases hEval with ⟨rfl, rfl⟩
+        rcases
+            run_compileExprCode?_lit_frameStore_shared
+              hCompile hReady state hShared hRel front rest rfl hPrefixLen with
+          ⟨final, hRun, hStack, hReadyFinal, hSharedFinal, hRelFinal⟩
+        refine ⟨final, ?_, hRun, ?_, hReadyFinal, ?_, ?_⟩
+        · simp
+        · simpa using hStack
+        · simpa using hSharedFinal
+        · exact hRelFinal
+    | var name =>
+        unfold Locals.Source.Expr.eval at hEval
+        cases hStore : source.vars name with
+        | none =>
+            simp [hStore, Locals.Source.invalid] at hEval
+            cases hEval
+        | some value =>
+            simp [hStore] at hEval
+            rcases hEval with ⟨rfl, rfl⟩
+            rcases
+                run_compileExprCode?_var_frameStore_lookup_shared_of_stateSlots
+                  hCompile hStateBound hFrameWords hReady state hShared hRel
+                  front rest rfl hPrefixLen with
+              ⟨loaded, final, hStoreLoaded, hRun, hStack, hReadyFinal,
+                hSharedFinal, hRelFinal⟩
+            have hLoaded : loaded = value := by
+              rw [hStore] at hStoreLoaded
+              cases hStoreLoaded
+              rfl
+            subst loaded
+            refine ⟨final, ?_, hRun, ?_, hReadyFinal, ?_, ?_⟩
+            · simp
+            · simpa using hStack
+            · simpa using hSharedFinal
+            · exact hRelFinal
+    | code raw =>
+        simp [SourceExprSafe] at hSafe
+        cases hSafe
+    | prim op args =>
+        simp [SourceExprSafe] at hSafe
+        rcases hSafe with ⟨hOpSafe, hArgsSafe⟩
+        unfold Locals.Source.Expr.eval at hEval
+        cases hArgsEval :
+            Locals.Source.Expr.ExprSeq.eval
+              Locals.Source.PrimitiveSemantics.structured args source with
+        | error err =>
+            simp [hArgsEval] at hEval
+        | ok argsResult =>
+            rcases argsResult with ⟨sourceAfterArgs, argValues⟩
+            simp [hArgsEval] at hEval
+            cases hPrimEval :
+                Locals.Source.PrimitiveSemantics.structured.eval op
+                  sourceAfterArgs.shared argValues with
+            | error err =>
+                simp [hPrimEval] at hEval
+            | ok primResult =>
+                rcases primResult with ⟨shared', primValues⟩
+                simp [hPrimEval] at hEval
+                rcases hEval with ⟨rfl, rfl⟩
+                rcases
+                    run_compileExprCode?_prim_frameStore_of_args
+                      (compileState := compileState)
+                      (store := sourceAfterArgs.vars)
+                      (base := base)
+                      (words := words)
+                      (valuesAboveBase := valuesAboveBase)
+                      (op := op)
+                      (args := args)
+                      (code := code)
+                      (sourceShared := sourceAfterArgs.shared)
+                      (sourceShared' := shared')
+                      (argValues := argValues)
+                      (resultValues := primValues)
+                      hCompile hOpSafe hPrimEval state front rest
+                      (fun {argsCode} hArgsCode =>
+                        by
+                          rcases
+                              run_compileExprSeqCode?_frameStore_of_source_eval
+                                hArgsSafe hArgsEval hArgsCode hStateBound
+                                hFrameWords hReady hShared hRel hPrefixLen with
+                            ⟨mid, _hArgLen, hRunArgs, hMidStack, hReadyMid,
+                              hSharedMid, hRelMid⟩
+                          exact
+                            ⟨mid, hRunArgs, hMidStack, hReadyMid, hSharedMid,
+                              hRelMid⟩) with
+                  ⟨final, hResultLen, hRun, hStack, hReadyFinal,
+                    hSharedFinal, hRelFinal⟩
+                refine ⟨final, hResultLen, hRun, hStack, hReadyFinal, ?_, ?_⟩
+                · simpa only [Locals.Source.State.withShared] using
+                    hSharedFinal
+                · change
+                    FrameStoreRel compileState.env sourceAfterArgs.vars
+                      final.toMachineState base
+                  exact hRelFinal
+
+  theorem run_compileExprSeqCode?_frameStore_of_source_eval :
+      ∀ {results : Nat} {exprs : Locals.ExprSeq results}
+        {compileState : CompileState}
+        {source source' : Locals.Source.State}
+        {state : EVMState} {base : Word} {words valuesAboveBase : Nat}
+        {front rest : EvmYul.Stack Word}
+        {resultValues : List Word} {code : Structured.Code},
+        SourceExprSeqSafe exprs →
+        Locals.Source.Expr.ExprSeq.eval
+          Locals.Source.PrimitiveSemantics.structured exprs source =
+            .ok (source', resultValues) →
+        compileExprSeqCode? compileState.env valuesAboveBase exprs =
+          some code →
+        StateSlotsBounded compileState →
+        compileState.nextSlot ≤ words →
+        ScratchRegionReady state.toMachineState
+          (range base words).base (range base words).words →
+        SharedStateEqOutsideScratch (range base words) source.shared
+          state.toSharedState →
+        FrameStoreRel compileState.env source.vars state.toMachineState base →
+        front.length = valuesAboveBase →
+          ∃ final,
+            resultValues.length = results ∧
+            Structured.Code.run code
+                { state with stack := front ++ base :: rest } = .ok final ∧
+            final.stack = resultValues.reverse ++ front ++ base :: rest ∧
+            ScratchRegionReady final.toMachineState
+              (range base words).base (range base words).words ∧
+            SharedStateEqOutsideScratch (range base words) source'.shared
+              final.toSharedState ∧
+            FrameStoreRel compileState.env source'.vars
+              final.toMachineState base := by
+    intro results exprs compileState source source' state base words
+      valuesAboveBase front rest resultValues code hSafe hEval hCompile
+      hStateBound hFrameWords hReady hShared hRel hPrefixLen
+    cases exprs with
+    | nil =>
+        simp [Locals.Source.Expr.ExprSeq.eval] at hEval
+        rcases hEval with ⟨rfl, rfl⟩
+        rcases
+            run_compileExprSeqCode?_nil_frameStore_shared
+              hCompile hReady state hShared hRel front rest rfl
+              hPrefixLen with
+          ⟨final, hRun, hStack, hReadyFinal, hSharedFinal, hRelFinal⟩
+        refine ⟨final, ?_, hRun, ?_, hReadyFinal, ?_, ?_⟩
+        · simp
+        · simpa using hStack
+        · simpa using hSharedFinal
+        · exact hRelFinal
+    | @cons left right head tail =>
+        simp [SourceExprSeqSafe] at hSafe
+        rcases hSafe with ⟨hHeadSafe, hTailSafe⟩
+        unfold Locals.Source.Expr.ExprSeq.eval at hEval
+        cases hHeadEval :
+            Locals.Source.Expr.eval
+              Locals.Source.PrimitiveSemantics.structured head source with
+        | error err =>
+            simp [hHeadEval] at hEval
+        | ok headResult =>
+            rcases headResult with ⟨sourceAfterHead, headValues⟩
+            simp [hHeadEval] at hEval
+            cases hTailEval :
+                Locals.Source.Expr.ExprSeq.eval
+                  Locals.Source.PrimitiveSemantics.structured tail
+                    sourceAfterHead with
+            | error err =>
+                simp [hTailEval] at hEval
+            | ok tailResult =>
+                rcases tailResult with ⟨sourceAfterTail, tailValues⟩
+                simp [hTailEval] at hEval
+                rcases hEval with ⟨rfl, rfl⟩
+                simp [compileExprSeqCode?] at hCompile
+                cases hHeadCode :
+                    compileExprCode? compileState.env valuesAboveBase
+                      head with
+                | none =>
+                    simp [hHeadCode] at hCompile
+                | some headCode =>
+                    cases hTailCode :
+                        compileExprSeqCode? compileState.env
+                          (valuesAboveBase + left) tail with
+                    | none =>
+                        simp [hHeadCode, hTailCode] at hCompile
+                    | some tailCode =>
+                        simp [hHeadCode, hTailCode] at hCompile
+                        cases hCompile
+                        rcases
+                            run_compileExprCode?_frameStore_of_source_eval
+                              hHeadSafe hHeadEval hHeadCode hStateBound
+                              hFrameWords hReady hShared hRel hPrefixLen with
+                          ⟨mid, hHeadLen, hRunHead, hMidStack, hReadyMid,
+                            hSharedMid, hRelMid⟩
+                        have hTailPrefixLen :
+                            (headValues.reverse ++ front).length =
+                              valuesAboveBase + left := by
+                          simp [List.length_reverse, hHeadLen, hPrefixLen]
+                          omega
+                        rcases
+                            run_compileExprSeqCode?_frameStore_of_source_eval
+                              (exprs := tail)
+                              (compileState := compileState)
+                              (source := sourceAfterHead)
+                              (source' := sourceAfterTail)
+                              (state := mid)
+                              (base := base)
+                              (words := words)
+                              (valuesAboveBase := valuesAboveBase + left)
+                              (front := headValues.reverse ++ front)
+                              (rest := rest)
+                              (resultValues := tailValues)
+                              (code := tailCode)
+                              hTailSafe hTailEval hTailCode hStateBound
+                              hFrameWords hReadyMid hSharedMid hRelMid
+                              hTailPrefixLen with
+                          ⟨final, hTailLen, hRunTail, hFinalStack,
+                            hReadyFinal, hSharedFinal, hRelFinal⟩
+                        refine
+                          ⟨final, ?_, ?_, ?_, hReadyFinal, hSharedFinal,
+                            hRelFinal⟩
+                        · simp [hHeadLen, hTailLen]
+                        · rw [Structured.Preservation.Code.run_append,
+                            hRunHead]
+                          have hMidStart :
+                              ({ mid with
+                                stack :=
+                                  headValues.reverse ++ (front ++
+                                    base :: rest) } : EVMState) = mid := by
+                            cases mid
+                            simp at hMidStack ⊢
+                            simpa [List.append_assoc] using hMidStack.symm
+                          simpa [hMidStart, List.append_assoc] using hRunTail
+                        · simpa [List.reverse_append, List.append_assoc]
+                            using hFinalStack
+end
 
 theorem run_storeTopSlotCode?_frameStore_assign
     (hSpec : ZeroPaddingSpec)
