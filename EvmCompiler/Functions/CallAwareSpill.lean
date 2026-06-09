@@ -7461,6 +7461,154 @@ theorem functionReturnsNodup
 
 end ProgramCallAwareSupported
 
+def stmtOpenSupported? (returns : List Name) : Stmt → Bool
+  | .call _targets _functionName _args => true
+  | .leave => true
+  | stmt => SourceLowering.SourceToLocals.Stmt.sourceOwned? returns stmt
+
+def stmtListOpenSupported? (returns : List Name) : List Stmt → Bool
+  | [] => true
+  | stmt :: rest =>
+      stmtOpenSupported? returns stmt &&
+        stmtListOpenSupported? returns rest
+
+def blockOpenSupported? (returns : List Name) (block : Block) : Bool :=
+  stmtListOpenSupported? returns block.stmts
+
+def funDefsOpenSupported? : List FunDef → Bool
+  | [] => true
+  | fn :: rest =>
+      blockOpenSupported? fn.returns fn.body &&
+        funDefsOpenSupported? rest
+
+def programOpenSupported? (program : Program) : Bool :=
+  blockOpenSupported? [] program.body &&
+    funDefsOpenSupported? program.functions
+
+theorem stmtOpenSupported?_sound
+    {returns : List Name} {stmt : Stmt}
+    (hCheck : stmtOpenSupported? returns stmt = true) :
+    StmtOpenSupported returns stmt := by
+  cases stmt with
+  | call targets functionName args =>
+      simp [stmtOpenSupported?, StmtOpenSupported]
+  | leave =>
+      simp [stmtOpenSupported?, StmtOpenSupported]
+  | expr expr =>
+      exact
+        SourceLowering.SourceToLocals.Stmt.sourceOwned?_sound
+          (by simpa [stmtOpenSupported?] using hCheck)
+  | let_ name value =>
+      exact
+        SourceLowering.SourceToLocals.Stmt.sourceOwned?_sound
+          (by simpa [stmtOpenSupported?] using hCheck)
+  | assign name value =>
+      exact
+        SourceLowering.SourceToLocals.Stmt.sourceOwned?_sound
+          (by simpa [stmtOpenSupported?] using hCheck)
+  | block body =>
+      exact
+        SourceLowering.SourceToLocals.Stmt.sourceOwned?_sound
+          (by simpa [stmtOpenSupported?] using hCheck)
+  | if_ cond body =>
+      exact
+        SourceLowering.SourceToLocals.Stmt.sourceOwned?_sound
+          (by simpa [stmtOpenSupported?] using hCheck)
+  | switch scrutinee cases defaultBody =>
+      exact
+        SourceLowering.SourceToLocals.Stmt.sourceOwned?_sound
+          (by simpa [stmtOpenSupported?] using hCheck)
+  | for_ init cond post body =>
+      exact
+        SourceLowering.SourceToLocals.Stmt.sourceOwned?_sound
+          (by simpa [stmtOpenSupported?] using hCheck)
+  | brk =>
+      exact
+        SourceLowering.SourceToLocals.Stmt.sourceOwned?_sound
+          (by simpa [stmtOpenSupported?] using hCheck)
+  | cont =>
+      exact
+        SourceLowering.SourceToLocals.Stmt.sourceOwned?_sound
+          (by simpa [stmtOpenSupported?] using hCheck)
+  | terminal kind =>
+      exact
+        SourceLowering.SourceToLocals.Stmt.sourceOwned?_sound
+          (by simpa [stmtOpenSupported?] using hCheck)
+  | terminalArgs kind args =>
+      exact
+        SourceLowering.SourceToLocals.Stmt.sourceOwned?_sound
+          (by simpa [stmtOpenSupported?] using hCheck)
+
+theorem stmtListOpenSupported?_sound
+    {returns : List Name} :
+    ∀ {stmts : List Stmt},
+      stmtListOpenSupported? returns stmts = true →
+        StmtListOpenSupported returns stmts
+  | [], hCheck => by
+      simp [StmtListOpenSupported]
+  | stmt :: rest, hCheck => by
+      have hAnd :
+          stmtOpenSupported? returns stmt = true ∧
+            stmtListOpenSupported? returns rest = true := by
+        simpa [stmtListOpenSupported?] using hCheck
+      exact
+        ⟨stmtOpenSupported?_sound hAnd.1,
+          stmtListOpenSupported?_sound hAnd.2⟩
+
+theorem blockOpenSupported?_sound
+    {returns : List Name} {block : Block}
+    (hCheck : blockOpenSupported? returns block = true) :
+    BlockOpenSupported returns block := by
+  cases block with
+  | mk stmts =>
+      exact
+        stmtListOpenSupported?_sound
+          (by simpa [blockOpenSupported?] using hCheck)
+
+theorem funDefsOpenSupported?_find_sound
+    {fns : List FunDef}
+    (hCheck : funDefsOpenSupported? fns = true)
+    {functionName : Name} {fn : FunDef}
+    (hFind : FunList.find? functionName fns = some fn) :
+    BlockOpenSupported fn.returns fn.body := by
+  induction fns with
+  | nil =>
+      simp [FunList.find?] at hFind
+  | cons head rest ih =>
+      have hAnd :
+          blockOpenSupported? head.returns head.body = true ∧
+            funDefsOpenSupported? rest = true := by
+        simpa [funDefsOpenSupported?] using hCheck
+      by_cases hName : head.name = functionName
+      · simp [FunList.find?, hName] at hFind
+        cases hFind
+        exact blockOpenSupported?_sound hAnd.1
+      · have hTailFind :
+            FunList.find? functionName rest = some fn := by
+          simpa [FunList.find?, hName] using hFind
+        exact ih hAnd.2 hTailFind
+
+theorem programOpenSupported?_sound
+    {program : Program}
+    (hCheck : programOpenSupported? program = true) :
+    ProgramOpenSupported program := by
+  have hAnd :
+      blockOpenSupported? [] program.body = true ∧
+        funDefsOpenSupported? program.functions = true := by
+    simpa [programOpenSupported?] using hCheck
+  exact
+    { body := blockOpenSupported?_sound hAnd.1
+      functions := fun hFind =>
+        funDefsOpenSupported?_find_sound hAnd.2 hFind }
+
+theorem programCallAwareSupported_of_openCheck_of_sourceAccepted
+    {program : Program}
+    (hCheck : programOpenSupported? program = true)
+    (hSourceAccepted : program.SourceAccepted) :
+    ProgramCallAwareSupported program :=
+  { programScoped := hSourceAccepted.2
+    openSupported := programOpenSupported?_sound hCheck }
+
 namespace FunctionSourceNoMemoryTouch
 
 mutual
@@ -16100,7 +16248,10 @@ def compileTargetPlannedPrealloc?
     (maxWords : Nat) (program : Program) :
     Option (ScratchRange × Plan × Expressions.Program ×
       Assembly.TargetProgram) :=
-  compileTargetPlannedPreallocFrom? program maxWords 0
+  if programOpenSupported? program then
+    compileTargetPlannedPreallocFrom? program maxWords 0
+  else
+    none
 
 theorem plannedScratchRangeChecked?_eq_some
     {words : Nat} {range : ScratchRange}
@@ -16137,7 +16288,10 @@ noncomputable def compileCheckedPlannedPreallocFrom?
 noncomputable def compileCheckedPlannedPrealloc?
     (maxWords : Nat) (program : Program) :
     Option (ScratchRange × Plan × Expressions.Program × Assembly.Program) :=
-  compileCheckedPlannedPreallocFrom? program maxWords 0
+  if programOpenSupported? program then
+    compileCheckedPlannedPreallocFrom? program maxWords 0
+  else
+    none
 
 theorem compileCheckedAssembly?_eq_some
     {range : ScratchRange} {program : Program} {asm : Assembly.Program}
@@ -16225,14 +16379,48 @@ theorem compileCheckedPlannedPrealloc?_eq_some
         some (range, plan, exprProgram, asm)) :
     compileChecked? range program = some (plan, exprProgram, asm) ∧
       range.base = 0 ∧ range.words ≤ maxWords := by
-  have h :=
-    compileCheckedPlannedPreallocFrom?_eq_some
-      (program := program) (remaining := maxWords) (start := 0)
-      (range := range) (plan := plan) (exprProgram := exprProgram)
-      (asm := asm)
-      hCompile
-  rcases h with ⟨hChecked, _hFits, hBase, _hStart, hBound⟩
-  exact ⟨hChecked, hBase, by simpa using hBound⟩
+  unfold compileCheckedPlannedPrealloc? at hCompile
+  by_cases hSupported : programOpenSupported? program = true
+  · simp [hSupported] at hCompile
+    have h :=
+      compileCheckedPlannedPreallocFrom?_eq_some
+        (program := program) (remaining := maxWords) (start := 0)
+        (range := range) (plan := plan) (exprProgram := exprProgram)
+        (asm := asm)
+        hCompile
+    rcases h with ⟨hChecked, _hFits, hBase, _hStart, hBound⟩
+    exact ⟨hChecked, hBase, by simpa using hBound⟩
+  · have hUnsupported : programOpenSupported? program = false := by
+      cases h : programOpenSupported? program <;> simp [h] at hSupported ⊢
+    simp [hUnsupported] at hCompile
+
+theorem compileCheckedPlannedPrealloc?_openSupported
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    ProgramOpenSupported program := by
+  unfold compileCheckedPlannedPrealloc? at hCompile
+  by_cases hSupported : programOpenSupported? program = true
+  · exact programOpenSupported?_sound hSupported
+  · have hUnsupported : programOpenSupported? program = false := by
+      cases h : programOpenSupported? program <;> simp [h] at hSupported ⊢
+    simp [hUnsupported] at hCompile
+
+theorem compileCheckedPlannedPrealloc?_callAwareSupported_of_sourceAccepted
+    {maxWords : Nat} {program : Program}
+    {range : ScratchRange} {plan : Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm))
+    (hSourceAccepted : program.SourceAccepted) :
+    ProgramCallAwareSupported program :=
+  { programScoped := hSourceAccepted.2
+    openSupported :=
+      compileCheckedPlannedPrealloc?_openSupported hCompile }
 
 theorem compileCheckedPlannedPrealloc?_noCallCreate
     {maxWords : Nat} {program : Program}
@@ -16252,11 +16440,17 @@ theorem compileCheckedPlannedPrealloc?_preallocFits
       compileCheckedPlannedPrealloc? maxWords program =
         some (range, plan, exprProgram, asm)) :
     range.preallocFits? = true := by
-  have h :=
-    compileCheckedPlannedPreallocFrom?_eq_some
-      (program := program) (remaining := maxWords) (start := 0)
-      hCompile
-  exact h.2.1
+  unfold compileCheckedPlannedPrealloc? at hCompile
+  by_cases hSupported : programOpenSupported? program = true
+  · simp [hSupported] at hCompile
+    have h :=
+      compileCheckedPlannedPreallocFrom?_eq_some
+        (program := program) (remaining := maxWords) (start := 0)
+        hCompile
+    exact h.2.1
+  · have hUnsupported : programOpenSupported? program = false := by
+      cases h : programOpenSupported? program <;> simp [h] at hSupported ⊢
+    simp [hUnsupported] at hCompile
 
 theorem compileCheckedPlannedPrealloc?_programSafe
     {maxWords : Nat} {program : Program}
@@ -17722,7 +17916,6 @@ theorem compileCheckedPlannedPrealloc?_sourceAccepted_preserves_initialState_emp
     (hCompile :
       compileCheckedPlannedPrealloc? maxWords program =
         some (range, plan, exprProgram, asm))
-    (hSupport : ProgramCallAwareSupported program)
     (hSourceAccepted : program.SourceAccepted)
     (hInitialMemory : ScratchInitialMemoryEmpty initial.toMachineState)
     (hInitialStack : initial.stack = [])
@@ -17737,6 +17930,10 @@ theorem compileCheckedPlannedPrealloc?_sourceAccepted_preserves_initialState_emp
       Locals.Source.Program.AdaptiveSpillPrivateObservableProgramOutcomeRel
         range sourceOutcome targetOutcome ∧
       Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  have hSupport :
+      ProgramCallAwareSupported program :=
+    compileCheckedPlannedPrealloc?_callAwareSupported_of_sourceAccepted
+      hCompile hSourceAccepted
   exact
     compileCheckedPlannedPrealloc?_regular_or_halt_preserves_initialState_emptyMemory_privateObservable_endPc
       hSpec hWordBytes hCompile hSupport hInitialMemory hInitialStack

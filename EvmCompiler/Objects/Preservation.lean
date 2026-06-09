@@ -2,6 +2,7 @@ import EvmCompiler.Objects.Semantics
 import EvmCompiler.Objects.SourceSemantics
 import EvmCompiler.Functions.Preservation
 import EvmCompiler.Functions.LiveLayoutPreservation
+import EvmCompiler.Functions.CallAwareSpill
 import EvmCompiler.Functions.ScratchFrameSpill
 import EvmCompiler.Functions.ScratchFrameMemory
 
@@ -200,6 +201,13 @@ noncomputable def compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?
       Assembly.Program) :=
   Functions.Source.Program.compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?
     maxWords program.toFunctions
+
+noncomputable def compileCheckedWithCallAwareSpillPlannedPrealloc?
+    (maxWords : Nat) (program : Objects.Program) :
+    Option (Functions.CallAwareSpill.ScratchRange ×
+      Functions.CallAwareSpill.Plan × Expressions.Program × Assembly.Program) :=
+  Functions.CallAwareSpill.compileCheckedPlannedPrealloc? maxWords
+    program.toFunctions
 
 noncomputable def compileCheckedWithScratchFrameSpill?
     (maxFrameWords : Nat) (program : Objects.Program) :
@@ -464,6 +472,31 @@ theorem compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_eq_some
       some (range, asm) := by
   simpa [compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?]
     using hCompile
+
+theorem compileCheckedWithCallAwareSpillPlannedPrealloc?_eq_some
+    {maxWords : Nat} {program : Objects.Program}
+    {range : Functions.CallAwareSpill.ScratchRange}
+    {plan : Functions.CallAwareSpill.Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithCallAwareSpillPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    Functions.CallAwareSpill.compileCheckedPlannedPrealloc? maxWords
+        program.toFunctions =
+      some (range, plan, exprProgram, asm) := by
+  simpa [compileCheckedWithCallAwareSpillPlannedPrealloc?] using hCompile
+
+theorem compileCheckedWithCallAwareSpillPlannedPrealloc?_noCallCreate
+    {maxWords : Nat} {program : Objects.Program}
+    {range : Functions.CallAwareSpill.ScratchRange}
+    {plan : Functions.CallAwareSpill.Plan}
+    {exprProgram : Expressions.Program} {asm : Assembly.Program}
+    (hCompile :
+      compileCheckedWithCallAwareSpillPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm)) :
+    Assembly.Program.usesCallCreate asm = false :=
+  Functions.CallAwareSpill.compileCheckedPlannedPrealloc?_noCallCreate
+    (compileCheckedWithCallAwareSpillPlannedPrealloc?_eq_some hCompile)
 
 theorem compileCheckedWithScratchFrameSpill?_eq_some
     {maxFrameWords : Nat} {program : Objects.Program}
@@ -3211,6 +3244,55 @@ theorem compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_observations
       (compileCheckedWithAdaptiveSpillPlannedPreallocSourceOwned?_eq_some
         hCompile)
       hInitialMemory hInitialPc hFunctionRun
+
+theorem compileCheckedWithCallAwareSpillPlannedPrealloc?_observations
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {maxWords : Nat}
+    {range : Functions.CallAwareSpill.ScratchRange}
+    {plan : Functions.CallAwareSpill.Plan}
+    {exprProgram : Expressions.Program}
+    {program : Objects.Program} {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState} {sourceOutcome : Outcome}
+    (hCompile :
+      compileCheckedWithCallAwareSpillPlannedPrealloc? maxWords program =
+        some (range, plan, exprProgram, asm))
+    (hSourceAccepted : Objects.Program.SourceAccepted program)
+    (hInitialMemory :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchInitialMemoryEmpty
+        initial.toMachineState)
+    (hInitialStack : initial.stack = [])
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun :
+      Source.Program.run Locals.Source.PrimitiveSemantics.structured fuel
+          program initial =
+        .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Locals.Source.Program.AdaptiveSpillPrivateObservableProgramOutcomeRel
+        range sourceOutcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  have hFunctionRun :
+      Functions.Source.Program.run Locals.Source.PrimitiveSemantics.structured
+          fuel program.toFunctions initial =
+        .ok sourceOutcome := by
+    cases program with
+    | mk root =>
+        cases root with
+        | mk name code data objects =>
+            simpa [Source.Program.run, Source.Object.run,
+              Objects.Program.toFunctions, Objects.Object.toFunctions] using
+              hRun
+  have hFunctionAccepted :
+      Functions.Program.SourceAccepted program.toFunctions := by
+    simpa [Functions.Inline.Program.SourceAccepted] using hSourceAccepted.2
+  exact
+    Functions.CallAwareSpill.compileCheckedPlannedPrealloc?_sourceAccepted_preserves_initialState_emptyMemory_privateObservable_endPc
+      hSpec hWordBytes
+      (compileCheckedWithCallAwareSpillPlannedPrealloc?_eq_some hCompile)
+      hFunctionAccepted hInitialMemory hInitialStack hInitialPc hFunctionRun
 
 end Program
 end Source
