@@ -2219,14 +2219,14 @@ theorem run_compileStmt?_assign_frameStore_of_source_evalOne
 theorem run_compileStmt?_expr_frameStore_of_source_eval
     {ctx : CompileCtx} {returns : List Name}
     {compileState : CompileState} {expr : Expr 0} {plan : Plan}
-    {source source' : Locals.Source.State}
+    {source source' : Locals.Source.State} {resultValues : List Word}
     {evmState : EVMState} {base : Word} {words : Nat}
     (hCompile :
       compileStmt? ctx returns compileState (.expr expr) = some plan)
     (hSafe : SourceExprSafe expr)
     (hEval :
       Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
-        expr source = .ok (source', []))
+        expr source = .ok (source', resultValues))
     (hStateBound : StateSlotsBounded compileState)
     (hFrameWords : compileState.nextSlot ≤ words)
     (hReady : ScratchRegionReady evmState.toMachineState
@@ -2264,17 +2264,19 @@ theorem run_compileStmt?_expr_frameStore_of_source_eval
             (valuesAboveBase := 0)
             (front := [])
             (rest := rest)
-            (resultValues := [])
+            (resultValues := resultValues)
             (code := code)
             hSafe hEval hCode hStateBound hFrameWords
             hReady hShared hRel (by simp) with
-        ⟨final, _hResultLen, hRun, hStack, hReadyFinal,
+        ⟨final, hResultLen, hRun, hStack, hReadyFinal,
           hSharedFinal, hRelFinal⟩
+      have hResultNil : resultValues = [] :=
+        List.eq_nil_of_length_eq_zero hResultLen
       refine
         ⟨final, code, rfl, rfl, ?_, ?_, hReadyFinal, hSharedFinal,
           hRelFinal⟩
       · simpa using hRun
-      · simpa using hStack
+      · simpa [hResultNil] using hStack
 
 theorem run_compileStmt?_let_frameStore_of_source_evalOne
     (hSpec : ZeroPaddingSpec)
