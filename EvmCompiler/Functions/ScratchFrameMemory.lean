@@ -390,7 +390,8 @@ theorem run_dupCode?_copyBase
       Structured.Code.run code
           { state with stack := front ++ base :: rest } = .ok final ∧
       final.stack = base :: front ++ base :: rest ∧
-      final.toMachineState = state.toMachineState := by
+      final.toMachineState = state.toMachineState ∧
+      final.toSharedState = state.toSharedState := by
   subst depth
   rcases dupCode?_eq_some_inv hCode with ⟨op, hDup, rfl⟩
   let start : EVMState := { state with stack := front ++ base :: rest }
@@ -418,9 +419,12 @@ theorem run_dupCode?_copyBase
       Structured.Code.run [Structured.BasicInstr.op op] start =
         .ok final := by
     simp [Structured.Code.run, Structured.BasicInstr.step, hOpStep]
-  refine ⟨final, ?_, ?_, ?_⟩
+  refine ⟨final, ?_, ?_, ?_, ?_⟩
   · simpa [start] using hRun
   · simp [final, start, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC]
+  · cases state
+    simp [final, start, EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC]
   · cases state
     simp [final, start, EvmYul.EVM.State.replaceStackAndIncrPC,
@@ -435,12 +439,13 @@ theorem run_slotAddressCode?
       Structured.Code.run code
           { state with stack := values ++ base :: rest } = .ok final ∧
       final.stack = (base + slotOffset slot) :: values ++ base :: rest ∧
-      final.toMachineState = state.toMachineState := by
+      final.toMachineState = state.toMachineState ∧
+      final.toSharedState = state.toSharedState := by
   rcases slotAddressCode?_eq_some_inv hCode with
     ⟨dup, hDup, hCodeEq⟩
   rcases run_dupCode?_copyBase hDup state values rest base
       (by omega) with
-    ⟨mid, hDupRun, hMidStack, hMidMachine⟩
+    ⟨mid, hDupRun, hMidStack, hMidMachine, hMidShared⟩
   let offset : Word := slotOffset slot
   let addr : Word := base + offset
   let state1 : EVMState :=
@@ -462,13 +467,15 @@ theorem run_slotAddressCode?
       hMidStack, offset, addr, state1, final]
     rw [word_add_comm]
     rfl
-  refine ⟨final, ?_, ?_, ?_⟩
+  refine ⟨final, ?_, ?_, ?_, ?_⟩
   · rw [hCodeEq, Structured.Preservation.Code.run_append, hDupRun]
     simpa [offset] using hTailRun
   · simp [final, state1, EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC, addr, offset]
   · simpa [final, state1, EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC, addr, offset] using hMidMachine
+  · simpa [final, state1, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, addr, offset] using hMidShared
 
 theorem run_loadSlotCode?
     {valuesAboveBase slot : Nat} {code : Structured.Code}
@@ -482,11 +489,16 @@ theorem run_loadSlotCode?
         (state.toMachineState.mload (base + slotOffset slot)).1 ::
           values ++ base :: rest ∧
       final.toMachineState =
-        (state.toMachineState.mload (base + slotOffset slot)).2 := by
+        (state.toMachineState.mload (base + slotOffset slot)).2 ∧
+      final.toSharedState =
+        ({ state with
+          toMachineState :=
+            (state.toMachineState.mload (base + slotOffset slot)).2 } :
+          EVMState).toSharedState := by
   rcases loadSlotCode?_eq_some_inv hCode with
     ⟨addrCode, hAddrCode, hCodeEq⟩
   rcases run_slotAddressCode? hAddrCode state values rest base hValues with
-    ⟨addrState, hAddrRun, hAddrStack, hAddrMachine⟩
+    ⟨addrState, hAddrRun, hAddrStack, hAddrMachine, hAddrShared⟩
   let addr : Word := base + slotOffset slot
   let loaded : Word × EvmYul.MachineState :=
     state.toMachineState.mload addr
@@ -504,13 +516,18 @@ theorem run_loadSlotCode?
       EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC, EvmYul.Stack.push, EvmYul.Stack.pop,
       hAddrStack, hAddrMachine, addr, loaded, final]
-  refine ⟨final, ?_, ?_, ?_⟩
+  refine ⟨final, ?_, ?_, ?_, ?_⟩
   · rw [hCodeEq, Structured.Preservation.Code.run_append, hAddrRun]
     simpa [addr] using hTailRun
   · simp [final, EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC, loaded, addr]
   · simp [final, EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC, loaded, addr]
+  · have hAddrState :
+        addrState.toState = state.toState := by
+      exact congrArg (fun shared => shared.toState) hAddrShared
+    simpa [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, loaded, addr] using hAddrState
 
 theorem run_storeTopSlotCode?
     {valuesAboveBase slot : Nat} {code : Structured.Code}
@@ -524,12 +541,17 @@ theorem run_storeTopSlotCode?
         .ok final ∧
       final.stack = tail ++ base :: rest ∧
       final.toMachineState =
-        state.toMachineState.mstore (base + slotOffset slot) value := by
+        state.toMachineState.mstore (base + slotOffset slot) value ∧
+      final.toSharedState =
+        ({ state with
+          toMachineState :=
+            state.toMachineState.mstore (base + slotOffset slot) value } :
+          EVMState).toSharedState := by
   rcases storeTopSlotCode?_eq_some_inv hCode with
     ⟨addrCode, hAddrCode, hCodeEq⟩
   rcases run_slotAddressCode? hAddrCode state (value :: tail) rest base
       hValues with
-    ⟨addrState, hAddrRun, hAddrStack, hAddrMachine⟩
+    ⟨addrState, hAddrRun, hAddrStack, hAddrMachine, hAddrShared⟩
   let addr : Word := base + slotOffset slot
   let final : EVMState :=
     ({ addrState with
@@ -546,13 +568,18 @@ theorem run_storeTopSlotCode?
       EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC,
       EvmYul.Stack.pop2, Id.run, hAddrStack, hAddrMachine, addr, final]
-  refine ⟨final, ?_, ?_, ?_⟩
+  refine ⟨final, ?_, ?_, ?_, ?_⟩
   · rw [hCodeEq, Structured.Preservation.Code.run_append, hAddrRun]
     simpa [addr] using hTailRun
   · simp [final, EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC]
   · simp [final, EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC, addr]
+  · have hAddrState :
+        addrState.toState = state.toState := by
+      exact congrArg (fun shared => shared.toState) hAddrShared
+    simpa [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, addr] using hAddrState
 
 theorem generatedAddress_toNat_of_ready
     {machine : EvmYul.MachineState} {base : Word} {words slot : Nat}
@@ -803,7 +830,7 @@ theorem run_loadSlotCode?_frameStore_lookup
       FrameStoreRel env store final.toMachineState base := by
   rcases hRel hLookup with ⟨value, hStore, hLoad⟩
   rcases run_loadSlotCode? hCode state values rest base hValues with
-    ⟨final, hRun, hStack, hFinalMachine⟩
+    ⟨final, hRun, hStack, hFinalMachine, _hFinalShared⟩
   have hMloadMachine :
       (state.toMachineState.mload (base + slotOffset slot)).2 =
         machine := by
@@ -876,6 +903,66 @@ theorem run_compileExprCode?_var_frameStore_lookup_of_stateSlots
       hLoadCode hStateBound hFrameWords hReady hRel hLookup
       state values rest hMachine hValues
 
+theorem run_compileExprCode?_var_frameStore_lookup_shared_of_stateSlots
+    {compileState : CompileState} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {sourceShared : EvmYul.SharedState .EVM}
+    {name : Name} {valuesAboveBase : Nat} {code : Structured.Code}
+    (hCompile :
+      compileExprCode? compileState.env valuesAboveBase (.var name) =
+        some code)
+    (hStateBound : StateSlotsBounded compileState)
+    (hFrameWords : compileState.nextSlot ≤ words)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (state : EVMState)
+    (hShared : SharedStateEqOutsideScratch (range base words) sourceShared
+      state.toSharedState)
+    (hRel : FrameStoreRel compileState.env store machine base)
+    (values rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (hValues : values.length = valuesAboveBase) :
+    ∃ value final,
+      store name = some value ∧
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.stack = value :: values ++ base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) sourceShared
+        final.toSharedState ∧
+      FrameStoreRel compileState.env store final.toMachineState base := by
+  have hEnvBound : EnvSlotsBounded compileState.env words :=
+    envSlotsBounded_of_stateSlotsBounded_le hStateBound hFrameWords
+  rcases
+      compileExprCode?_var_load_slot_bounded hEnvBound hCompile with
+    ⟨slot, hLookup, hSlot, hLoadCode⟩
+  rcases FrameStoreRel.load_lookup hRel hLookup with
+    ⟨value, hStore, hLoad⟩
+  rcases run_loadSlotCode? hLoadCode state values rest base hValues with
+    ⟨final, hRun, hStack, hFinalMachineRaw, hFinalSharedRaw⟩
+  have hMloadMachine :
+      (state.toMachineState.mload (base + slotOffset slot)).2 =
+        machine := by
+    rw [hMachine]
+    exact mload_generated_slot_machine_eq hReady hSlot
+  have hFinalMachine : final.toMachineState = machine := by
+    simpa [hFinalMachineRaw] using hMloadMachine
+  have hLoadedMachineState :
+      (state.toMachineState.mload (base + slotOffset slot)).2 =
+        state.toMachineState := by
+    simpa [hMachine] using hMloadMachine
+  have hFinalShared : final.toSharedState = state.toSharedState := by
+    rw [hFinalSharedRaw, hLoadedMachineState]
+  refine ⟨value, final, hStore, hRun, ?_, ?_, ?_, ?_⟩
+  · rw [hStack, hMachine, hLoad]
+  · rw [hFinalMachine]
+    exact hReady
+  · rw [hFinalShared]
+    exact hShared
+  · rw [hFinalMachine]
+    exact hRel
+
 theorem run_compileExprCode?_lit_frameStore
     {compileState : CompileState} {store : Locals.Source.Store}
     {machine : EvmYul.MachineState} {base value : Word}
@@ -914,6 +1001,63 @@ theorem run_compileExprCode?_lit_frameStore
     intro query slot hLookup
     exact hRel hLookup
 
+theorem run_compileExprCode?_lit_frameStore_shared
+    {compileState : CompileState} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base value : Word} {words : Nat}
+    {sourceShared : EvmYul.SharedState .EVM}
+    {valuesAboveBase : Nat} {code : Structured.Code}
+    (hCompile :
+      compileExprCode? compileState.env valuesAboveBase (.lit value) =
+        some code)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (state : EVMState)
+    (hShared : SharedStateEqOutsideScratch (range base words) sourceShared
+      state.toSharedState)
+    (hRel : FrameStoreRel compileState.env store machine base)
+    (values rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (hValues : values.length = valuesAboveBase) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.stack = value :: values ++ base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) sourceShared
+        final.toSharedState ∧
+      FrameStoreRel compileState.env store final.toMachineState base := by
+  rcases
+      run_compileExprCode?_lit_frameStore
+        hCompile hRel state values rest hMachine hValues with
+    ⟨final, hRun, hFinalMachine, hFinalStack, hRelFinal⟩
+  have hFinalShared : final.toSharedState = state.toSharedState := by
+    simp [compileExprCode?] at hCompile
+    cases hCompile
+    let start : EVMState := { state with stack := values ++ base :: rest }
+    let expected : EVMState :=
+      start.replaceStackAndIncrPC (value :: values ++ base :: rest)
+        (pcΔ := 33)
+    have hRunExpected :
+        Structured.Code.run [Structured.BasicInstr.push value]
+            { state with stack := values ++ base :: rest } =
+          .ok expected := by
+      simp [Structured.Code.run, Structured.BasicInstr.step,
+        Assembly.Target.stepInstr, EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC, EvmYul.Stack.push, start, expected]
+    have hExpected : final = expected := by
+      rw [hRunExpected] at hRun
+      injection hRun with hEq
+      exact hEq.symm
+    subst final
+    simp [expected, start, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC]
+  refine ⟨final, hRun, hFinalStack, ?_, ?_, hRelFinal⟩
+  · rw [hFinalMachine]
+    exact hReady
+  · rw [hFinalShared]
+    exact hShared
+
 theorem run_compileExprSeqCode?_nil_frameStore
     {compileState : CompileState} {store : Locals.Source.Store}
     {machine : EvmYul.MachineState} {base : Word}
@@ -939,6 +1083,50 @@ theorem run_compileExprSeqCode?_nil_frameStore
   · simp [Structured.Code.run, final]
   · simpa [final] using hMachine
   · simp [final]
+  · have hFinalMachine : final.toMachineState = machine := by
+      simpa [final] using hMachine
+    rw [hFinalMachine]
+    intro query slot hLookup
+    exact hRel hLookup
+
+theorem run_compileExprSeqCode?_nil_frameStore_shared
+    {compileState : CompileState} {store : Locals.Source.Store}
+    {machine : EvmYul.MachineState} {base : Word} {words : Nat}
+    {sourceShared : EvmYul.SharedState .EVM}
+    {valuesAboveBase : Nat} {code : Structured.Code}
+    (hCompile :
+      compileExprSeqCode? compileState.env valuesAboveBase
+          (Locals.ExprSeq.nil : Locals.ExprSeq 0) =
+        some code)
+    (hReady : ScratchRegionReady machine (range base words).base
+      (range base words).words)
+    (state : EVMState)
+    (hShared : SharedStateEqOutsideScratch (range base words) sourceShared
+      state.toSharedState)
+    (hRel : FrameStoreRel compileState.env store machine base)
+    (values rest : EvmYul.Stack Word)
+    (hMachine : state.toMachineState = machine)
+    (_hValues : values.length = valuesAboveBase) :
+    ∃ final,
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.stack = values ++ base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) sourceShared
+        final.toSharedState ∧
+      FrameStoreRel compileState.env store final.toMachineState base := by
+  simp [compileExprSeqCode?] at hCompile
+  cases hCompile
+  let final : EVMState := { state with stack := values ++ base :: rest }
+  refine ⟨final, ?_, ?_, ?_, ?_, ?_⟩
+  · simp [Structured.Code.run, final]
+  · simp [final]
+  · have hFinalMachine : final.toMachineState = machine := by
+      simpa [final] using hMachine
+    rw [hFinalMachine]
+    exact hReady
+  · simpa [final] using hShared
   · have hFinalMachine : final.toMachineState = machine := by
       simpa [final] using hMachine
     rw [hFinalMachine]
@@ -1018,6 +1206,97 @@ theorem run_compileExprSeqCode?_cons_frameStore_of_parts
           refine
             ⟨headValues ++ tailValues, final, ?_, ?_, ?_, hReadyFinal,
               hRelFinal⟩
+          · simp [hHeadLen, hTailLen]
+          · rw [Structured.Preservation.Code.run_append, hHeadRunCode]
+            exact hTailRunCode
+          · simpa [List.reverse_append, List.append_assoc] using hFinalStack
+
+theorem run_compileExprSeqCode?_cons_frameStore_shared_of_parts
+    {compileState : CompileState} {store : Locals.Source.Store}
+    {base : Word} {words : Nat} {valuesAboveBase left right : Nat}
+    {head : Expr left} {tail : Locals.ExprSeq right}
+    {code : Structured.Code}
+    {sourceShared' : EvmYul.SharedState .EVM}
+    (hCompile :
+      compileExprSeqCode? compileState.env valuesAboveBase
+          (Locals.ExprSeq.cons (left := left) (right := right) head tail) =
+        some code)
+    (state : EVMState) (values rest : EvmYul.Stack Word)
+    (hHeadRun :
+      ∀ {headCode : Structured.Code},
+        compileExprCode? compileState.env valuesAboveBase head =
+          some headCode →
+          ∃ (headValues : List Word)
+            (sourceSharedAfterHead : EvmYul.SharedState .EVM)
+            (mid : EVMState),
+            headValues.length = left ∧
+            Structured.Code.run headCode
+                { state with stack := values ++ base :: rest } = .ok mid ∧
+            mid.stack = headValues.reverse ++ values ++ base :: rest ∧
+            ScratchRegionReady mid.toMachineState
+              (range base words).base (range base words).words ∧
+            SharedStateEqOutsideScratch (range base words)
+              sourceSharedAfterHead mid.toSharedState ∧
+            FrameStoreRel compileState.env store mid.toMachineState base)
+    (hTailRun :
+      ∀ {tailCode : Structured.Code} {headValues : List Word}
+          {sourceSharedAfterHead : EvmYul.SharedState .EVM}
+          {mid : EVMState},
+        compileExprSeqCode? compileState.env (valuesAboveBase + left) tail =
+          some tailCode →
+        headValues.length = left →
+        mid.stack = headValues.reverse ++ values ++ base :: rest →
+        ScratchRegionReady mid.toMachineState
+          (range base words).base (range base words).words →
+        SharedStateEqOutsideScratch (range base words)
+          sourceSharedAfterHead mid.toSharedState →
+        FrameStoreRel compileState.env store mid.toMachineState base →
+          ∃ (tailValues : List Word) (final : EVMState),
+            tailValues.length = right ∧
+            Structured.Code.run tailCode mid = .ok final ∧
+            final.stack =
+              tailValues.reverse ++ headValues.reverse ++ values ++
+                base :: rest ∧
+            ScratchRegionReady final.toMachineState
+              (range base words).base (range base words).words ∧
+            SharedStateEqOutsideScratch (range base words) sourceShared'
+              final.toSharedState ∧
+            FrameStoreRel compileState.env store final.toMachineState base) :
+    ∃ (resultValues : List Word) (final : EVMState),
+      resultValues.length = left + right ∧
+      Structured.Code.run code
+          { state with stack := values ++ base :: rest } = .ok final ∧
+      final.stack = resultValues.reverse ++ values ++ base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) sourceShared'
+        final.toSharedState ∧
+      FrameStoreRel compileState.env store final.toMachineState base := by
+  simp [compileExprSeqCode?] at hCompile
+  cases hHeadCode :
+      compileExprCode? compileState.env valuesAboveBase head with
+  | none =>
+      simp [hHeadCode] at hCompile
+  | some headCode =>
+      cases hTailCode :
+          compileExprSeqCode? compileState.env (valuesAboveBase + left)
+            tail with
+      | none =>
+          simp [hHeadCode, hTailCode] at hCompile
+      | some tailCode =>
+          simp [hHeadCode, hTailCode] at hCompile
+          cases hCompile
+          rcases hHeadRun hHeadCode with
+            ⟨headValues, sourceSharedAfterHead, mid, hHeadLen,
+              hHeadRunCode, hMidStack, hReadyMid, hSharedMid, hRelMid⟩
+          rcases
+              hTailRun hTailCode hHeadLen hMidStack hReadyMid hSharedMid
+                hRelMid with
+            ⟨tailValues, final, hTailLen, hTailRunCode, hFinalStack,
+              hReadyFinal, hSharedFinal, hRelFinal⟩
+          refine
+            ⟨headValues ++ tailValues, final, ?_, ?_, ?_, hReadyFinal,
+              hSharedFinal, hRelFinal⟩
           · simp [hHeadLen, hTailLen]
           · rw [Structured.Preservation.Code.run_append, hHeadRunCode]
             exact hTailRunCode
@@ -1130,7 +1409,7 @@ theorem run_storeTopSlotCode?_frameStore_assign
         (Locals.Source.Store.insert store name value)
         final.toMachineState base := by
   rcases run_storeTopSlotCode? hCode state value tail rest base hValues with
-    ⟨final, hRun, hStack, hFinalMachine⟩
+    ⟨final, hRun, hStack, hFinalMachine, _hFinalShared⟩
   have hSlot : slot < words :=
     lookupSlot?_lt_of_bounded hBound hLookup
   have hReadyStored :
