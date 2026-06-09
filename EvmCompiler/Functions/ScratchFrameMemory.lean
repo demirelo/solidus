@@ -7981,6 +7981,193 @@ theorem run_compileStmt?_switch_some_frameStore_of_source_evalOne_run_regular_sc
                   hRelFinalSelected (name := name) (slot := slot)
                     hLookupSelected
 
+theorem run_compileStmt?_for_false_atomic_init_frameStore_of_source_parts
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {init post body : Block} {cond : Expr 1}
+    {plan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source sourceAfterInit sourceAfterCond : Locals.Source.State}
+    {sourceCtx initCtx : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel blockFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmt? ctx returns compileState (.for_ init cond post body) =
+        some plan)
+    (hInitSafe : AtomicStmtListSafe init.stmts)
+    (hInitScoped :
+      EvmCompiler.Functions.Scope.Block.Scoped sourceCtx.scope init)
+    (hCondSafe : SourceExprSafe cond)
+    (hInitRun :
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtx.withoutLoopControl sourceFuel init source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular sourceAfterInit,
+          initCtx))
+    (hCondFalse :
+      Locals.Source.Expr.evalCondition
+          Locals.Source.PrimitiveSemantics.structured cond sourceAfterInit =
+        .ok (sourceAfterCond, false))
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hNames : EnvNamesInScope compileState.env sourceCtx.scope)
+    (hFrameWords : plan.state.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (restStack : EvmYul.Stack Word) :
+    ∃ final,
+      Expressions.Block.run compiledProgram
+          (blockFuel + 2 * init.stmts.length + 3) plan.block
+          { runState with evm := { evmState with stack := base :: restStack } } =
+        .ok (Expressions.Outcome.regular ({ runState with evm := final })) ∧
+      final.stack = base :: restStack ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words)
+        (sourceAfterCond.restrictTo sourceCtx.scope).shared
+        final.toSharedState ∧
+      FrameStoreRel plan.state.env
+        (sourceAfterCond.restrictTo sourceCtx.scope).vars
+        final.toMachineState base := by
+  unfold compileStmt? at hCompile
+  cases hInitCompile : compileBlockOpen? ctx returns compileState init with
+  | none =>
+      simp [hInitCompile] at hCompile
+  | some initPlan =>
+      cases hCondCode :
+          compileExprCode? initPlan.state.env 0 cond with
+      | none =>
+          simp [hInitCompile, hCondCode] at hCompile
+      | some condCode =>
+          cases hPostCompile :
+              compileBlockScoped? ctx returns initPlan.state post with
+          | none =>
+              simp [hInitCompile, hCondCode, hPostCompile] at hCompile
+          | some postPlan =>
+              cases hBodyCompile :
+                  compileBlockScoped? ctx returns postPlan.state body with
+              | none =>
+                  simp [hInitCompile, hCondCode, hPostCompile, hBodyCompile]
+                    at hCompile
+              | some bodyPlan =>
+                  simp [hInitCompile, hCondCode, hPostCompile, hBodyCompile]
+                    at hCompile
+                  cases hCompile
+                  have hInitStmtListCompile :
+                      compileStmtList? ctx returns compileState init.stmts =
+                        some initPlan := by
+                    cases init
+                    simpa [compileBlockOpen?] using hInitCompile
+                  have hInitFrameWords : initPlan.state.nextSlot ≤ words := by
+                    have hInitPost :
+                        initPlan.state.nextSlot ≤ postPlan.state.nextSlot :=
+                      compileBlockScoped?_nextSlot_mono
+                        (plan := postPlan) hPostCompile
+                    have hPostBody :
+                        postPlan.state.nextSlot ≤ bodyPlan.state.nextSlot :=
+                      compileBlockScoped?_nextSlot_mono
+                        (plan := bodyPlan) hBodyCompile
+                    exact Nat.le_trans hInitPost
+                      (Nat.le_trans hPostBody hFrameWords)
+                  have hInitBound :
+                      StateSlotsBounded initPlan.state :=
+                    compileBlockOpen?_stateSlotsBounded
+                      (plan := initPlan) hStateBound hInitCompile
+                  have hInitNodup :
+                      StateSlotsNodup initPlan.state :=
+                    compileBlockOpen?_stateSlotsNodup
+                      (plan := initPlan) hStateBound hStateNodup
+                      hInitCompile
+                  have hInitPreserved :
+                      EnvLookupPreserved compileState.env
+                        initPlan.state.env :=
+                    compileBlockOpen?_atomic_envLookupPreserved_of_scoped
+                      hInitScoped hInitSafe hNames EnvLookupPreserved.refl
+                      hInitCompile
+                  rcases
+                    run_compileStmtList?_atomic_block_frameStore_of_source_run_open_regular
+                      hSpec hWordBytes
+                      (ctx := ctx)
+                      (returns := returns)
+                      (compileState := compileState)
+                      (stmts := init.stmts)
+                      (plan := initPlan)
+                      (sourceProgram := sourceProgram)
+                      (compiledProgram := compiledProgram)
+                      (source := source)
+                      (source' := sourceAfterInit)
+                      (sourceCtx := sourceCtx.withoutLoopControl)
+                      (sourceCtx' := initCtx)
+                      (sourceFuel := sourceFuel)
+                      (blockFuel := blockFuel)
+                      (runState := runState)
+                      (evmState := evmState)
+                      (base := base)
+                      (words := words)
+                      hInitStmtListCompile hInitSafe
+                      (by
+                        cases init
+                        simpa using hInitRun)
+                      hStateBound hStateNodup hInitFrameWords hReady hShared
+                      hRel restStack with
+                  ⟨initFinal, hInitTarget, hInitStack, hReadyInit,
+                    hSharedInit, hRelInit⟩
+                  rcases
+                    run_compileExprCode?_condition_frameStore_of_source_evalCondition
+                      (compileState := initPlan.state)
+                      (cond := cond)
+                      (code := condCode)
+                      (source := sourceAfterInit)
+                      (sourceAfterCond := sourceAfterCond)
+                      (condTrue := false)
+                      (evmState := initFinal)
+                      (base := base)
+                      (words := words)
+                      (runState := runState)
+                      hCondCode hCondSafe hCondFalse hInitBound
+                      hInitFrameWords hReadyInit hSharedInit hRelInit
+                      restStack with
+                  ⟨condFinal, hCondTarget, hCondStack, hReadyCond,
+                    hSharedCond, hRelCond⟩
+                  refine
+                    ⟨condFinal, ?_, hCondStack, hReadyCond, ?_, ?_⟩
+                  · have hCondStart :
+                        ({ runState with
+                          evm :=
+                            { initFinal with
+                              stack := base :: restStack } } :
+                          Expressions.RunState) =
+                        ({ runState with evm := initFinal } :
+                          Expressions.RunState) := by
+                      cases initFinal
+                      simp at hInitStack ⊢
+                      exact hInitStack.symm
+                    have hCondTarget' :
+                        Expressions.Expr.runConditionState (.code condCode)
+                            ({ runState with evm := initFinal } :
+                              Expressions.RunState) =
+                          .ok ({ runState with evm := condFinal }, false) := by
+                      rw [← hCondStart]
+                      exact hCondTarget
+                    have hFuel :
+                        blockFuel + 2 * init.stmts.length + 3 =
+                          (blockFuel + 2 * init.stmts.length + 2) + 1 := by
+                      omega
+                    rw [hFuel]
+                    simp [Expressions.Block.run, Expressions.Stmt.run,
+                      hInitTarget, Expressions.Stmt.runForLoop, hCondTarget',
+                      Expressions.Outcome.regular]
+                  · simpa [Locals.Source.State.restrictTo] using hSharedCond
+                  · exact
+                      FrameStoreRel.restrictTo_env_of_lookup_preserved
+                        hNames hInitPreserved hRelCond
+
 set_option maxHeartbeats 800000 in
 mutual
   theorem expressionsBlockRun_mono
