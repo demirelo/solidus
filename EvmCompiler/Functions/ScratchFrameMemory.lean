@@ -3237,6 +3237,77 @@ theorem run_frameInitCode_append_compileStmtList?_atomic_block_frameStore_of_sou
     simpa [hStartTail] using hBodyRun
   simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hBodyRun'
 
+theorem run_compileMain?_atomic_noPrelude_block_frameStore_of_source_run_open_regular
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {ctx : CompileCtx}
+    {compileState : CompileState} {stmts : List Stmt} {mainPlan : Plan}
+    {sourceProgram : Program} {compiledProgram : Expressions.Program}
+    {source source' : Locals.Source.State}
+    {sourceCtx sourceCtx' : EvmCompiler.Functions.Source.Ctx}
+    {sourceFuel blockFuel : Nat}
+    {runState : Expressions.RunState}
+    {evmState initState : EVMState} {base : Word} {words : Nat}
+    (hSplit : splitPrelude stmts = ([], stmts))
+    (hCompile :
+      compileMain? ctx words compileState { stmts := stmts } = some mainPlan)
+    (hSafe : AtomicStmtListSafe stmts)
+    (hRun :
+      EvmCompiler.Functions.Source.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured
+          sourceProgram sourceCtx sourceFuel { stmts := stmts } source =
+        .ok (EvmCompiler.Functions.Source.Outcome.regular source',
+          sourceCtx'))
+    (hStateBound : StateSlotsBounded compileState)
+    (hStateNodup : StateSlotsNodup compileState)
+    (hFrameWords : mainPlan.state.nextSlot ≤ words)
+    (hInitRun :
+      Structured.Code.run (frameInitCode words) evmState = .ok initState)
+    (hInitStack : initState.stack = base :: evmState.stack)
+    (hReady : ScratchRegionReady initState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      initState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      initState.toMachineState base) :
+    ∃ final,
+      Expressions.Block.run compiledProgram
+          (blockFuel + 2 * stmts.length + 2) mainPlan.block
+          { runState with evm := evmState } =
+        .ok (Expressions.Outcome.regular ({ runState with evm := final })) ∧
+      final.stack = base :: evmState.stack ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) source'.shared
+        final.toSharedState ∧
+      FrameStoreRel mainPlan.state.env source'.vars final.toMachineState
+        base := by
+  unfold compileMain? at hCompile
+  simp [hSplit] at hCompile
+  cases hPlan : compileStmtList? ctx [] compileState stmts with
+  | none =>
+      simp [hPlan] at hCompile
+  | some plan =>
+      simp [hPlan] at hCompile
+      cases hCompile
+      rcases
+          run_frameInitCode_append_compileStmtList?_atomic_block_frameStore_of_source_run_open_regular
+            hSpec hWordBytes
+            (compiledProgram := compiledProgram)
+            (sourceFuel := sourceFuel)
+            (blockFuel := blockFuel)
+            (runState := runState)
+            (evmState := evmState)
+            (initState := initState)
+            (base := base)
+            (words := words)
+            hPlan hSafe hRun hStateBound hStateNodup hFrameWords
+            hInitRun hInitStack hReady hShared hRel with
+        ⟨final, hBlockRun, hStack, hReadyFinal, hSharedFinal, hRelFinal⟩
+      refine
+        ⟨final, ?_, hStack, hReadyFinal, hSharedFinal, hRelFinal⟩
+      simpa [Block.append, Block.ofCode] using hBlockRun
+
 theorem run_compileStmt?_expr_block_frameStore_of_source_run_regular
     {ctx : CompileCtx} {returns : List Name}
     {compileState : CompileState} {expr : Expr 0} {plan : Plan}
