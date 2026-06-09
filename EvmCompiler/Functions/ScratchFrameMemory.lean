@@ -2216,6 +2216,66 @@ theorem run_compileStmt?_assign_frameStore_of_source_evalOne
     simpa [hMidStart] using hRunStore
   · simpa using hFinalStack
 
+theorem run_compileStmt?_expr_frameStore_of_source_eval
+    {ctx : CompileCtx} {returns : List Name}
+    {compileState : CompileState} {expr : Expr 0} {plan : Plan}
+    {source source' : Locals.Source.State}
+    {evmState : EVMState} {base : Word} {words : Nat}
+    (hCompile :
+      compileStmt? ctx returns compileState (.expr expr) = some plan)
+    (hSafe : SourceExprSafe expr)
+    (hEval :
+      Locals.Source.Expr.eval Locals.Source.PrimitiveSemantics.structured
+        expr source = .ok (source', []))
+    (hStateBound : StateSlotsBounded compileState)
+    (hFrameWords : compileState.nextSlot ≤ words)
+    (hReady : ScratchRegionReady evmState.toMachineState
+      (range base words).base (range base words).words)
+    (hShared : SharedStateEqOutsideScratch (range base words) source.shared
+      evmState.toSharedState)
+    (hRel : FrameStoreRel compileState.env source.vars
+      evmState.toMachineState base)
+    (rest : EvmYul.Stack Word) :
+    ∃ final code,
+      plan.state = compileState ∧
+      plan.block = Block.ofCode code ∧
+      Structured.Code.run code { evmState with stack := base :: rest } =
+        .ok final ∧
+      final.stack = base :: rest ∧
+      ScratchRegionReady final.toMachineState
+        (range base words).base (range base words).words ∧
+      SharedStateEqOutsideScratch (range base words) source'.shared
+        final.toSharedState ∧
+      FrameStoreRel compileState.env source'.vars final.toMachineState base := by
+  simp [compileStmt?] at hCompile
+  cases hCode : compileExprCode? compileState.env 0 expr with
+  | none =>
+      simp [hCode] at hCompile
+  | some code =>
+      simp [hCode] at hCompile
+      cases hCompile
+      rcases
+          run_compileExprCode?_frameStore_of_source_eval
+            (source := source)
+            (source' := source')
+            (state := evmState)
+            (base := base)
+            (words := words)
+            (valuesAboveBase := 0)
+            (front := [])
+            (rest := rest)
+            (resultValues := [])
+            (code := code)
+            hSafe hEval hCode hStateBound hFrameWords
+            hReady hShared hRel (by simp) with
+        ⟨final, _hResultLen, hRun, hStack, hReadyFinal,
+          hSharedFinal, hRelFinal⟩
+      refine
+        ⟨final, code, rfl, rfl, ?_, ?_, hReadyFinal, hSharedFinal,
+          hRelFinal⟩
+      · simpa using hRun
+      · simpa using hStack
+
 theorem run_compileStmt?_let_frameStore_of_source_evalOne
     (hSpec : ZeroPaddingSpec)
     (hWordBytes : WordByteEncodingSpec)
