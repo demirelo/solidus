@@ -736,6 +736,24 @@ theorem FrameStoreRel.load_lookup
         (machine.mload (base + slotOffset slot)).1 = value := by
   exact hRel hLookup
 
+theorem FrameStoreRel.empty
+    {store : Locals.Source.Store} {machine : EvmYul.MachineState}
+    {base : Word} :
+    FrameStoreRel [] store machine base := by
+  intro name slot hLookup
+  simp [lookupSlot?] at hLookup
+
+theorem StateSlotsBounded.empty (nextSlot : Nat) :
+    StateSlotsBounded
+      ({ env := [], nextSlot := nextSlot } : CompileState) := by
+  intro entry hMem
+  simp at hMem
+
+theorem StateSlotsNodup.empty (nextSlot : Nat) :
+    StateSlotsNodup
+      ({ env := [], nextSlot := nextSlot } : CompileState) := by
+  simp [StateSlotsNodup, slotList]
+
 theorem envSlotsBounded_of_stateSlotsBounded_le
     {compileState : CompileState} {words : Nat}
     (hBound : StateSlotsBounded compileState)
