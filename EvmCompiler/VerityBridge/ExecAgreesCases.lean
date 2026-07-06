@@ -1505,6 +1505,33 @@ private theorem eqEvalValues_prim (k : Nat) (op : EvmYul.Operation .Yul)
     Yul.Source.Effectful.evalValues]
   rfl
 
+private theorem eqEvalValues_var (k : Nat) (id : EvmYul.Identifier)
+    (code : Option YulContract) (s : State) :
+    evalValues (k + 1) (.Var id) code s =
+      (match s.lookup? id with
+       | some v => Interaction.pure (s, [v])
+       | none => InteractionSemantics.Primitive.fail s (.UnknownIdentifier id)) := by
+  simp only [evalValues, Yul.Source.Canonical.evalValues,
+    Yul.Source.Effectful.evalValues, stateModel, id_eq,
+    Yul.Source.Effectful.Control.fail]
+  rfl
+
+private theorem eqEvalValues_lit (k : Nat) (v : EvmYul.Literal)
+    (code : Option YulContract) (s : State) :
+    evalValues (k + 1) (.Lit v) code s = Interaction.pure (s, [v]) := by
+  simp only [evalValues, Yul.Source.Canonical.evalValues,
+    Yul.Source.Effectful.evalValues]
+  rfl
+
+private theorem eqEvalValues_internal (k : Nat) (fn : YulFunctionName)
+    (args : List Expr) (code : Option YulContract) (s : State) :
+    evalValues (k + 1) (.Call (.inr fn) args) code s =
+      Interaction.bind (evalArgs k args.reverse code s)
+        (fun r => call k r.2.reverse (some fn) code r.1) := by
+  simp only [evalValues, Yul.Source.Canonical.evalValues,
+    Yul.Source.Effectful.evalValues]
+  rfl
+
 private theorem eqCall_succ (k : Nat) (args : List Word)
     (fn? : Option YulFunctionName)
     (code : Option YulContract) (s : State) :
@@ -1769,6 +1796,190 @@ theorem caseEvalArgs (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
             obtain ⟨e, he, rfl⟩ := hNa
             rw [he]
             exact doneAgrees_fail_outOfFuel s
+
+/-! ### `caseEvalValues` / `caseEval` -/
+
+/-- Combinator for the `evalValues` call arms: native `reverse'`-then-leaf vs our
+`bind`-then-leaf (the leaf reverses the argument list itself). -/
+private theorem doneAgrees_revBind {k F : Nat}
+    {code : Option YulContract} {s : State} {args : List Expr}
+    {nleaf : State → List Word → Except EvmYul.Yul.Exception (State × List Word)}
+    {oleaf : State → List Word → Open (State × List Word)}
+    (hE : DoneAgrees (EvmYul.Yul.evalArgs k args.reverse code s)
+      (evalArgs F args.reverse code s))
+    (hleaf : ∀ s' a, EvmYul.Yul.evalArgs k args.reverse code s = .ok (s', a) →
+      DoneAgrees (nleaf s' a.reverse) (oleaf s' a.reverse)) :
+    DoneAgrees
+      (match EvmYul.Yul.reverse' (EvmYul.Yul.evalArgs k args.reverse code s) with
+       | .ok (s', a) => nleaf s' a
+       | .error e => .error e)
+      (Interaction.bind (evalArgs F args.reverse code s)
+        (fun r => oleaf r.1 r.2.reverse)) := by
+  obtain ⟨r, hr, hRA⟩ := hE
+  rw [hr]
+  cases hnEA : EvmYul.Yul.evalArgs k args.reverse code s with
+  | error e =>
+      rw [hnEA] at hRA
+      cases r with
+      | ok b => exact (hRA : False).elim
+      | error f =>
+          rw [Simulation.Interaction.bind_done_error]
+          simp only [EvmYul.Yul.reverse']
+          exact ⟨.error f, rfl, hRA⟩
+  | ok p =>
+      rw [hnEA] at hRA
+      cases r with
+      | error f => exact (hRA : False).elim
+      | ok b =>
+          have hbp : b = p := hRA
+          subst b
+          rw [Simulation.Interaction.bind_done_ok]
+          obtain ⟨s', a⟩ := p
+          simp only [EvmYul.Yul.reverse']
+          exact hleaf s' a hnEA
+
+theorem caseEvalValues (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
+    ∀ (expr : Expr) (code : Option YulContract) (s : State),
+      BridgeExpr expr → BridgeCode code → CodeBridge s →
+      ∃ m, DoneAgrees (EvmYul.Yul.evalValues n expr code s) (evalValues m expr code s) := by
+  intro expr code s hExpr hCode hCB
+  match n with
+  | 0 => exact ⟨0, by rw [Native.evalValues_zero, EvalValues.zero]; exact doneAgrees_errorFail s⟩
+  | k + 1 =>
+    have ihk : BridgeAgreesAt k := ih k (Nat.lt_succ_self k)
+    have hB0 := nativePreservesAt_of_prim hPrim
+    cases expr with
+    | Var id =>
+        refine ⟨1, ?_⟩
+        rw [Native.evalValues_var, eqEvalValues_var]
+        cases s.lookup? id with
+        | some v => exact doneAgrees_pure _
+        | none => exact doneAgrees_errorFail _
+    | Lit v =>
+        exact ⟨1, by rw [Native.evalValues_lit, eqEvalValues_lit]; exact doneAgrees_pure _⟩
+    | Call sop args =>
+        cases sop with
+        | inl op =>
+            have hbe : bridgeExpr? (.Call (.inl op) args) = true := hExpr
+            simp only [bridgeExpr?, Bool.and_eq_true, bridgeOp?_iff] at hbe
+            have hOp : BridgeOp op := hbe.1
+            have hBArgs : BridgeExprs args.reverse := bridgeExprs?_reverse hbe.2
+            cases k with
+            | zero =>
+                refine ⟨0, ?_⟩
+                have hw : EvmYul.Yul.evalValues 1 (.Call (.inl op) args) code s =
+                    .error .OutOfFuel := by
+                  simp only [Native.evalValues_prim, Native.evalArgs_zero,
+                    EvmYul.Yul.reverse']
+                rw [hw, EvalValues.zero]; exact doneAgrees_fail_outOfFuel s
+            | succ k' =>
+                obtain ⟨m₁, hE⟩ := ihk.evalArgs args.reverse code s hBArgs hCode hCB
+                by_cases hNe :
+                    NativeSettled (EvmYul.Yul.evalArgs (k' + 1) args.reverse code s)
+                · have hEl : DoneAgrees (EvmYul.Yul.evalArgs (k' + 1) args.reverse code s)
+                      (evalArgs (m₁ + 2) args.reverse code s) :=
+                    evalArgs_lift hNe (Nat.le_add_right m₁ 2) hE
+                  refine ⟨m₁ + 2 + 1, ?_⟩
+                  rw [Native.evalValues_prim, eqEvalValues_prim]
+                  refine doneAgrees_revBind
+                    (nleaf := fun s' a => EvmYul.Yul.primCall (k' + 1) s' op a)
+                    (oleaf := fun s' l => InteractionSemantics.Primitive.openEval (m₁ + 2) s' op l)
+                    hEl ?_
+                  intro s' a _
+                  show DoneAgrees (EvmYul.Yul.primCall (k' + 1) s' op a.reverse)
+                    (InteractionSemantics.Primitive.openEval (m₁ + 2) s' op a.reverse)
+                  have hfi : EvmYul.Yul.primCall (k' + 1) s' op a.reverse =
+                      EvmYul.Yul.primCall (m₁ + 1) s' op a.reverse :=
+                    primCall_fuel_insensitive hOp k' m₁ s' a.reverse
+                  rw [hfi]
+                  exact doneAgrees_openEval_shift hOp (m₁ + 1) s' a.reverse
+                · refine ⟨0, ?_⟩
+                  simp only [NativeSettled, not_forall, not_not] at hNe
+                  obtain ⟨e, he, rfl⟩ := hNe
+                  have hw : EvmYul.Yul.evalValues (k' + 1 + 1) (.Call (.inl op) args) code s =
+                      .error .OutOfFuel := by
+                    simp only [Native.evalValues_prim, he, EvmYul.Yul.reverse']
+                  rw [hw, EvalValues.zero]; exact doneAgrees_fail_outOfFuel s
+        | inr fn =>
+            have hbe : bridgeExpr? (.Call (.inr fn) args) = true := hExpr
+            simp only [bridgeExpr?, Bool.and_eq_true] at hbe
+            have hBArgs : BridgeExprs args.reverse := bridgeExprs?_reverse hbe
+            obtain ⟨m₁, hE⟩ := ihk.evalArgs args.reverse code s hBArgs hCode hCB
+            by_cases hNe :
+                NativeSettled (EvmYul.Yul.evalValues (k + 1) (.Call (.inr fn) args) code s)
+            · have hNea : NativeSettled (EvmYul.Yul.evalArgs k args.reverse code s) := by
+                intro e he; rintro rfl
+                exact (hNe .OutOfFuel (by
+                  simp only [Native.evalValues_call, he, EvmYul.Yul.reverse'])) rfl
+              cases hns : EvmYul.Yul.evalArgs k args.reverse code s with
+              | error e =>
+                  refine ⟨m₁ + 1, ?_⟩
+                  rw [Native.evalValues_call, eqEvalValues_internal]
+                  exact doneAgrees_revBind
+                    (nleaf := fun ss aa => EvmYul.Yul.call k aa (some fn) code ss)
+                    (oleaf := fun ss ll => call m₁ ll (some fn) code ss)
+                    (evalArgs_lift hNea (Nat.le_refl _) hE)
+                    (fun s' a hh => by rw [hns] at hh; exact nomatch hh)
+              | ok p =>
+                  obtain ⟨s', a⟩ := p
+                  have hCBs' : CodeBridge s' :=
+                    (hB0 k).evalArgs args.reverse code s hBArgs hCode hCB s' a (by rw [hns])
+                  obtain ⟨m₂, hc⟩ := ihk.call a.reverse (some fn) code s' hCode hCBs'
+                  have hNc : NativeSettled (EvmYul.Yul.call k a.reverse (some fn) code s') := by
+                    intro e he; rintro rfl
+                    exact (hNe .OutOfFuel (by
+                      simp only [Native.evalValues_call, hns, EvmYul.Yul.reverse', he])) rfl
+                  refine ⟨max m₁ m₂ + 1, ?_⟩
+                  rw [Native.evalValues_call, eqEvalValues_internal]
+                  refine doneAgrees_revBind
+                    (nleaf := fun ss aa => EvmYul.Yul.call k aa (some fn) code ss)
+                    (oleaf := fun ss ll => call (max m₁ m₂) ll (some fn) code ss)
+                    (evalArgs_lift hNea (le_max_left _ _) hE) ?_
+                  intro s'' a'' hh
+                  rw [hns] at hh
+                  obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj hh
+                  exact call_lift hNc (le_max_right _ _) hc
+            · refine ⟨0, ?_⟩
+              simp only [NativeSettled, not_forall, not_not] at hNe
+              obtain ⟨e, he, rfl⟩ := hNe
+              rw [EvalValues.zero, he]; exact doneAgrees_fail_outOfFuel s
+
+private theorem doneAgrees_head' {nEV : Except EvmYul.Yul.Exception (State × List Word)}
+    {oEV : Open (State × List Word)} (h : DoneAgrees nEV oEV) :
+    DoneAgrees (EvmYul.Yul.head' nEV)
+      (Interaction.bind oEV (fun r => Interaction.pure (r.1, r.2.head!))) := by
+  obtain ⟨r, hr, hRA⟩ := h
+  rw [hr]
+  cases hn : nEV with
+  | error e =>
+      rw [hn] at hRA
+      cases r with
+      | ok b => exact (hRA : False).elim
+      | error f =>
+          rw [Simulation.Interaction.bind_done_error]
+          simp only [EvmYul.Yul.head']
+          exact ⟨.error f, rfl, hRA⟩
+  | ok p =>
+      rw [hn] at hRA
+      cases r with
+      | error f => exact (hRA : False).elim
+      | ok b =>
+          have hbp : b = p := hRA
+          subst b
+          rw [Simulation.Interaction.bind_done_ok]
+          obtain ⟨s', l⟩ := p
+          simp only [EvmYul.Yul.head']
+          exact ⟨.ok (s', l.head!), rfl, rfl⟩
+
+theorem caseEval (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
+    ∀ (expr : Expr) (code : Option YulContract) (s : State),
+      BridgeExpr expr → BridgeCode code → CodeBridge s →
+      ∃ m, DoneAgrees (EvmYul.Yul.eval n expr code s) (eval m expr code s) := by
+  intro expr code s hExpr hCode hCB
+  obtain ⟨m, hv⟩ := caseEvalValues hPrim n ih expr code s hExpr hCode hCB
+  refine ⟨m, ?_⟩
+  rw [Native.eval_eq, eval_eq_bind]
+  exact doneAgrees_head' hv
 
 /-! ### `caseExecSeq` -/
 
