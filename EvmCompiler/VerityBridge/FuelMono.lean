@@ -226,7 +226,7 @@ open InteractionSemantics (State Open eval evalArgs evalValues call exec execSeq
 etc.). -/
 abbrev evalTail := Yul.Source.Canonical.evalTail stateModel primitiveSemantics
 
-private theorem evalTail_succ (k : Nat) (args : List Expr)
+theorem evalTail_succ (k : Nat) (args : List Expr)
     (code : Option YulContract) (result : Open (State × Word)) :
     evalTail (k + 1) args code result =
       Interaction.bind result (fun p =>
@@ -235,14 +235,14 @@ private theorem evalTail_succ (k : Nat) (args : List Expr)
   unfold evalTail Yul.Source.Canonical.evalTail Yul.Source.Effectful.evalTail
   rfl
 
-private theorem evalArgs_cons_eq (k : Nat) (a : Expr) (as : List Expr)
+theorem evalArgs_cons_eq (k : Nat) (a : Expr) (as : List Expr)
     (code : Option YulContract) (s : State) :
     evalArgs (k + 1) (a :: as) code s =
       evalTail k as code (eval k a code s) := by
   unfold evalArgs Yul.Source.Canonical.evalArgs Yul.Source.Effectful.evalArgs
   rfl
 
-private theorem evalValues_prim_succ (k : Nat) (op : EvmYul.Operation .Yul)
+theorem evalValues_prim_succ (k : Nat) (op : EvmYul.Operation .Yul)
     (args : List Expr) (code : Option YulContract) (s : State) :
     evalValues (k + 1) (.Call (.inl op) args) code s =
       Interaction.bind (evalArgs k args.reverse code s)
@@ -251,7 +251,7 @@ private theorem evalValues_prim_succ (k : Nat) (op : EvmYul.Operation .Yul)
     Yul.Source.Effectful.evalValues]
   rfl
 
-private theorem call_succ (k : Nat) (args : List Word)
+theorem call_succ (k : Nat) (args : List Word)
     (fn? : Option EvmYul.Yul.Ast.YulFunctionName)
     (code : Option YulContract) (s : State) :
     call (k + 1) args fn? code s =
@@ -278,7 +278,7 @@ private theorem call_succ (k : Nat) (args : List Word)
     id_eq]
   rfl
 
-private theorem evalTail_zero (args : List Expr)
+theorem evalTail_zero (args : List Expr)
     (code : Option YulContract) (result : Open (State × Word)) :
     evalTail 0 args code result =
       Interaction.bind result (fun p =>
