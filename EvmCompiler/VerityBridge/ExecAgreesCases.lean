@@ -1723,6 +1723,53 @@ theorem caseCall (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
                       dsimp only [Option.getD_some]
                       exact callBodyClose (rets := rets) (s := s) hex
 
+theorem caseEvalArgs (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
+    ∀ (args : List Expr) (code : Option YulContract) (s : State),
+      BridgeExprs args → BridgeCode code → CodeBridge s →
+      ∃ m, DoneAgrees (EvmYul.Yul.evalArgs n args code s) (evalArgs m args code s) := by
+  intro args code s hArgs hCode hCB
+  match n with
+  | 0 =>
+      refine ⟨0, ?_⟩
+      rw [Native.evalArgs_zero, EvalArgs.zero]
+      exact doneAgrees_fail_outOfFuel s
+  | k + 1 =>
+      have ihk : BridgeAgreesAt k := ih k (Nat.lt_succ_self k)
+      match args with
+      | [] =>
+          refine ⟨k + 1, ?_⟩
+          rw [Native.evalArgs_nil, EvalArgs.nil_succ]
+          exact doneAgrees_pure _
+      | a :: as =>
+          simp only [BridgeExprs, bridgeExprs?, Bool.and_eq_true] at hArgs
+          have hBA : BridgeExpr a := hArgs.1
+          have hBAs : BridgeExprs as := hArgs.2
+          obtain ⟨m₁, hd⟩ := ihk.eval a code s hBA hCode hCB
+          obtain ⟨m₂, ht⟩ := ihk.evalTail as code (EvmYul.Yul.eval k a code s)
+            (eval m₁ a code s) hBAs hCode
+            (fun p hp => (nativePreservesAt_of_prim hPrim k).eval a code s hBA hCode
+              hCB p.1 p.2 hp) hd
+          rw [← Native.evalArgs_cons] at ht
+          by_cases hNa : NativeSettled (EvmYul.Yul.evalArgs (k + 1) (a :: as) code s)
+          · have hNe : NativeSettled (EvmYul.Yul.eval k a code s) := by
+              intro e he
+              rintro rfl
+              exact (hNa .OutOfFuel (by rw [Native.evalArgs_cons, he,
+                Native.evalTail_error])) rfl
+            have hSe : Settled (eval m₁ a code s) := settled_of_doneAgrees hNe hd
+            have hSt : Settled (evalTail m₂ as code (eval m₁ a code s)) :=
+              settled_of_doneAgrees hNa ht
+            refine ⟨max m₁ m₂ + 1, ?_⟩
+            rw [eqEvalArgs_cons, eval_mono (le_max_left m₁ m₂) a code s hSe,
+              evalTail_mono (le_max_right m₁ m₂) as code (eval m₁ a code s) hSt]
+            exact ht
+          · refine ⟨0, ?_⟩
+            rw [EvalArgs.zero]
+            simp only [NativeSettled, not_forall, not_not] at hNa
+            obtain ⟨e, he, rfl⟩ := hNa
+            rw [he]
+            exact doneAgrees_fail_outOfFuel s
+
 end KnotProper
 
 end VerityBridge
