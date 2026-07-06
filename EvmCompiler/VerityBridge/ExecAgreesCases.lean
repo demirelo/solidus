@@ -1531,41 +1531,8 @@ private theorem eqCall_succ (k : Nat) (args : List Word)
     id_eq]
   rfl
 
-/-! ### Local one-step closers (mirror of `ExecAgreesFamily`, restated for the
-same rebuild-independence reason). -/
-
-private theorem doneAgrees_bind {α β : Type}
-    {nsub : Except EvmYul.Yul.Exception α} {osub : Open α}
-    {nk : α → Except EvmYul.Yul.Exception β} {oK : α → Open β}
-    (hSub : DoneAgrees nsub osub)
-    (hK : ∀ a, nsub = .ok a → DoneAgrees (nk a) (oK a)) :
-    DoneAgrees
-      (match nsub with | .ok a => nk a | .error e => .error e)
-      (Interaction.bind osub oK) := by
-  obtain ⟨r, hEq, hRA⟩ := hSub
-  subst hEq
-  cases nsub with
-  | ok a =>
-      cases r with
-      | ok b =>
-          have hb : b = a := hRA
-          rw [Interaction.bind_done_ok, hb]; exact hK a rfl
-      | error f => exact (hRA : False).elim
-  | error e =>
-      cases r with
-      | ok b => exact (hRA : False).elim
-      | error f => rw [Interaction.bind_done_error]; exact ⟨.error f, rfl, hRA⟩
-
-private theorem doneAgrees_wrap {α β : Type}
-    {nsub : Except EvmYul.Yul.Exception α} {osub : Open α}
-    (g : α → β) (h : DoneAgrees nsub osub) :
-    DoneAgrees
-      (match nsub with | .ok a => .ok (g a) | .error e => .error e)
-      (Interaction.bind osub (fun a => Interaction.pure (g a))) :=
-  doneAgrees_bind h (fun a _ => ⟨.ok (g a), rfl, rfl⟩)
-
-private theorem doneAgrees_pure {α : Type} (a : α) :
-    DoneAgrees (.ok a) (Interaction.pure a) := ⟨.ok a, rfl, rfl⟩
+/-! ### Local one-step closers (the `bind`/`wrap`/`pure` closers live in
+`ExecAgreesFamily`; these are the extra native-combinator-shaped ones). -/
 
 /-- `cons'`-shaped closer (native side is literally `cons'`, so no matcher-defeq
 against a rewritten form is needed). -/
