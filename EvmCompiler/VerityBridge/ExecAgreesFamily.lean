@@ -85,6 +85,54 @@ theorem doneAgrees_fail_outOfFuel {α : Type} (s : State) :
       (InteractionSemantics.Primitive.fail s .OutOfFuel) :=
   ⟨.error { exception := .OutOfFuel, state := s }, rfl, rfl⟩
 
+/-! ## The one-step `bind` combinator
+
+Every case of the mutual family is "native match-and-propagate versus our
+`Interaction.bind`" after unfolding one step on each side. `doneAgrees_bind`
+closes that shape from sub-agreement plus continuation agreement on the actual
+`.ok` value; `doneAgrees_wrap` is the pure-continuation special case. -/
+
+theorem doneAgrees_bind {α β : Type}
+    {nsub : Except EvmYul.Yul.Exception α} {osub : Open α}
+    {nk : α → Except EvmYul.Yul.Exception β} {oK : α → Open β}
+    (hSub : DoneAgrees nsub osub)
+    (hK : ∀ a, nsub = .ok a → DoneAgrees (nk a) (oK a)) :
+    DoneAgrees
+      (match nsub with | .ok a => nk a | .error e => .error e)
+      (Simulation.Interaction.bind osub oK) := by
+  obtain ⟨r, hEq, hRA⟩ := hSub
+  subst hEq
+  cases nsub with
+  | ok a =>
+      cases r with
+      | ok b =>
+          have hb : b = a := hRA
+          rw [Simulation.Interaction.bind_done_ok, hb]
+          exact hK a rfl
+      | error f => exact (hRA : False).elim
+  | error e =>
+      cases r with
+      | ok b => exact (hRA : False).elim
+      | error f =>
+          rw [Simulation.Interaction.bind_done_error]
+          exact ⟨.error f, rfl, hRA⟩
+
+theorem doneAgrees_wrap {α β : Type}
+    {nsub : Except EvmYul.Yul.Exception α} {osub : Open α}
+    (g : α → β) (h : DoneAgrees nsub osub) :
+    DoneAgrees
+      (match nsub with | .ok a => .ok (g a) | .error e => .error e)
+      (Simulation.Interaction.bind osub
+        (fun a => Simulation.Interaction.pure (g a))) :=
+  doneAgrees_bind h (fun a _ => ⟨.ok (g a), rfl, rfl⟩)
+
+theorem doneAgrees_pure {α : Type} (a : α) :
+    DoneAgrees (.ok a) (Simulation.Interaction.pure a) := ⟨.ok a, rfl, rfl⟩
+
+theorem doneAgrees_error {α : Type} {e : EvmYul.Yul.Exception} (s : State) :
+    DoneAgrees (α := α) (.error e) (InteractionSemantics.Primitive.fail s e) :=
+  ⟨.error { exception := e, state := s }, rfl, rfl⟩
+
 /-! ## Witness lifting (PART A monotonicity, per function) -/
 
 /-- Generic lift: a settled our-side agreement survives more fuel, given a
