@@ -60,6 +60,50 @@ unfold either layer with `simp`. -/
 
 open EvmYul.Yul.Ast
 
+/-! ### Break/continue-free loop posts
+
+Discovered boundary (stage 5): when a For-loop's *post* block yields a
+`Break`/`Continue` checkpoint, native `loop` recurses into `exec (.For …)` from
+that **Checkpoint** state; the recursion restarts from `mkOk Checkpoint =
+default`, whose account map is empty — so native `call` raises
+`.MissingContract` while our `resolveActiveCode?` proceeds with the override.
+The bridge agreement is therefore *false* for such programs, and they are
+compiler-rejected Yul anyway ("a Break or Continue in the pre or post is a
+compiler error" — Interpreter.lean). The fragment predicate excludes them: a
+For statement additionally requires its post to be break/continue-free.
+
+`Leave` is deliberately allowed (native `loop` returns on a `Leave` post
+outcome without recursing), and a nested `For` swallows its own body/post
+jumps, so its presence is fine. -/
+
+mutual
+
+/-- No `Break`/`Continue` *outcome* can escape this statement (syntactic
+over-approximation: no `.Break`/`.Continue` outside nested `For` loops). -/
+def breakContinueFree? : Stmt → Bool
+  | .Block stmts => breakContinueFreeStmts? stmts
+  | .Let _ _ => true
+  | .Assign _ _ => true
+  | .ExprStmtCall _ => true
+  | .Switch _ cases default =>
+      breakContinueFreeCases? cases && breakContinueFreeStmts? default
+  | .For _ _ _ => true
+  | .If _ body => breakContinueFreeStmts? body
+  | .Continue => false
+  | .Break => false
+  | .Leave => true
+
+def breakContinueFreeStmts? : List Stmt → Bool
+  | [] => true
+  | s :: ss => breakContinueFree? s && breakContinueFreeStmts? ss
+
+def breakContinueFreeCases? : List (Literal × List Stmt) → Bool
+  | [] => true
+  | (_, body) :: rest =>
+      breakContinueFreeStmts? body && breakContinueFreeCases? rest
+
+end
+
 mutual
 
 /-- Every op reachable in an expression is a `BridgeOp`. -/
@@ -82,7 +126,8 @@ def bridgeStmt? : Stmt → Bool
   | .Switch cond cases default =>
       bridgeExpr? cond && bridgeCases? cases && bridgeStmts? default
   | .For cond post body =>
-      bridgeExpr? cond && bridgeStmts? post && bridgeStmts? body
+      bridgeExpr? cond && bridgeStmts? post && breakContinueFreeStmts? post &&
+        bridgeStmts? body
   | .If cond body => bridgeExpr? cond && bridgeStmts? body
   | .Continue => true
   | .Break => true
@@ -105,6 +150,13 @@ def bridgeFunction? : FunctionDefinition → Bool
 /-- The dispatcher and every declared function body are request-free. -/
 def bridgeContract? (c : YulContract) : Bool :=
   bridgeStmt? c.dispatcher && c.functions.all (fun _ f => bridgeFunction? f)
+
+/-- `Prop` lift: no `Break`/`Continue` outcome escapes these statements. -/
+def BreakContinueFreeStmts (ss : List Stmt) : Prop :=
+  breakContinueFreeStmts? ss = true
+
+@[simp] theorem breakContinueFreeStmts?_iff (ss : List Stmt) :
+    breakContinueFreeStmts? ss = true ↔ BreakContinueFreeStmts ss := Iff.rfl
 
 /-- `Prop` lift: every op in `e` is a `BridgeOp`. -/
 def BridgeExpr (e : Expr) : Prop := bridgeExpr? e = true
