@@ -257,6 +257,16 @@ theorem exec_expr_internal (fn : YulFunctionName) (args : List Expr) :
       execCall fuel fn [] code (reverse' (evalArgs fuel args.reverse code s)) := by
   rw [exec]; repeat' first | rfl | split
 
+theorem exec_expr_var (id : EvmYul.Identifier) :
+    exec (fuel + 1) (.ExprStmtCall (.Var id)) code s = .error .InvalidExpression := by
+  rw [exec]; repeat' first | rfl | split
+  all_goals exact fun _ _ h => Expr.noConfusion h
+
+theorem exec_expr_lit (v : EvmYul.Literal) :
+    exec (fuel + 1) (.ExprStmtCall (.Lit v)) code s = .error .InvalidExpression := by
+  rw [exec]; repeat' first | rfl | split
+  all_goals exact fun _ _ h => Expr.noConfusion h
+
 theorem exec_continue :
     exec (fuel + 1) .Continue code s = .ok s.setContinue := by rw [exec]; repeat' first | rfl | split
 
@@ -265,6 +275,35 @@ theorem exec_break :
 
 theorem exec_leave :
     exec (fuel + 1) .Leave code s = .ok s.setLeave := by rw [exec]; repeat' first | rfl | split
+
+/-! ### `execPrimCall` / `execCall` (the `ExprStmtCall` helpers) -/
+
+theorem execPrimCall_error (prim : EvmYul.Operation .Yul)
+    (vars : List EvmYul.Identifier) (e : EvmYul.Yul.Exception) :
+    execPrimCall fuel prim vars (.error e) = .error e := by
+  rw [execPrimCall]
+
+theorem execPrimCall_ok (prim : EvmYul.Operation .Yul)
+    (vars : List EvmYul.Identifier) (st : State) (vals : List Word) :
+    execPrimCall fuel prim vars (.ok (st, vals)) =
+      multifill' vars (primCall fuel st prim vals) := by
+  rw [execPrimCall]
+
+theorem execCall_error (fn : YulFunctionName)
+    (vars : List EvmYul.Identifier) (e : EvmYul.Yul.Exception) :
+    execCall fuel fn vars code (.error e) = .error e := by
+  rw [execCall]
+
+theorem execCall_ok_zero (fn : YulFunctionName)
+    (vars : List EvmYul.Identifier) (st : State) (vals : List Word) :
+    execCall 0 fn vars code (.ok (st, vals)) = .error .OutOfFuel := by
+  rw [execCall]
+
+theorem execCall_ok_succ (fn : YulFunctionName)
+    (vars : List EvmYul.Identifier) (st : State) (vals : List Word) :
+    execCall (fuel + 1) fn vars code (.ok (st, vals)) =
+      multifill' vars (call fuel vals (some fn) code st) := by
+  rw [execCall]
 
 /-! ### `call` -/
 
@@ -608,6 +647,808 @@ structure NativePreservesAt (n : Nat) : Prop where
       BridgeStmts body → BridgeCode code → CodeBridge s →
       ∀ r, EvmYul.Yul.loop n cond post body code s = .ok r →
         StateBridge r ∧ ¬ IsJumpBC r
+
+/-! ### The Part B0 preservation mutual -/
+
+private theorem bridgeExprs?_all (l : List Expr) :
+    bridgeExprs? l = l.all bridgeExpr? := by
+  induction l with
+  | nil => rfl
+  | cons e es ih => simp only [bridgeExprs?, List.all_cons, ih]
+
+theorem bridgeExprs?_reverse {args : List Expr}
+    (h : bridgeExprs? args = true) : bridgeExprs? args.reverse = true := by
+  rw [bridgeExprs?_all] at h ⊢
+  simpa only [List.all_reverse] using h
+
+/-- The shared post/For tail of one native `loop` iteration, factored so both the
+`Continue`-checkpoint and fall-through (`Ok`) body outcomes reuse it. -/
+private theorem loopPostTail (j : Nat) (ihj : NativePreservesAt j)
+    (cond : Expr) (post body : List Stmt) (code : Option YulContract)
+    (shared : EvmYul.SharedState .Yul) (store : EvmYul.Yul.VarStore)
+    (hCond : BridgeExpr cond) (hPost : BridgeStmts post)
+    (hPostBC : BreakContinueFreeStmts post) (hBody : BridgeStmts body)
+    (hCode : BridgeCode code) (entry : State) (hEntry : CodeBridge entry)
+    (r : State)
+    (hEq : (match EvmYul.Yul.exec j (.Block post) code entry with
+            | .error e => (.error e : Except EvmYul.Yul.Exception State)
+            | .ok s₃ =>
+                match s₃ with
+                | .OutOfFuel => .ok (s₃.overwrite? (EvmYul.Yul.State.Ok shared store))
+                | .Checkpoint (.Leave _ _) =>
+                    .ok (s₃.overwrite? (EvmYul.Yul.State.Ok shared store))
+                | _ =>
+                    match EvmYul.Yul.exec j (.For cond post body) code
+                        (s₃.overwrite? (EvmYul.Yul.State.Ok shared store)) with
+                    | .error e => .error e
+                    | .ok s₅ =>
+                        .ok (s₅.overwrite? (EvmYul.Yul.State.Ok shared store))) = .ok r) :
+    StateBridge r ∧ ¬ IsJumpBC r := by
+  cases hpx : EvmYul.Yul.exec j (.Block post) code entry with
+  | error e =>
+      rw [hpx] at hEq
+      exact nomatch hEq
+  | ok s₃ =>
+      rw [hpx] at hEq
+      have h₃ := ihj.exec (.Block post) code entry hPost hCode hEntry s₃ hpx
+      have hnbc : ¬ IsJumpBC s₃ := h₃.2 hPostBC
+      cases s₃ with
+      | OutOfFuel => exact ((h₃.1 : False)).elim
+      | Checkpoint jj =>
+          cases jj with
+          | Break sh₃ st₃ => exact absurd trivial hnbc
+          | Continue sh₃ st₃ => exact absurd trivial hnbc
+          | Leave sh₃ st₃ =>
+              have hEq' : (Except.ok
+                  (EvmYul.Yul.State.Checkpoint (.Leave sh₃ st₃)) :
+                    Except EvmYul.Yul.Exception State) = .ok r := hEq
+              simp only [Except.ok.injEq] at hEq'
+              subst hEq'
+              exact ⟨h₃.1, fun hbc => hbc⟩
+      | Ok sh₃ st₃ =>
+          have hEq' : (match EvmYul.Yul.exec j (.For cond post body) code
+                  (EvmYul.Yul.State.Ok sh₃ st₃) with
+              | .error e => (.error e : Except EvmYul.Yul.Exception State)
+              | .ok s₅ =>
+                  .ok (s₅.overwrite? (EvmYul.Yul.State.Ok shared store))) = .ok r := hEq
+          have hFor : BridgeStmt (.For cond post body) := by
+            show bridgeStmt? (.For cond post body) = true
+            simp only [bridgeStmt?, Bool.and_eq_true]
+            exact ⟨⟨⟨hCond, hPost⟩, hPostBC⟩, hBody⟩
+          cases hfx : EvmYul.Yul.exec j (.For cond post body) code
+              (EvmYul.Yul.State.Ok sh₃ st₃) with
+          | error e =>
+              rw [hfx] at hEq'
+              exact nomatch hEq'
+          | ok s₅ =>
+              rw [hfx] at hEq'
+              have h₅ := ihj.exec (.For cond post body) code (EvmYul.Yul.State.Ok sh₃ st₃)
+                hFor hCode h₃.1 s₅ hfx
+              have hEq'' : (Except.ok s₅ : Except EvmYul.Yul.Exception State) =
+                  .ok r := hEq'
+              simp only [Except.ok.injEq] at hEq''
+              subst hEq''
+              exact ⟨h₅.1, h₅.2 rfl⟩
+
+/-- Part B0, parameterized by the primitive boundary fact (discharged by
+`primCall_preserves_codeBridge` once PrimAgrees lands). -/
+theorem nativePreservesAt_of_prim
+    (hPrim : ∀ {op : EvmYul.Operation .Yul}, BridgeOp op →
+      ∀ (fuel : Nat) (s : State) (args : List Word) (s' : State) (out : List Word),
+        EvmYul.Yul.primCall fuel s op args = .ok (s', out) →
+        CodeBridge s → CodeBridge s') :
+    ∀ n, NativePreservesAt n := by
+  intro n
+  induction n using Nat.strong_induction_on with
+  | _ n ih =>
+    match n with
+    | 0 =>
+        refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+        · intro args code nr _ _ _ s' out hEq
+          cases nr with
+          | ok p =>
+              rw [Native.evalTail_zero_ok] at hEq
+              exact nomatch hEq
+          | error e =>
+              rw [Native.evalTail_error] at hEq
+              exact nomatch hEq
+        · intro args code s _ _ _ s' out hEq
+          rw [Native.evalArgs_zero] at hEq
+          exact nomatch hEq
+        · intro expr code s _ _ _ s' out hEq
+          rw [Native.evalValues_zero] at hEq
+          exact nomatch hEq
+        · intro expr code s _ _ _ s' w hEq
+          rw [Native.eval_eq, Native.evalValues_zero] at hEq
+          exact nomatch hEq
+        · intro args fn? code s _ _ s' out hEq
+          rw [Native.call_zero] at hEq
+          exact nomatch hEq
+        · intro stmts code s _ _ _ r hEq
+          rw [Native.execSeq_zero] at hEq
+          exact nomatch hEq
+        · intro stmt code s _ _ _ r hEq
+          rw [Native.exec_zero] at hEq
+          exact nomatch hEq
+        · intro cond post body code s _ _ _ _ _ _ r hEq
+          rw [Native.loop_zero] at hEq
+          exact nomatch hEq
+    | k + 1 =>
+        have ihk : NativePreservesAt k := ih k (Nat.lt_succ_self k)
+        -- `evalTail (k+1)` — cons' over `evalArgs k` after a good prior result.
+        have hEvalTail : ∀ (args : List Expr) (code : Option YulContract)
+            (nr : Except EvmYul.Yul.Exception (State × Word)),
+            BridgeExprs args → BridgeCode code →
+            (∀ p, nr = .ok p → CodeBridge p.1) →
+            ∀ s' out, EvmYul.Yul.evalTail (k + 1) args code nr = .ok (s', out) →
+              CodeBridge s' := by
+          intro args code nr hArgs hCode hnr s' out hEq
+          cases nr with
+          | error e =>
+              rw [Native.evalTail_error] at hEq
+              exact nomatch hEq
+          | ok p =>
+              rw [Native.evalTail_ok] at hEq
+              cases hA : EvmYul.Yul.evalArgs k args code p.1 with
+              | error e =>
+                  rw [hA] at hEq
+                  exact nomatch hEq
+              | ok q =>
+                  obtain ⟨qs, qv⟩ := q
+                  rw [hA] at hEq
+                  have hEq' : (Except.ok (qs, p.2 :: qv) :
+                      Except EvmYul.Yul.Exception (State × List Word)) =
+                        .ok (s', out) := hEq
+                  simp only [Except.ok.injEq, Prod.mk.injEq] at hEq'
+                  obtain ⟨rfl, rfl⟩ := hEq'
+                  exact ihk.evalArgs args code p.1 hArgs hCode (hnr p rfl) qs qv hA
+        -- `evalArgs (k+1)` — head expression, then the tail.
+        have hEvalArgs : ∀ (args : List Expr) (code : Option YulContract) (s : State),
+            BridgeExprs args → BridgeCode code → CodeBridge s →
+            ∀ s' out, EvmYul.Yul.evalArgs (k + 1) args code s = .ok (s', out) →
+              CodeBridge s' := by
+          intro args code s hArgs hCode hCB s' out hEq
+          cases args with
+          | nil =>
+              rw [Native.evalArgs_nil] at hEq
+              have hEq' : (Except.ok (s, ([] : List Word)) :
+                  Except EvmYul.Yul.Exception (State × List Word)) =
+                    .ok (s', out) := hEq
+              simp only [Except.ok.injEq, Prod.mk.injEq] at hEq'
+              obtain ⟨rfl, rfl⟩ := hEq'
+              exact hCB
+          | cons arg rest =>
+              rw [Native.evalArgs_cons] at hEq
+              have hS : bridgeExpr? arg = true ∧ bridgeExprs? rest = true := by
+                have h : bridgeExprs? (arg :: rest) = true := hArgs
+                simpa only [bridgeExprs?, Bool.and_eq_true] using h
+              exact ihk.evalTail rest code (EvmYul.Yul.eval k arg code s) hS.2 hCode
+                (fun p hp => ihk.eval arg code s hS.1 hCode hCB p.1 p.2 hp)
+                s' out hEq
+        -- `evalValues (k+1)` — the four expression constructors.
+        have hEvalValues : ∀ (expr : Expr) (code : Option YulContract) (s : State),
+            BridgeExpr expr → BridgeCode code → CodeBridge s →
+            ∀ s' out, EvmYul.Yul.evalValues (k + 1) expr code s = .ok (s', out) →
+              CodeBridge s' := by
+          intro expr code s hExpr hCode hCB s' out hEq
+          cases expr with
+          | Var id =>
+              rw [Native.evalValues_var] at hEq
+              cases hlk : s.lookup? id with
+              | none =>
+                  rw [hlk] at hEq
+                  exact nomatch hEq
+              | some v =>
+                  rw [hlk] at hEq
+                  have hEq' : (Except.ok (s, [v]) :
+                      Except EvmYul.Yul.Exception (State × List Word)) =
+                        .ok (s', out) := hEq
+                  simp only [Except.ok.injEq, Prod.mk.injEq] at hEq'
+                  obtain ⟨rfl, rfl⟩ := hEq'
+                  exact hCB
+          | Lit v =>
+              rw [Native.evalValues_lit] at hEq
+              have hEq' : (Except.ok (s, [v]) :
+                  Except EvmYul.Yul.Exception (State × List Word)) =
+                    .ok (s', out) := hEq
+              simp only [Except.ok.injEq, Prod.mk.injEq] at hEq'
+              obtain ⟨rfl, rfl⟩ := hEq'
+              exact hCB
+          | Call sop args =>
+              cases sop with
+              | inl op =>
+                  rw [Native.evalValues_prim] at hEq
+                  have hS : bridgeOp? op = true ∧ bridgeExprs? args = true := by
+                    have h : bridgeExpr? (.Call (.inl op) args) = true := hExpr
+                    simpa only [bridgeExpr?, Bool.and_eq_true] using h
+                  cases hargs : EvmYul.Yul.evalArgs k args.reverse code s with
+                  | error e =>
+                      rw [hargs] at hEq
+                      exact nomatch hEq
+                  | ok p =>
+                      obtain ⟨ps, pv⟩ := p
+                      rw [hargs] at hEq
+                      have hEq' : EvmYul.Yul.primCall k ps op pv.reverse =
+                          .ok (s', out) := hEq
+                      have hps := ihk.evalArgs args.reverse code s
+                        (bridgeExprs?_reverse hS.2) hCode hCB ps pv hargs
+                      exact hPrim ((bridgeOp?_iff op).mp hS.1) k ps pv.reverse
+                        s' out hEq' hps
+              | inr fn =>
+                  rw [Native.evalValues_call] at hEq
+                  have hS : bridgeExprs? args = true := hExpr
+                  cases hargs : EvmYul.Yul.evalArgs k args.reverse code s with
+                  | error e =>
+                      rw [hargs] at hEq
+                      exact nomatch hEq
+                  | ok p =>
+                      obtain ⟨ps, pv⟩ := p
+                      rw [hargs] at hEq
+                      have hEq' : EvmYul.Yul.call k pv.reverse (some fn) code ps =
+                          .ok (s', out) := hEq
+                      have hps := ihk.evalArgs args.reverse code s
+                        (bridgeExprs?_reverse hS) hCode hCB ps pv hargs
+                      exact ihk.call pv.reverse (some fn) code ps hCode hps
+                        s' out hEq'
+        -- `eval (k+1)` — same-level `head'` wrapper over `evalValues (k+1)`.
+        have hEval : ∀ (expr : Expr) (code : Option YulContract) (s : State),
+            BridgeExpr expr → BridgeCode code → CodeBridge s →
+            ∀ s' w, EvmYul.Yul.eval (k + 1) expr code s = .ok (s', w) →
+              CodeBridge s' := by
+          intro expr code s hExpr hCode hCB s' w hEq
+          rw [Native.eval_eq] at hEq
+          cases hev : EvmYul.Yul.evalValues (k + 1) expr code s with
+          | error e =>
+              rw [hev] at hEq
+              exact nomatch hEq
+          | ok p =>
+              obtain ⟨ps, pv⟩ := p
+              rw [hev] at hEq
+              have hEq' : (Except.ok (ps, pv.head!) :
+                  Except EvmYul.Yul.Exception (State × Word)) = .ok (s', w) := hEq
+              simp only [Except.ok.injEq, Prod.mk.injEq] at hEq'
+              obtain ⟨rfl, rfl⟩ := hEq'
+              exact hEvalValues expr code s hExpr hCode hCB ps pv hev
+        -- `call (k+1)` — presence gives the account; `BridgeCode` the program.
+        have hCall : ∀ (args : List Word) (fn? : Option YulFunctionName)
+            (code : Option YulContract) (s : State),
+            BridgeCode code → CodeBridge s →
+            ∀ s' out, EvmYul.Yul.call (k + 1) args fn? code s = .ok (s', out) →
+              CodeBridge s' := by
+          intro args fn? code s hCode hCB s' out hEq
+          obtain ⟨c, rfl, hc⟩ := hCode
+          rw [Native.call_succ] at hEq
+          cases hf : s.sharedState.accountMap.find? s.executionEnv.codeOwner with
+          | none => exact absurd hf hCB
+          | some yc =>
+              rw [hf] at hEq
+              cases fn? with
+              | none =>
+                  have hEq' :
+                      (match EvmYul.Yul.exec k (.Block [c.dispatcher]) (some c)
+                          (EvmYul.Yul.State.mkOk (s.initcall [] [] args)) with
+                       | .error e => (.error e :
+                           Except EvmYul.Yul.Exception (State × List Word))
+                       | .ok s₂ => .ok ((s₂.reviveJump.overwrite? s).setStore s,
+                           List.map s₂.lookup! [])) = .ok (s', out) := hEq
+                  cases hex : EvmYul.Yul.exec k (.Block [c.dispatcher]) (some c)
+                      (EvmYul.Yul.State.mkOk (s.initcall [] [] args)) with
+                  | error e =>
+                      rw [hex] at hEq'
+                      exact nomatch hEq'
+                  | ok s₂ =>
+                      rw [hex] at hEq'
+                      have hEq'' : (Except.ok
+                          ((s₂.reviveJump.overwrite? s).setStore s,
+                            List.map s₂.lookup! ([] : List EvmYul.Identifier)) :
+                          Except EvmYul.Yul.Exception (State × List Word)) =
+                            .ok (s', out) := hEq'
+                      simp only [Except.ok.injEq, Prod.mk.injEq] at hEq''
+                      obtain ⟨rfl, rfl⟩ := hEq''
+                      have hc' := hc
+                      simp only [BridgeContract, bridgeContract?,
+                        Bool.and_eq_true] at hc'
+                      have hdisp : BridgeStmt (.Block [c.dispatcher]) := by
+                        show bridgeStmts? [c.dispatcher] = true
+                        simp only [bridgeStmts?, Bool.and_eq_true]
+                        exact ⟨hc'.1, trivial⟩
+                      have h₂ := ihk.exec (.Block [c.dispatcher]) (some c) _ hdisp
+                        ⟨c, rfl, hc⟩ (codeBridge_initcall hCB [] [] args) s₂ hex
+                      exact codeBridge_callResult h₂.1 hCB
+              | some fnName =>
+                  have hEq₀ :
+                      (match c.functions.lookup fnName with
+                       | .none => (.error (.MissingContractFunction fnName) :
+                           Except EvmYul.Yul.Exception (State × List Word))
+                       | .some f =>
+                           match EvmYul.Yul.exec k (.Block f.body) (some c)
+                               (EvmYul.Yul.State.mkOk
+                                 (s.initcall f.params f.rets args)) with
+                           | .error e => .error e
+                           | .ok s₂ => .ok ((s₂.reviveJump.overwrite? s).setStore s,
+                               List.map s₂.lookup! f.rets)) = .ok (s', out) := hEq
+                  cases hlk : c.functions.lookup fnName with
+                  | none =>
+                      rw [hlk] at hEq₀
+                      exact nomatch hEq₀
+                  | some f =>
+                      rw [hlk] at hEq₀
+                      cases f with
+                      | Def params rets body =>
+                          have hEq₁ :
+                              (match EvmYul.Yul.exec k (.Block body) (some c)
+                                  (EvmYul.Yul.State.mkOk
+                                    (s.initcall params rets args)) with
+                               | .error e => (.error e :
+                                   Except EvmYul.Yul.Exception (State × List Word))
+                               | .ok s₂ =>
+                                   .ok ((s₂.reviveJump.overwrite? s).setStore s,
+                                     List.map s₂.lookup! rets)) = .ok (s', out) := hEq₀
+                          cases hex : EvmYul.Yul.exec k (.Block body) (some c)
+                              (EvmYul.Yul.State.mkOk (s.initcall params rets args)) with
+                          | error e =>
+                              rw [hex] at hEq₁
+                              exact nomatch hEq₁
+                          | ok s₂ =>
+                              rw [hex] at hEq₁
+                              have hEq₂ : (Except.ok
+                                  ((s₂.reviveJump.overwrite? s).setStore s,
+                                    List.map s₂.lookup! rets) :
+                                  Except EvmYul.Yul.Exception (State × List Word)) =
+                                    .ok (s', out) := hEq₁
+                              simp only [Except.ok.injEq, Prod.mk.injEq] at hEq₂
+                              obtain ⟨rfl, rfl⟩ := hEq₂
+                              have h₂ := ihk.exec (.Block body) (some c) _
+                                (bridgeContract_lookup hc hlk) ⟨c, rfl, hc⟩
+                                (codeBridge_initcall hCB params rets args) s₂ hex
+                              exact codeBridge_callResult h₂.1 hCB
+        -- `execSeq (k+1)` — statement then guarded continuation.
+        have hExecSeq : ∀ (stmts : List Stmt) (code : Option YulContract) (s : State),
+            BridgeStmts stmts → BridgeCode code → CodeBridge s →
+            ∀ r, EvmYul.Yul.execSeq (k + 1) stmts code s = .ok r →
+              StateBridge r ∧ (BreakContinueFreeStmts stmts → ¬ IsJumpBC r) := by
+          intro stmts code s hStmts hCode hCB r hEq
+          cases stmts with
+          | nil =>
+              rw [Native.execSeq_nil] at hEq
+              have hEq' : (Except.ok s : Except EvmYul.Yul.Exception State) =
+                  .ok r := hEq
+              simp only [Except.ok.injEq] at hEq'
+              subst hEq'
+              exact ⟨stateBridge_of_codeBridge hCB,
+                fun _ => not_isJumpBC_of_codeBridge hCB⟩
+          | cons stmt rest =>
+              have hS : bridgeStmt? stmt = true ∧ bridgeStmts? rest = true := by
+                have h : bridgeStmts? (stmt :: rest) = true := hStmts
+                simpa only [bridgeStmts?, Bool.and_eq_true] using h
+              rw [Native.execSeq_cons] at hEq
+              cases hex : EvmYul.Yul.exec k stmt code s with
+              | error e =>
+                  rw [hex] at hEq
+                  exact nomatch hEq
+              | ok s₁ =>
+                  rw [hex] at hEq
+                  have h₁ := ihk.exec stmt code s hS.1 hCode hCB s₁ hex
+                  cases s₁ with
+                  | Ok shared₁ store₁ =>
+                      have hEq' : EvmYul.Yul.execSeq k rest code
+                          (.Ok shared₁ store₁) = .ok r := hEq
+                      have h₂ := ihk.execSeq rest code (EvmYul.Yul.State.Ok shared₁ store₁)
+                        hS.2 hCode h₁.1 r hEq'
+                      refine ⟨h₂.1, fun hbc => ?_⟩
+                      have hb : breakContinueFree? stmt = true ∧
+                          breakContinueFreeStmts? rest = true := by
+                        have h : breakContinueFreeStmts? (stmt :: rest) = true := hbc
+                        simpa only [breakContinueFreeStmts?, Bool.and_eq_true] using h
+                      exact h₂.2 hb.2
+                  | OutOfFuel => exact ((h₁.1 : False)).elim
+                  | Checkpoint j =>
+                      have hEq' : (Except.ok (EvmYul.Yul.State.Checkpoint j) :
+                          Except EvmYul.Yul.Exception State) = .ok r := hEq
+                      simp only [Except.ok.injEq] at hEq'
+                      subst hEq'
+                      refine ⟨h₁.1, fun hbc => ?_⟩
+                      have hb : breakContinueFree? stmt = true ∧
+                          breakContinueFreeStmts? rest = true := by
+                        have h : breakContinueFreeStmts? (stmt :: rest) = true := hbc
+                        simpa only [breakContinueFreeStmts?, Bool.and_eq_true] using h
+                      exact h₁.2 hb.1
+        -- `exec (k+1)` — the eleven statement constructors.
+        have hExec : ∀ (stmt : Stmt) (code : Option YulContract) (s : State),
+            BridgeStmt stmt → BridgeCode code → CodeBridge s →
+            ∀ r, EvmYul.Yul.exec (k + 1) stmt code s = .ok r →
+              StateBridge r ∧ (breakContinueFree? stmt = true → ¬ IsJumpBC r) := by
+          intro stmt code s hStmt hCode hCB r hEq
+          cases stmt with
+          | Block body =>
+              rw [Native.exec_block] at hEq
+              cases hseq : EvmYul.Yul.execSeq k body code s with
+              | error e =>
+                  rw [hseq] at hEq
+                  exact nomatch hEq
+              | ok s₁ =>
+                  rw [hseq] at hEq
+                  have hEq' : (Except.ok (s₁.restrictStoreTo s.store) :
+                      Except EvmYul.Yul.Exception State) = .ok r := hEq
+                  simp only [Except.ok.injEq] at hEq'
+                  subst hEq'
+                  have h₁ := ihk.execSeq body code s hStmt hCode hCB s₁ hseq
+                  exact ⟨stateBridge_restrictStoreTo _ h₁.1,
+                    fun hbc => not_isJumpBC_restrictStoreTo _ (h₁.2 hbc)⟩
+          | Let names expr? =>
+              cases expr? with
+              | none =>
+                  rw [Native.exec_let_none] at hEq
+                  cases hck : EvmYul.Yul.checkDeclaration s names with
+                  | error e =>
+                      rw [hck] at hEq
+                      exact nomatch hEq
+                  | ok u =>
+                      cases u
+                      rw [hck] at hEq
+                      have hEq' : (Except.ok (s.zeroFill names) :
+                          Except EvmYul.Yul.Exception State) = .ok r := hEq
+                      simp only [Except.ok.injEq] at hEq'
+                      subst hEq'
+                      obtain ⟨shared, store, rfl, hp⟩ := codeBridge_ok hCB
+                      obtain ⟨store', hzf⟩ := zeroFill_ok names shared store
+                      rw [hzf]
+                      exact ⟨hp, fun _ hbc => hbc⟩
+              | some expr =>
+                  rw [Native.exec_let_some] at hEq
+                  cases hck : EvmYul.Yul.checkDeclaration s names with
+                  | error e =>
+                      rw [hck] at hEq
+                      exact nomatch hEq
+                  | ok u =>
+                      cases u
+                      rw [hck] at hEq
+                      have hEq' : EvmYul.Yul.multifill' names
+                          (EvmYul.Yul.evalValues k expr code s) = .ok r := hEq
+                      cases hev : EvmYul.Yul.evalValues k expr code s with
+                      | error e =>
+                          rw [hev] at hEq'
+                          exact nomatch hEq'
+                      | ok p =>
+                          obtain ⟨ps, pv⟩ := p
+                          rw [hev] at hEq'
+                          have hEq'' : (Except.ok
+                              (EvmYul.Yul.State.multifill names pv ps) :
+                              Except EvmYul.Yul.Exception State) = .ok r := hEq'
+                          simp only [Except.ok.injEq] at hEq''
+                          subst hEq''
+                          have hps := ihk.evalValues expr code s hStmt hCode hCB
+                            ps pv hev
+                          obtain ⟨shared₁, store₁, rfl, hp₁⟩ := codeBridge_ok hps
+                          obtain ⟨store', hmf⟩ := multifill_ok names pv shared₁ store₁
+                          rw [hmf]
+                          exact ⟨hp₁, fun _ hbc => hbc⟩
+          | Assign names expr =>
+              rw [Native.exec_assign] at hEq
+              cases hck : EvmYul.Yul.checkAssignment s names with
+              | error e =>
+                  rw [hck] at hEq
+                  exact nomatch hEq
+              | ok u =>
+                  cases u
+                  rw [hck] at hEq
+                  have hEq' : EvmYul.Yul.multifill' names
+                      (EvmYul.Yul.evalValues k expr code s) = .ok r := hEq
+                  cases hev : EvmYul.Yul.evalValues k expr code s with
+                  | error e =>
+                      rw [hev] at hEq'
+                      exact nomatch hEq'
+                  | ok p =>
+                      obtain ⟨ps, pv⟩ := p
+                      rw [hev] at hEq'
+                      have hEq'' : (Except.ok
+                          (EvmYul.Yul.State.multifill names pv ps) :
+                          Except EvmYul.Yul.Exception State) = .ok r := hEq'
+                      simp only [Except.ok.injEq] at hEq''
+                      subst hEq''
+                      have hps := ihk.evalValues expr code s hStmt hCode hCB ps pv hev
+                      obtain ⟨shared₁, store₁, rfl, hp₁⟩ := codeBridge_ok hps
+                      obtain ⟨store', hmf⟩ := multifill_ok names pv shared₁ store₁
+                      rw [hmf]
+                      exact ⟨hp₁, fun _ hbc => hbc⟩
+          | If cond body =>
+              rw [Native.exec_if] at hEq
+              have hS : bridgeExpr? cond = true ∧ bridgeStmts? body = true := by
+                have h : bridgeStmt? (.If cond body) = true := hStmt
+                simpa only [bridgeStmt?, Bool.and_eq_true] using h
+              cases hev : EvmYul.Yul.eval k cond code s with
+              | error e =>
+                  rw [hev] at hEq
+                  exact nomatch hEq
+              | ok p =>
+                  obtain ⟨ps, pc⟩ := p
+                  rw [hev] at hEq
+                  have hps := ihk.eval cond code s hS.1 hCode hCB ps pc hev
+                  have hEq' : (if pc ≠ (⟨0⟩ : Word) then
+                      EvmYul.Yul.exec k (.Block body) code ps
+                    else (Except.ok ps : Except EvmYul.Yul.Exception State)) =
+                      .ok r := hEq
+                  by_cases hc : pc ≠ (⟨0⟩ : Word)
+                  · rw [if_pos hc] at hEq'
+                    have h₁ := ihk.exec (.Block body) code ps hS.2 hCode hps r hEq'
+                    exact ⟨h₁.1, fun hbc => h₁.2 hbc⟩
+                  · rw [if_neg hc] at hEq'
+                    simp only [Except.ok.injEq] at hEq'
+                    subst hEq'
+                    exact ⟨stateBridge_of_codeBridge hps,
+                      fun _ => not_isJumpBC_of_codeBridge hps⟩
+          | ExprStmtCall e =>
+              cases e with
+              | Var id =>
+                  rw [Native.exec_expr_var] at hEq
+                  exact nomatch hEq
+              | Lit v =>
+                  rw [Native.exec_expr_lit] at hEq
+                  exact nomatch hEq
+              | Call sop args =>
+                  cases sop with
+                  | inl op =>
+                      rw [Native.exec_expr_prim] at hEq
+                      have hS : bridgeOp? op = true ∧ bridgeExprs? args = true := by
+                        have h : bridgeStmt?
+                            (.ExprStmtCall (.Call (.inl op) args)) = true := hStmt
+                        simpa only [bridgeStmt?, bridgeExpr?, Bool.and_eq_true] using h
+                      cases hargs : EvmYul.Yul.evalArgs k args.reverse code s with
+                      | error e =>
+                          rw [hargs, show EvmYul.Yul.reverse' (Except.error e :
+                            Except EvmYul.Yul.Exception (State × List Word)) =
+                              .error e from rfl, Native.execPrimCall_error] at hEq
+                          exact nomatch hEq
+                      | ok p =>
+                          obtain ⟨ps, pv⟩ := p
+                          rw [hargs, show EvmYul.Yul.reverse' (Except.ok (ps, pv) :
+                            Except EvmYul.Yul.Exception (State × List Word)) =
+                              .ok (ps, pv.reverse) from rfl,
+                            Native.execPrimCall_ok] at hEq
+                          have hEq' : EvmYul.Yul.multifill' []
+                              (EvmYul.Yul.primCall k ps op pv.reverse) = .ok r := hEq
+                          have hps : CodeBridge ps := ihk.evalArgs args.reverse code s
+                            (bridgeExprs?_reverse hS.2) hCode hCB ps pv hargs
+                          cases hpc : EvmYul.Yul.primCall k ps op pv.reverse with
+                          | error e =>
+                              rw [hpc] at hEq'
+                              exact nomatch hEq'
+                          | ok q =>
+                              obtain ⟨qs, qv⟩ := q
+                              rw [hpc] at hEq'
+                              have hEq'' : (Except.ok
+                                  (EvmYul.Yul.State.multifill [] qv qs) :
+                                  Except EvmYul.Yul.Exception State) = .ok r := hEq'
+                              simp only [Except.ok.injEq] at hEq''
+                              subst hEq''
+                              have hqs : CodeBridge qs :=
+                                hPrim ((bridgeOp?_iff op).mp hS.1) k ps pv.reverse
+                                  qs qv hpc hps
+                              obtain ⟨shared₂, store₂, rfl, hp₂⟩ := codeBridge_ok hqs
+                              obtain ⟨store', hmf⟩ := multifill_ok [] qv shared₂ store₂
+                              rw [hmf]
+                              exact ⟨hp₂, fun _ hbc => hbc⟩
+                  | inr fn =>
+                      rw [Native.exec_expr_internal] at hEq
+                      have hS : bridgeExprs? args = true := hStmt
+                      cases hargs : EvmYul.Yul.evalArgs k args.reverse code s with
+                      | error e =>
+                          rw [hargs, show EvmYul.Yul.reverse' (Except.error e :
+                            Except EvmYul.Yul.Exception (State × List Word)) =
+                              .error e from rfl, Native.execCall_error] at hEq
+                          exact nomatch hEq
+                      | ok p =>
+                          obtain ⟨ps, pv⟩ := p
+                          rw [hargs, show EvmYul.Yul.reverse' (Except.ok (ps, pv) :
+                            Except EvmYul.Yul.Exception (State × List Word)) =
+                              .ok (ps, pv.reverse) from rfl] at hEq
+                          have hps : CodeBridge ps := ihk.evalArgs args.reverse code s
+                            (bridgeExprs?_reverse hS) hCode hCB ps pv hargs
+                          cases k with
+                          | zero =>
+                              rw [Native.execCall_ok_zero] at hEq
+                              exact nomatch hEq
+                          | succ j =>
+                              rw [Native.execCall_ok_succ] at hEq
+                              have hEq' : EvmYul.Yul.multifill' []
+                                  (EvmYul.Yul.call j pv.reverse (some fn) code ps) =
+                                    .ok r := hEq
+                              cases hcl : EvmYul.Yul.call j pv.reverse (some fn)
+                                  code ps with
+                              | error e =>
+                                  rw [hcl] at hEq'
+                                  exact nomatch hEq'
+                              | ok q =>
+                                  obtain ⟨qs, qv⟩ := q
+                                  rw [hcl] at hEq'
+                                  have hEq'' : (Except.ok
+                                      (EvmYul.Yul.State.multifill [] qv qs) :
+                                      Except EvmYul.Yul.Exception State) = .ok r := hEq'
+                                  simp only [Except.ok.injEq] at hEq''
+                                  subst hEq''
+                                  have hqs : CodeBridge qs :=
+                                    (ih j (by omega)).call pv.reverse (some fn)
+                                      code ps hCode hps qs qv hcl
+                                  obtain ⟨shared₂, store₂, rfl, hp₂⟩ :=
+                                    codeBridge_ok hqs
+                                  obtain ⟨store', hmf⟩ :=
+                                    multifill_ok [] qv shared₂ store₂
+                                  rw [hmf]
+                                  exact ⟨hp₂, fun _ hbc => hbc⟩
+          | Switch cond cases' default' =>
+              rw [Native.exec_switch] at hEq
+              have hS : (bridgeExpr? cond = true ∧ bridgeCases? cases' = true) ∧
+                  bridgeStmts? default' = true := by
+                have h : bridgeStmt? (.Switch cond cases' default') = true := hStmt
+                simpa only [bridgeStmt?, Bool.and_eq_true] using h
+              cases hev : EvmYul.Yul.eval k cond code s with
+              | error e =>
+                  rw [hev] at hEq
+                  exact nomatch hEq
+              | ok p =>
+                  obtain ⟨ps, pc⟩ := p
+                  rw [hev] at hEq
+                  have hEq' : EvmYul.Yul.exec k
+                      (.Block (EvmYul.Yul.selectSwitchCase pc default' cases'))
+                      code ps = .ok r := hEq
+                  have hps := ihk.eval cond code s hS.1.1 hCode hCB ps pc hev
+                  have hsel : BridgeStmts
+                      (EvmYul.Yul.selectSwitchCase pc default' cases') :=
+                    bridgeStmts_selectSwitchCase hS.1.2 hS.2 pc
+                  have h₁ := ihk.exec (.Block _) code ps hsel hCode hps r hEq'
+                  refine ⟨h₁.1, fun hbc => ?_⟩
+                  have hb : breakContinueFreeCases? cases' = true ∧
+                      breakContinueFreeStmts? default' = true := by
+                    have h : breakContinueFree? (.Switch cond cases' default') =
+                        true := hbc
+                    simpa only [breakContinueFree?, Bool.and_eq_true] using h
+                  exact h₁.2 (breakContinueFreeStmts_selectSwitchCase hb.1 hb.2 pc)
+          | For cond post body =>
+              rw [Native.exec_for] at hEq
+              have h4 : ((bridgeExpr? cond = true ∧ bridgeStmts? post = true) ∧
+                  breakContinueFreeStmts? post = true) ∧
+                    bridgeStmts? body = true := by
+                have h : bridgeStmt? (.For cond post body) = true := hStmt
+                simpa only [bridgeStmt?, Bool.and_eq_true] using h
+              have h₁ := ihk.loop cond post body code s h4.1.1.1 h4.1.1.2 h4.1.2
+                h4.2 hCode hCB r hEq
+              exact ⟨h₁.1, fun _ => h₁.2⟩
+          | Continue =>
+              rw [Native.exec_continue] at hEq
+              have hEq' : (Except.ok s.setContinue :
+                  Except EvmYul.Yul.Exception State) = .ok r := hEq
+              simp only [Except.ok.injEq] at hEq'
+              subst hEq'
+              obtain ⟨shared, store, rfl, hp⟩ := codeBridge_ok hCB
+              exact ⟨hp, fun hbc => Bool.noConfusion hbc⟩
+          | Break =>
+              rw [Native.exec_break] at hEq
+              have hEq' : (Except.ok s.setBreak :
+                  Except EvmYul.Yul.Exception State) = .ok r := hEq
+              simp only [Except.ok.injEq] at hEq'
+              subst hEq'
+              obtain ⟨shared, store, rfl, hp⟩ := codeBridge_ok hCB
+              exact ⟨hp, fun hbc => Bool.noConfusion hbc⟩
+          | Leave =>
+              rw [Native.exec_leave] at hEq
+              have hEq' : (Except.ok s.setLeave :
+                  Except EvmYul.Yul.Exception State) = .ok r := hEq
+              simp only [Except.ok.injEq] at hEq'
+              subst hEq'
+              obtain ⟨shared, store, rfl, hp⟩ := codeBridge_ok hCB
+              exact ⟨hp, fun _ hbc => hbc⟩
+        -- `loop (k+1)` — one iteration; the post tail via `loopPostTail`.
+        have hLoop : ∀ (cond : Expr) (post body : List Stmt)
+            (code : Option YulContract) (s : State),
+            BridgeExpr cond → BridgeStmts post → BreakContinueFreeStmts post →
+            BridgeStmts body → BridgeCode code → CodeBridge s →
+            ∀ r, EvmYul.Yul.loop (k + 1) cond post body code s = .ok r →
+              StateBridge r ∧ ¬ IsJumpBC r := by
+          intro cond post body code s hCond hPost hPostBC hBody hCode hCB r hEq
+          cases k with
+          | zero =>
+              rw [Native.loop_one] at hEq
+              exact nomatch hEq
+          | succ j =>
+              have ihj : NativePreservesAt j := ih j (by omega)
+              rw [Native.loop_succ_succ] at hEq
+              obtain ⟨shared, store, rfl, hp⟩ := codeBridge_ok hCB
+              rw [show EvmYul.Yul.State.mkOk (EvmYul.Yul.State.Ok shared store) =
+                  EvmYul.Yul.State.Ok shared store from rfl] at hEq
+              cases hev : EvmYul.Yul.eval j cond code
+                  (EvmYul.Yul.State.Ok shared store) with
+              | error e =>
+                  rw [hev] at hEq
+                  exact nomatch hEq
+              | ok p =>
+                  obtain ⟨s₁, x⟩ := p
+                  rw [hev] at hEq
+                  have hs₁ : CodeBridge s₁ :=
+                    ihj.eval cond code (EvmYul.Yul.State.Ok shared store)
+                      hCond hCode hp s₁ x hev
+                  have hEq' :
+                      (if x = (⟨0⟩ : Word) then
+                        (Except.ok (s₁.overwrite? (EvmYul.Yul.State.Ok shared store)) :
+                          Except EvmYul.Yul.Exception State)
+                      else
+                        match EvmYul.Yul.exec j (.Block body) code s₁ with
+                        | .error e => .error e
+                        | .ok s₂ =>
+                            match s₂ with
+                            | .OutOfFuel =>
+                                .ok (s₂.overwrite? (EvmYul.Yul.State.Ok shared store))
+                            | .Checkpoint (.Break _ _) =>
+                                .ok (s₂.reviveJump.overwrite?
+                                  (EvmYul.Yul.State.Ok shared store))
+                            | .Checkpoint (.Leave _ _) =>
+                                .ok (s₂.overwrite? (EvmYul.Yul.State.Ok shared store))
+                            | .Checkpoint (.Continue _ _) | _ =>
+                                match EvmYul.Yul.exec j (.Block post) code
+                                    s₂.reviveJump with
+                                | .error e => .error e
+                                | .ok s₃ =>
+                                    match s₃ with
+                                    | .OutOfFuel =>
+                                        .ok (s₃.overwrite?
+                                          (EvmYul.Yul.State.Ok shared store))
+                                    | .Checkpoint (.Leave _ _) =>
+                                        .ok (s₃.overwrite?
+                                          (EvmYul.Yul.State.Ok shared store))
+                                    | _ =>
+                                        match EvmYul.Yul.exec j
+                                            (.For cond post body) code
+                                            (s₃.overwrite?
+                                              (EvmYul.Yul.State.Ok shared store)) with
+                                        | .error e => .error e
+                                        | .ok s₅ =>
+                                            .ok (s₅.overwrite?
+                                              (EvmYul.Yul.State.Ok shared store))) =
+                        .ok r := hEq
+                  by_cases hx : x = (⟨0⟩ : Word)
+                  · rw [if_pos hx] at hEq'
+                    have hEq'' : (Except.ok s₁ :
+                        Except EvmYul.Yul.Exception State) = .ok r := hEq'
+                    simp only [Except.ok.injEq] at hEq''
+                    subst hEq''
+                    exact ⟨stateBridge_of_codeBridge hs₁,
+                      not_isJumpBC_of_codeBridge hs₁⟩
+                  · rw [if_neg hx] at hEq'
+                    cases hbx : EvmYul.Yul.exec j (.Block body) code s₁ with
+                    | error e =>
+                        rw [hbx] at hEq'
+                        exact nomatch hEq'
+                    | ok s₂ =>
+                        rw [hbx] at hEq'
+                        have h₂ := ihj.exec (.Block body) code s₁ hBody hCode hs₁
+                          s₂ hbx
+                        cases s₂ with
+                        | OutOfFuel => exact ((h₂.1 : False)).elim
+                        | Ok sh₂ st₂ =>
+                            exact loopPostTail j ihj cond post body code shared store
+                              hCond hPost hPostBC hBody hCode
+                              (EvmYul.Yul.State.Ok sh₂ st₂) h₂.1 r hEq'
+                        | Checkpoint jj =>
+                            cases jj with
+                            | Break sh₂ st₂ =>
+                                have hEq'' : (Except.ok
+                                    (EvmYul.Yul.State.Ok sh₂ st₂) :
+                                    Except EvmYul.Yul.Exception State) = .ok r := hEq'
+                                simp only [Except.ok.injEq] at hEq''
+                                subst hEq''
+                                exact ⟨h₂.1, fun hbc => hbc⟩
+                            | Leave sh₂ st₂ =>
+                                have hEq'' : (Except.ok
+                                    (EvmYul.Yul.State.Checkpoint (.Leave sh₂ st₂)) :
+                                    Except EvmYul.Yul.Exception State) = .ok r := hEq'
+                                simp only [Except.ok.injEq] at hEq''
+                                subst hEq''
+                                exact ⟨h₂.1, fun hbc => hbc⟩
+                            | Continue sh₂ st₂ =>
+                                exact loopPostTail j ihj cond post body code
+                                  shared store hCond hPost hPostBC hBody hCode
+                                  (EvmYul.Yul.State.Ok sh₂ st₂) h₂.1 r hEq'
+        exact ⟨hEvalTail, hEvalArgs, hEvalValues, hEval, hCall, hExecSeq,
+          hExec, hLoop⟩
 
 end PartB0
 
