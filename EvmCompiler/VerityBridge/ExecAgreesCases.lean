@@ -2530,6 +2530,491 @@ theorem caseExec (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
         rw [Native.exec_leave, Exec.leave_succ 0 code s]
         exact doneAgrees_pure _
 
+/-! ### `caseLoop`
+
+Mirrors native `loop_succ_succ` / our `Exec.loop_succ_succ`. `loopGlue` glues one
+iteration at a common our fuel `M`, taking the four leaf agreements (eval /
+body-exec / post-exec / For-exec) as conditional functions and using Part B0
+(`nativePreservesAt_of_prim`) to prune the impossible checkpoint arms
+(`OutOfFuel`-state, and — via `BreakContinueFreeStmts post` — a `Break`/`Continue`
+post result). `caseLoop` descends the native `.ok` chain obtaining and lifting
+those witnesses. -/
+
+/-- Body-result states from which native `loop` actually runs the post block (all
+other outcomes are settled leaves). Lets `loopGlue`'s post agreement be demanded
+only where it is used. -/
+def IsPostReaching : State → Prop
+  | .Ok _ _ => True
+  | .Checkpoint (.Continue _ _) => True
+  | _ => False
+
+/-- Post-result states from which native `loop` runs the recursive `For` step. -/
+def IsForReaching : State → Prop
+  | .Ok _ _ => True
+  | _ => False
+
+private theorem loopGlue {j M : Nat} {cond : Expr} {post body : List Stmt}
+    {code : Option YulContract} {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hPrim : PrimBoundary) (hCond : BridgeExpr cond) (hPost : BridgeStmts post)
+    (hPostBC : BreakContinueFreeStmts post) (hBody : BridgeStmts body)
+    (hCode : BridgeCode code) (hp : OwnerPresent shared)
+    (hE : DoneAgrees (EvmYul.Yul.eval j cond code (.Ok shared store))
+      (eval M cond code (.Ok shared store)))
+    (hBfun : ∀ s₁ x, EvmYul.Yul.eval j cond code (.Ok shared store) = .ok (s₁, x) →
+      x ≠ (⟨0⟩ : Word) →
+      DoneAgrees (EvmYul.Yul.exec j (.Block body) code s₁) (exec M (.Block body) code s₁))
+    (hPfun : ∀ s₁ x s₂, EvmYul.Yul.eval j cond code (.Ok shared store) = .ok (s₁, x) →
+      x ≠ (⟨0⟩ : Word) →
+      EvmYul.Yul.exec j (.Block body) code s₁ = .ok s₂ → IsPostReaching s₂ →
+      DoneAgrees (EvmYul.Yul.exec j (.Block post) code s₂.reviveJump)
+        (exec M (.Block post) code s₂.reviveJump))
+    (hFfun : ∀ s₁ x s₂ s₃, EvmYul.Yul.eval j cond code (.Ok shared store) = .ok (s₁, x) →
+      x ≠ (⟨0⟩ : Word) →
+      EvmYul.Yul.exec j (.Block body) code s₁ = .ok s₂ → IsPostReaching s₂ →
+      EvmYul.Yul.exec j (.Block post) code s₂.reviveJump = .ok s₃ → IsForReaching s₃ →
+      DoneAgrees
+        (EvmYul.Yul.exec j (.For cond post body) code (s₃.overwrite? (.Ok shared store)))
+        (exec M (.For cond post body) code (s₃.overwrite? (.Ok shared store)))) :
+    DoneAgrees (EvmYul.Yul.loop (j + 1 + 1) cond post body code (.Ok shared store))
+      (loop (M + 1 + 1) cond post body code (.Ok shared store)) := by
+  have ihj : NativePreservesAt j := nativePreservesAt_of_prim hPrim j
+  have hCB0 : CodeBridge (EvmYul.Yul.State.Ok shared store) := codeBridge_okState hp
+  rw [Native.loop_succ_succ, Exec.loop_succ_succ M]
+  simp only [stateModel, id_eq,
+    show EvmYul.Yul.State.mkOk (EvmYul.Yul.State.Ok shared store) =
+      EvmYul.Yul.State.Ok shared store from rfl]
+  obtain ⟨rE, hrE, hRAE⟩ := hE
+  rw [hrE]
+  cases hev : EvmYul.Yul.eval j cond code (.Ok shared store) with
+  | error e =>
+      rw [hev] at hRAE
+      cases rE with
+      | ok b => exact (hRAE : False).elim
+      | error f => simp only [Simulation.Interaction.bind_done_error]; exact ⟨.error f, rfl, hRAE⟩
+  | ok p =>
+      rw [hev] at hRAE
+      cases rE with
+      | error f => exact (hRAE : False).elim
+      | ok b =>
+          have hbp : b = p := hRAE
+          subst b
+          obtain ⟨s₁, x⟩ := p
+          have hCBs₁ : CodeBridge s₁ := ihj.eval cond code _ hCond hCode hCB0 s₁ x hev
+          simp only [Simulation.Interaction.bind_done_ok]
+          simp only [show EvmYul.UInt256.ofNat 0 = (⟨0⟩ : Word) from rfl]
+          by_cases hx : x = (⟨0⟩ : Word)
+          · simp only [if_pos hx]
+            exact ⟨.ok _, rfl, rfl⟩
+          · simp only [if_neg hx]
+            -- body bind
+            obtain ⟨rB, hrB, hRAB⟩ := hBfun s₁ x hev hx
+            rw [hrB]
+            cases hbd : EvmYul.Yul.exec j (.Block body) code s₁ with
+            | error e =>
+                rw [hbd] at hRAB
+                cases rB with
+                | ok b => exact (hRAB : False).elim
+                | error f => simp only [Simulation.Interaction.bind_done_error]; exact ⟨.error f, rfl, hRAB⟩
+            | ok s₂ =>
+                rw [hbd] at hRAB
+                cases rB with
+                | error f => exact (hRAB : False).elim
+                | ok b =>
+                    have hbeq : b = s₂ := hRAB
+                    subst b
+                    simp only [Simulation.Interaction.bind_done_ok]
+                    have hSB₂ := (ihj.exec (.Block body) code s₁ hBody hCode hCBs₁ s₂ hbd).1
+                    cases s₂ with
+                    | OutOfFuel => exact (hSB₂ : False).elim
+                    | Checkpoint jj =>
+                        cases jj with
+                        | Break sh st => exact ⟨.ok _, rfl, rfl⟩
+                        | Leave sh st => exact ⟨.ok _, rfl, rfl⟩
+                        | Continue sh st =>
+                            obtain ⟨rP, hrP, hRAP⟩ := hPfun s₁ x _ hev hx hbd trivial
+                            rw [hrP]
+                            have hCBentry : CodeBridge
+                                (EvmYul.Yul.State.Checkpoint (.Continue sh st)).reviveJump :=
+                              codeBridge_reviveJump hSB₂
+                            cases hpo : EvmYul.Yul.exec j (.Block post) code
+                                (EvmYul.Yul.State.Checkpoint (.Continue sh st)).reviveJump with
+                            | error e =>
+                                rw [hpo] at hRAP
+                                cases rP with
+                                | ok b => exact (hRAP : False).elim
+                                | error f =>
+                                    simp only [Simulation.Interaction.bind_done_error]
+                                    exact ⟨.error f, rfl, hRAP⟩
+                            | ok s₃ =>
+                                rw [hpo] at hRAP
+                                cases rP with
+                                | error f => exact (hRAP : False).elim
+                                | ok b =>
+                                    have hb3 : b = s₃ := hRAP
+                                    subst b
+                                    simp only [Simulation.Interaction.bind_done_ok]
+                                    have hpres := ihj.exec (.Block post) code _ hPost hCode
+                                      hCBentry s₃ hpo
+                                    have hnbc₃ := hpres.2 hPostBC
+                                    cases s₃ with
+                                    | OutOfFuel => exact (hpres.1 : False).elim
+                                    | Checkpoint jj2 =>
+                                        cases jj2 with
+                                        | Break _ _ => exact absurd trivial hnbc₃
+                                        | Continue _ _ => exact absurd trivial hnbc₃
+                                        | Leave _ _ => exact ⟨.ok _, rfl, rfl⟩
+                                    | Ok sh3 st3 =>
+                                        obtain ⟨rF, hrF, hRAF⟩ :=
+                                          hFfun s₁ x _ (EvmYul.Yul.State.Ok sh3 st3) hev hx hbd trivial hpo trivial
+                                        rw [hrF]
+                                        cases hfr : EvmYul.Yul.exec j (.For cond post body) code
+                                            ((EvmYul.Yul.State.Ok sh3 st3).overwrite?
+                                              (EvmYul.Yul.State.Ok shared store)) with
+                                        | error e =>
+                                            rw [hfr] at hRAF
+                                            cases rF with
+                                            | ok b => exact (hRAF : False).elim
+                                            | error f =>
+                                                simp only [Simulation.Interaction.bind_done_error]
+                                                exact ⟨.error f, rfl, hRAF⟩
+                                        | ok s₅ =>
+                                            rw [hfr] at hRAF
+                                            cases rF with
+                                            | error f => exact (hRAF : False).elim
+                                            | ok b =>
+                                                have hb5 : b = s₅ := hRAF
+                                                subst b
+                                                simp only [Simulation.Interaction.bind_done_ok]
+                                                exact ⟨.ok _, rfl, rfl⟩
+                    | Ok sh st =>
+                        obtain ⟨rP, hrP, hRAP⟩ := hPfun s₁ x _ hev hx hbd trivial
+                        rw [hrP]
+                        have hCBentry : CodeBridge (EvmYul.Yul.State.Ok sh st).reviveJump :=
+                          codeBridge_reviveJump hSB₂
+                        cases hpo : EvmYul.Yul.exec j (.Block post) code
+                            (EvmYul.Yul.State.Ok sh st).reviveJump with
+                        | error e =>
+                            rw [hpo] at hRAP
+                            cases rP with
+                            | ok b => exact (hRAP : False).elim
+                            | error f =>
+                                simp only [Simulation.Interaction.bind_done_error]
+                                exact ⟨.error f, rfl, hRAP⟩
+                        | ok s₃ =>
+                            rw [hpo] at hRAP
+                            cases rP with
+                            | error f => exact (hRAP : False).elim
+                            | ok b =>
+                                have hb3 : b = s₃ := hRAP
+                                subst b
+                                simp only [Simulation.Interaction.bind_done_ok]
+                                have hpres := ihj.exec (.Block post) code _ hPost hCode
+                                  hCBentry s₃ hpo
+                                have hnbc₃ := hpres.2 hPostBC
+                                cases s₃ with
+                                | OutOfFuel => exact (hpres.1 : False).elim
+                                | Checkpoint jj2 =>
+                                    cases jj2 with
+                                    | Break _ _ => exact absurd trivial hnbc₃
+                                    | Continue _ _ => exact absurd trivial hnbc₃
+                                    | Leave _ _ => exact ⟨.ok _, rfl, rfl⟩
+                                | Ok sh3 st3 =>
+                                    obtain ⟨rF, hrF, hRAF⟩ :=
+                                      hFfun s₁ x _ (EvmYul.Yul.State.Ok sh3 st3) hev hx hbd trivial hpo trivial
+                                    rw [hrF]
+                                    cases hfr : EvmYul.Yul.exec j (.For cond post body) code
+                                        ((EvmYul.Yul.State.Ok sh3 st3).overwrite?
+                                          (EvmYul.Yul.State.Ok shared store)) with
+                                    | error e =>
+                                        rw [hfr] at hRAF
+                                        cases rF with
+                                        | ok b => exact (hRAF : False).elim
+                                        | error f =>
+                                            simp only [Simulation.Interaction.bind_done_error]
+                                            exact ⟨.error f, rfl, hRAF⟩
+                                    | ok s₅ =>
+                                        rw [hfr] at hRAF
+                                        cases rF with
+                                        | error f => exact (hRAF : False).elim
+                                        | ok b =>
+                                            have hb5 : b = s₅ := hRAF
+                                            subst b
+                                            simp only [Simulation.Interaction.bind_done_ok]
+                                            exact ⟨.ok _, rfl, rfl⟩
+
+/-- Show the whole native loop is `OutOfFuel` from any reached sub being
+`OutOfFuel`; used to route those paths to the witness-`0` (`Exec.loop_zero`) leaf. -/
+private theorem loop_oof_of_eval {j : Nat} {cond : Expr} {post body : List Stmt}
+    {code : Option YulContract} {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (he : EvmYul.Yul.eval j cond code (.Ok shared store) = .error .OutOfFuel) :
+    EvmYul.Yul.loop (j + 1 + 1) cond post body code (.Ok shared store) = .error .OutOfFuel := by
+  rw [Native.loop_succ_succ,
+    show EvmYul.Yul.State.mkOk (EvmYul.Yul.State.Ok shared store) =
+      EvmYul.Yul.State.Ok shared store from rfl, he]
+
+private theorem loop_oof_of_body {j : Nat} {cond : Expr} {post body : List Stmt}
+    {code : Option YulContract} {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore} {s₁ : State} {x : Word}
+    (hev : EvmYul.Yul.eval j cond code (.Ok shared store) = .ok (s₁, x))
+    (hx : x ≠ (⟨0⟩ : Word))
+    (hb : EvmYul.Yul.exec j (.Block body) code s₁ = .error .OutOfFuel) :
+    EvmYul.Yul.loop (j + 1 + 1) cond post body code (.Ok shared store) = .error .OutOfFuel := by
+  rw [Native.loop_succ_succ,
+    show EvmYul.Yul.State.mkOk (EvmYul.Yul.State.Ok shared store) =
+      EvmYul.Yul.State.Ok shared store from rfl, hev]
+  simp only [hx, if_false, hb, reduceIte]
+
+private theorem loop_oof_of_post {j : Nat} {cond : Expr} {post body : List Stmt}
+    {code : Option YulContract} {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore} {s₁ : State} {x : Word} {s₂ : State}
+    (hev : EvmYul.Yul.eval j cond code (.Ok shared store) = .ok (s₁, x))
+    (hx : x ≠ (⟨0⟩ : Word))
+    (hb : EvmYul.Yul.exec j (.Block body) code s₁ = .ok s₂)
+    (hpr : IsPostReaching s₂)
+    (hp : EvmYul.Yul.exec j (.Block post) code s₂.reviveJump = .error .OutOfFuel) :
+    EvmYul.Yul.loop (j + 1 + 1) cond post body code (.Ok shared store) = .error .OutOfFuel := by
+  rw [Native.loop_succ_succ,
+    show EvmYul.Yul.State.mkOk (EvmYul.Yul.State.Ok shared store) =
+      EvmYul.Yul.State.Ok shared store from rfl, hev]
+  simp only [hx, reduceIte, hb]
+  cases s₂ with
+  | OutOfFuel => exact hpr.elim
+  | Ok sh st => simp only [hp]
+  | Checkpoint jj =>
+      cases jj with
+      | Continue sh st => simp only [hp]
+      | Break sh st => exact hpr.elim
+      | Leave sh st => exact hpr.elim
+
+private theorem loop_oof_of_for {j : Nat} {cond : Expr} {post body : List Stmt}
+    {code : Option YulContract} {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore} {s₁ : State} {x : Word} {s₂ s₃ : State}
+    (hev : EvmYul.Yul.eval j cond code (.Ok shared store) = .ok (s₁, x))
+    (hx : x ≠ (⟨0⟩ : Word))
+    (hb : EvmYul.Yul.exec j (.Block body) code s₁ = .ok s₂)
+    (hpr : IsPostReaching s₂)
+    (hp : EvmYul.Yul.exec j (.Block post) code s₂.reviveJump = .ok s₃)
+    (hfr : IsForReaching s₃)
+    (hf : EvmYul.Yul.exec j (.For cond post body) code (s₃.overwrite? (.Ok shared store)) =
+      .error .OutOfFuel) :
+    EvmYul.Yul.loop (j + 1 + 1) cond post body code (.Ok shared store) = .error .OutOfFuel := by
+  have hpostFor :
+      (match EvmYul.Yul.exec j (.Block post) code s₂.reviveJump with
+       | .error e => (.error e : Except EvmYul.Yul.Exception State)
+       | .ok s₃ => match s₃ with
+           | .OutOfFuel => .ok (s₃.overwrite? (.Ok shared store))
+           | .Checkpoint (.Leave _ _) => .ok (s₃.overwrite? (.Ok shared store))
+           | _ => match EvmYul.Yul.exec j (.For cond post body) code
+                     (s₃.overwrite? (.Ok shared store)) with
+               | .error e => .error e
+               | .ok s₅ => .ok (s₅.overwrite? (.Ok shared store))) = .error .OutOfFuel := by
+    rw [hp]
+    cases s₃ with
+    | OutOfFuel => exact hfr.elim
+    | Ok sh st => simp only [hf]
+    | Checkpoint jj => cases jj <;> exact hfr.elim
+  rw [Native.loop_succ_succ,
+    show EvmYul.Yul.State.mkOk (EvmYul.Yul.State.Ok shared store) =
+      EvmYul.Yul.State.Ok shared store from rfl, hev]
+  simp only [hx, reduceIte, hb]
+  cases s₂ with
+  | OutOfFuel => exact hpr.elim
+  | Ok sh st => exact hpostFor
+  | Checkpoint jj =>
+      cases jj with
+      | Continue sh st => exact hpostFor
+      | Break sh st => exact hpr.elim
+      | Leave sh st => exact hpr.elim
+
+theorem caseLoop (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
+    ∀ (cond : Expr) (post body : List Stmt) (code : Option YulContract) (s : State),
+      BridgeExpr cond → BridgeStmts post → BreakContinueFreeStmts post →
+      BridgeStmts body → BridgeCode code → CodeBridge s →
+      ∃ m, DoneAgrees (EvmYul.Yul.loop n cond post body code s) (loop m cond post body code s) := by
+  intro cond post body code s hCond hPost hPostBC hBody hCode hCB
+  match n with
+  | 0 => exact ⟨0, by rw [Native.loop_zero, Exec.loop_zero]; exact doneAgrees_errorFail s⟩
+  | 1 => exact ⟨0, by rw [Native.loop_one, Exec.loop_zero]; exact doneAgrees_errorFail s⟩
+  | j + 1 + 1 =>
+      have hj : j < j + 1 + 1 := by omega
+      have hB0 : ∀ k, NativePreservesAt k := nativePreservesAt_of_prim hPrim
+      obtain ⟨shared, store, rfl, hp⟩ := codeBridge_ok hCB
+      have hCB0 : CodeBridge (EvmYul.Yul.State.Ok shared store) := codeBridge_okState hp
+      have hForB : BridgeStmt (.For cond post body) := by
+        show bridgeStmt? (.For cond post body) = true
+        simp only [bridgeStmt?, Bool.and_eq_true]; exact ⟨⟨⟨hCond, hPost⟩, hPostBC⟩, hBody⟩
+      have oof : EvmYul.Yul.loop (j + 1 + 1) cond post body code (.Ok shared store) =
+            .error .OutOfFuel →
+          ∃ m, DoneAgrees (EvmYul.Yul.loop (j + 1 + 1) cond post body code (.Ok shared store))
+            (loop m cond post body code (.Ok shared store)) :=
+        fun hw => ⟨0, by rw [Exec.loop_zero, hw]; exact doneAgrees_fail_outOfFuel _⟩
+      obtain ⟨mE, hE0⟩ := (ih j hj).eval cond code (.Ok shared store) hCond hCode hCB0
+      by_cases hEs : NativeSettled (EvmYul.Yul.eval j cond code (.Ok shared store))
+      case neg =>
+        simp only [NativeSettled, not_forall, not_not] at hEs
+        obtain ⟨e, he, rfl⟩ := hEs
+        exact oof (loop_oof_of_eval he)
+      -- eval settled.
+      cases hev : EvmYul.Yul.eval j cond code (.Ok shared store) with
+      | error e =>
+          exact ⟨mE + 1 + 1, loopGlue hPrim hCond hPost hPostBC hBody hCode hp hE0
+            (fun _ _ heq _ => by simp only [hev, reduceCtorEq] at heq)
+            (fun _ _ _ heq _ _ _ => by simp only [hev, reduceCtorEq] at heq)
+            (fun _ _ _ _ heq _ _ _ _ _ => by simp only [hev, reduceCtorEq] at heq)⟩
+      | ok p =>
+          obtain ⟨s₁, x⟩ := p
+          have hCBs₁ : CodeBridge s₁ := (hB0 j).eval cond code _ hCond hCode hCB0 s₁ x hev
+          have hES : NativeSettled (EvmYul.Yul.eval j cond code (.Ok shared store)) := by
+            rw [hev]; exact NativeSettled.ok _
+          by_cases hx0 : x = (⟨0⟩ : Word)
+          · -- x = 0: eval leaf; all sub-funs excluded by their `x ≠ 0` hypothesis.
+            refine ⟨mE + 1 + 1, loopGlue hPrim hCond hPost hPostBC hBody hCode hp hE0
+              (fun s₁' x' heq hx' => by
+                rw [hev] at heq; obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                exact absurd hx0 hx')
+              (fun s₁' x' _ heq hx' _ _ => by
+                rw [hev] at heq; obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                exact absurd hx0 hx')
+              (fun s₁' x' _ _ heq hx' _ _ _ _ => by
+                rw [hev] at heq; obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                exact absurd hx0 hx')⟩
+          · -- x ≠ 0: run body.
+            obtain ⟨mB, hB0'⟩ := (ih j hj).exec (.Block body) code s₁ hBody hCode hCBs₁
+            by_cases hBs : NativeSettled (EvmYul.Yul.exec j (.Block body) code s₁)
+            case neg =>
+              simp only [NativeSettled, not_forall, not_not] at hBs
+              obtain ⟨e, he, rfl⟩ := hBs
+              exact oof (loop_oof_of_body hev hx0 he)
+            -- body settled; the shared eval+body agreements at fuel `mB` slack.
+            have hEb : ∀ s₁' x', EvmYul.Yul.eval j cond code (.Ok shared store) = .ok (s₁', x') →
+                x' ≠ (⟨0⟩ : Word) →
+                DoneAgrees (EvmYul.Yul.exec j (.Block body) code s₁')
+                  (exec (max mE mB) (.Block body) code s₁') := by
+              intro s₁' x' heq _
+              rw [hev] at heq; obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+              exact exec_lift hBs (by omega) hB0'
+            cases hbd : EvmYul.Yul.exec j (.Block body) code s₁ with
+            | error e =>
+                exact ⟨max mE mB + 1 + 1, loopGlue hPrim hCond hPost hPostBC hBody hCode hp
+                  (eval_lift hES (by omega) hE0) hEb
+                  (fun s₁' x' s₂ heq _ hbd' _ => by
+                    rw [hev] at heq; obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                    rw [hbd] at hbd'; exact nomatch hbd')
+                  (fun s₁' x' s₂ s₃ heq _ hbd' _ _ _ => by
+                    rw [hev] at heq; obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                    rw [hbd] at hbd'; exact nomatch hbd')⟩
+            | ok s₂ =>
+                have hSB₂ := ((hB0 j).exec (.Block body) code s₁ hBody hCode hCBs₁ s₂ hbd).1
+                -- Break / Leave: settled leaf, post/For excluded by `IsPostReaching`.
+                have leafBL : ¬ IsPostReaching s₂ →
+                    ∃ m, DoneAgrees (EvmYul.Yul.loop (j + 1 + 1) cond post body code (.Ok shared store))
+                      (loop m cond post body code (.Ok shared store)) := by
+                  intro hnr
+                  exact ⟨max mE mB + 1 + 1, loopGlue hPrim hCond hPost hPostBC hBody hCode hp
+                    (eval_lift hES (by omega) hE0) hEb
+                    (fun s₁' x' s₂' heq _ hbd' hr => by
+                      rw [hev] at heq; obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                      rw [hbd] at hbd'; obtain rfl := Except.ok.inj hbd'; exact absurd hr hnr)
+                    (fun s₁' x' s₂' s₃ heq _ hbd' hr _ _ => by
+                      rw [hev] at heq; obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                      rw [hbd] at hbd'; obtain rfl := Except.ok.inj hbd'; exact absurd hr hnr)⟩
+                have hCBrev : CodeBridge s₂.reviveJump := codeBridge_reviveJump hSB₂
+                obtain ⟨mP, hP0⟩ := (ih j hj).exec (.Block post) code s₂.reviveJump hPost hCode hCBrev
+                have hPreach : IsPostReaching s₂ →
+                    ∃ m, DoneAgrees (EvmYul.Yul.loop (j + 1 + 1) cond post body code (.Ok shared store))
+                      (loop m cond post body code (.Ok shared store)) := by
+                  intro hReach
+                  by_cases hPs : NativeSettled (EvmYul.Yul.exec j (.Block post) code s₂.reviveJump)
+                  case neg =>
+                    simp only [NativeSettled, not_forall, not_not] at hPs
+                    obtain ⟨e, he, rfl⟩ := hPs
+                    exact oof (loop_oof_of_post hev hx0 hbd hReach he)
+                  have hEb' : ∀ s₁' x', EvmYul.Yul.eval j cond code (.Ok shared store) = .ok (s₁', x') →
+                      x' ≠ (⟨0⟩ : Word) →
+                      DoneAgrees (EvmYul.Yul.exec j (.Block body) code s₁')
+                        (exec (max (max mE mB) mP) (.Block body) code s₁') := by
+                    intro s₁' x' heq _
+                    rw [hev] at heq; obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                    exact exec_lift hBs (by omega) hB0'
+                  have hPeq : ∀ s₁' x' s₂', EvmYul.Yul.eval j cond code (.Ok shared store) = .ok (s₁', x') →
+                      x' ≠ (⟨0⟩ : Word) → EvmYul.Yul.exec j (.Block body) code s₁' = .ok s₂' →
+                      IsPostReaching s₂' →
+                      DoneAgrees (EvmYul.Yul.exec j (.Block post) code s₂'.reviveJump)
+                        (exec (max (max mE mB) mP) (.Block post) code s₂'.reviveJump) := by
+                    intro s₁' x' s₂' heq _ hbd' _
+                    rw [hev] at heq; obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                    rw [hbd] at hbd'; obtain rfl := Except.ok.inj hbd'
+                    exact exec_lift hPs (by omega) hP0
+                  cases hpo : EvmYul.Yul.exec j (.Block post) code s₂.reviveJump with
+                  | error e =>
+                      exact ⟨max (max mE mB) mP + 1 + 1, loopGlue hPrim hCond hPost hPostBC hBody
+                        hCode hp (eval_lift hES (by omega) hE0) hEb' hPeq
+                        (fun s₁' x' s₂' s₃ heq _ hbd' _ hpo' _ => by
+                          rw [hev] at heq; obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                          rw [hbd] at hbd'; obtain rfl := Except.ok.inj hbd'
+                          rw [hpo] at hpo'; exact nomatch hpo')⟩
+                  | ok s₃ =>
+                      have hpres3 := (hB0 j).exec (.Block post) code s₂.reviveJump hPost hCode
+                        hCBrev s₃ hpo
+                      have hSB₃ := hpres3.1
+                      have hnbc₃ := hpres3.2 hPostBC
+                      cases s₃ with
+                      | OutOfFuel => exact (hSB₃ : False).elim
+                      | Checkpoint jj =>
+                          cases jj with
+                          | Break sh st => exact absurd trivial hnbc₃
+                          | Continue sh st => exact absurd trivial hnbc₃
+                          | Leave sh st =>
+                              -- `Leave` post result: the loop is a settled leaf; For excluded.
+                              exact ⟨max (max mE mB) mP + 1 + 1, loopGlue hPrim hCond hPost hPostBC
+                                hBody hCode hp (eval_lift hES (by omega) hE0) hEb' hPeq
+                                (fun s₁' x' s₂' s₃' heq _ hbd' _ hpo' hfr => by
+                                  rw [hev] at heq
+                                  obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                                  rw [hbd] at hbd'; obtain rfl := Except.ok.inj hbd'
+                                  rw [hpo] at hpo'; obtain rfl := Except.ok.inj hpo'
+                                  exact hfr.elim)⟩
+                      | Ok sh3 st3 =>
+                          have hCBfor : CodeBridge
+                              ((EvmYul.Yul.State.Ok sh3 st3).overwrite? (.Ok shared store)) := hSB₃
+                          obtain ⟨mF, hF0⟩ := (ih j hj).exec (.For cond post body) code
+                            ((EvmYul.Yul.State.Ok sh3 st3).overwrite? (.Ok shared store)) hForB hCode
+                            hCBfor
+                          by_cases hFs : NativeSettled (EvmYul.Yul.exec j (.For cond post body) code
+                              ((EvmYul.Yul.State.Ok sh3 st3).overwrite? (.Ok shared store)))
+                          case neg =>
+                            simp only [NativeSettled, not_forall, not_not] at hFs
+                            obtain ⟨e, he, rfl⟩ := hFs
+                            exact oof (loop_oof_of_for hev hx0 hbd hReach hpo trivial he)
+                          exact ⟨max (max mE mB) (max mP mF) + 1 + 1, loopGlue hPrim hCond hPost
+                            hPostBC hBody hCode hp (eval_lift hES (by omega) hE0)
+                            (fun s₁' x' heq _ => by
+                              rw [hev] at heq
+                              obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                              exact exec_lift hBs (by omega) hB0')
+                            (fun s₁' x' s₂' heq _ hbd' _ => by
+                              rw [hev] at heq
+                              obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                              rw [hbd] at hbd'; obtain rfl := Except.ok.inj hbd'
+                              exact exec_lift hPs (by omega) hP0)
+                            (fun s₁' x' s₂' s₃' heq _ hbd' _ hpo' _ => by
+                              rw [hev] at heq
+                              obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj heq
+                              rw [hbd] at hbd'; obtain rfl := Except.ok.inj hbd'
+                              rw [hpo] at hpo'; obtain rfl := Except.ok.inj hpo'
+                              exact exec_lift hFs (by omega) hF0)⟩
+                -- dispatch on whether s₂ reaches the post block.
+                cases s₂ with
+                | OutOfFuel => exact (hSB₂ : False).elim
+                | Ok sh st => exact hPreach trivial
+                | Checkpoint jj =>
+                    cases jj with
+                    | Continue sh st => exact hPreach trivial
+                    | Break sh st => exact leafBL (by intro h; exact h)
+                    | Leave sh st => exact leafBL (by intro h; exact h)
+
 end KnotProper
 
 end VerityBridge
