@@ -3,6 +3,50 @@
 Annex to `VERITY_ROADMAP.md`. Workflow: `$verified-compiler-lab`.
 Recon performed 2026-07-05 directly against the code on both sides.
 
+## STATUS (2026-07-06, stage 5 of PART B)
+
+The ratified **unbounded ∃-fuel** bridge form (commit 6769774bf) is the vehicle;
+PART A (our-side fuel monotonicity), the primitive layer (W2), and the native
+equation lemmas are all committed green. Stage 5 landed the two ratified
+corrections and the mechanical core:
+
+**Two ratified/discovered corrections (binding):**
+1. `CodeBridge` = **presence only** (`accountMap.find? codeOwner ≠ none`), split
+   from the invariant `BridgeCode` (override bridge-ness). Native `call` demands
+   the owner account present even under `codeOverride = some c`; ours does not —
+   so agreement needs presence, threaded/preserved by Part B0. (ratified
+   282ca375b)
+2. **For-post break/continue exclusion** (discovered stage 5): a For-loop *post*
+   yielding a `Break`/`Continue` checkpoint makes both interpreters recurse from
+   `mkOk Checkpoint = default` (empty account map), where native `call` raises
+   `MissingContract` but ours proceeds — agreement is *false* there. Such posts
+   are compiler-rejected Yul; the fragment predicate now excludes them
+   (`breakContinueFree?` in RequestFree.lean; the `loop` conjunct carries
+   `BreakContinueFreeStmts post`).
+
+**Landed green (theorem names):**
+- `primCall_preserves_codeBridge` (PrimAgrees) — the ratified boundary leaf: a
+  `BridgeOp` `primCall` returning `.ok` preserves owner presence and `codeOwner`.
+  Empirically refutes the old SELFDESTRUCT worry (it is terminal `.error`; only
+  SSTORE/TSTORE mutate the map, both by `insert`).
+- `nativePreservesAt_of_prim` (ExecAgreesCases) — Part B0, native-side
+  `CodeBridge` preservation mutual (`StateBridge`/`IsJumpBC`).
+- `doneAgrees_bind`/`wrap`/`pure`/`error` (ExecAgreesFamily) — the one-step closer.
+- `caseEvalTail` + the `KnotProper` infrastructure (equation restatements,
+  `PrimBoundary`, closers).
+
+**In progress / remaining for Phase-3 exit:** the seven combining case lemmas
+(`caseEvalArgs/…/caseLoop`, via the settled/`_lift` monotonicity recipe), the
+strong-induction knot `bridgeAgreesAt`, the eight unconditional public
+corollaries (`exec_agrees` etc., instantiating `hPrim := primCall_preserves_codeBridge`),
+`callDispatcher_agrees` (native `callDispatcher (some contract) s` = native
+`call [] none (some contract) s` under the harness installation + `CodeBridge`,
+then `call_agrees`; our dispatcher run is `Program.openRun = call [] none (some
+code)`), the W5 `native_run_to_interaction_run` endpoint, and the `#print axioms`
+audit.
+
+---
+
 ## 1. What the recon changed
 
 The roadmap assumed Phase 3 was a semantic bridge between two towers. The
