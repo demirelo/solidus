@@ -1452,6 +1452,224 @@ theorem nativePreservesAt_of_prim
 
 end PartB0
 
+/-! ## PART B proper — the eight case lemmas, the knot, the public corollaries
+
+Each `caseF hPrim n ih` proves the `BridgeAgreesAt.F` conjunct at native fuel `n`
+from the strong-induction hypothesis `ih : BridgeIH n` (agreement at every
+`k < n`). `hPrim` is the primitive boundary fact (`primCall_preserves_codeBridge`,
+PrimAgrees.lean); `nativePreservesAt_of_prim hPrim` is Part B0, consumed to
+re-establish `CodeBridge` at threaded states. -/
+
+section KnotProper
+
+open EvmYul.Yul.Ast
+open InteractionSemantics
+open Simulation (Interaction)
+
+/-! ### Local our-side bind-form equations
+
+Restated here (rather than imported from `FuelMono`) so this section builds
+against the current olean set even while `PrimAgrees`/`FuelMono` are mid-rebuild;
+all are `rfl`/`simp only` unfoldings identical to the `FuelMono` originals. -/
+
+private theorem eqEvalTail_zero (args : List Expr) (code : Option YulContract)
+    (result : Open (State × Word)) :
+    evalTail 0 args code result =
+      Interaction.bind result (fun p =>
+        InteractionSemantics.Primitive.fail p.1 .OutOfFuel) := by
+  unfold evalTail Yul.Source.Canonical.evalTail Yul.Source.Effectful.evalTail
+  rfl
+
+private theorem eqEvalTail_succ (k : Nat) (args : List Expr)
+    (code : Option YulContract) (result : Open (State × Word)) :
+    evalTail (k + 1) args code result =
+      Interaction.bind result (fun p =>
+        Interaction.bind (evalArgs k args code p.1)
+          (fun q => Interaction.pure (q.1, p.2 :: q.2))) := by
+  unfold evalTail Yul.Source.Canonical.evalTail Yul.Source.Effectful.evalTail
+  rfl
+
+private theorem eqEvalArgs_cons (k : Nat) (a : Expr) (as : List Expr)
+    (code : Option YulContract) (s : State) :
+    evalArgs (k + 1) (a :: as) code s =
+      evalTail k as code (eval k a code s) := by
+  unfold evalArgs Yul.Source.Canonical.evalArgs Yul.Source.Effectful.evalArgs
+  rfl
+
+private theorem eqEvalValues_prim (k : Nat) (op : EvmYul.Operation .Yul)
+    (args : List Expr) (code : Option YulContract) (s : State) :
+    evalValues (k + 1) (.Call (.inl op) args) code s =
+      Interaction.bind (evalArgs k args.reverse code s)
+        (fun r => InteractionSemantics.Primitive.openEval k r.1 op r.2.reverse) := by
+  simp only [evalValues, Yul.Source.Canonical.evalValues,
+    Yul.Source.Effectful.evalValues]
+  rfl
+
+private theorem eqCall_succ (k : Nat) (args : List Word)
+    (fn? : Option YulFunctionName)
+    (code : Option YulContract) (s : State) :
+    call (k + 1) args fn? code s =
+      (match Yul.Source.Effectful.resolveActiveCode? s code with
+       | none => Yul.Source.Effectful.Control.fail s
+           (.MissingContract (s!"{s.executionEnv.codeOwner}"))
+       | some c =>
+           match (match fn? with
+                  | none => some (FunctionDefinition.Def [] [] [c.dispatcher])
+                  | some f => c.functions.lookup f) with
+           | none => Yul.Source.Effectful.Control.fail s
+               (.MissingContractFunction (fn?.getD ".none"))
+           | some function =>
+               match function with
+               | .Def params rets body =>
+                   Interaction.bind
+                     (exec k (.Block body) code
+                       (EvmYul.Yul.State.mkOk (s.initcall params rets args)))
+                     (fun sab => Interaction.pure
+                       ((sab.reviveJump.overwrite? s).setStore s,
+                         List.map sab.lookup! rets))) := by
+  simp only [call, Yul.Source.Canonical.call, Yul.Source.Effectful.call, stateModel,
+    id_eq]
+  rfl
+
+/-! ### Local one-step closers (mirror of `ExecAgreesFamily`, restated for the
+same rebuild-independence reason). -/
+
+private theorem doneAgrees_bind {α β : Type}
+    {nsub : Except EvmYul.Yul.Exception α} {osub : Open α}
+    {nk : α → Except EvmYul.Yul.Exception β} {oK : α → Open β}
+    (hSub : DoneAgrees nsub osub)
+    (hK : ∀ a, nsub = .ok a → DoneAgrees (nk a) (oK a)) :
+    DoneAgrees
+      (match nsub with | .ok a => nk a | .error e => .error e)
+      (Interaction.bind osub oK) := by
+  obtain ⟨r, hEq, hRA⟩ := hSub
+  subst hEq
+  cases nsub with
+  | ok a =>
+      cases r with
+      | ok b =>
+          have hb : b = a := hRA
+          rw [Interaction.bind_done_ok, hb]; exact hK a rfl
+      | error f => exact (hRA : False).elim
+  | error e =>
+      cases r with
+      | ok b => exact (hRA : False).elim
+      | error f => rw [Interaction.bind_done_error]; exact ⟨.error f, rfl, hRA⟩
+
+private theorem doneAgrees_wrap {α β : Type}
+    {nsub : Except EvmYul.Yul.Exception α} {osub : Open α}
+    (g : α → β) (h : DoneAgrees nsub osub) :
+    DoneAgrees
+      (match nsub with | .ok a => .ok (g a) | .error e => .error e)
+      (Interaction.bind osub (fun a => Interaction.pure (g a))) :=
+  doneAgrees_bind h (fun a _ => ⟨.ok (g a), rfl, rfl⟩)
+
+private theorem doneAgrees_pure {α : Type} (a : α) :
+    DoneAgrees (.ok a) (Interaction.pure a) := ⟨.ok a, rfl, rfl⟩
+
+/-- `cons'`-shaped closer (native side is literally `cons'`, so no matcher-defeq
+against a rewritten form is needed). -/
+private theorem doneAgrees_cons' {w : Word}
+    {na : Except EvmYul.Yul.Exception (State × List Word)}
+    {oa : Open (State × List Word)} (h : DoneAgrees na oa) :
+    DoneAgrees (EvmYul.Yul.cons' w na)
+      (Interaction.bind oa (fun q => Interaction.pure (q.1, w :: q.2))) := by
+  obtain ⟨r, hr, hRA⟩ := h
+  subst hr
+  cases na with
+  | ok a =>
+      cases r with
+      | ok b =>
+          have hb : b = a := hRA
+          subst b
+          cases a with
+          | mk s as =>
+              rw [Interaction.bind_done_ok]
+              exact ⟨.ok (s, w :: as), rfl, rfl⟩
+      | error f => exact (hRA : False).elim
+  | error e =>
+      cases r with
+      | ok b => exact (hRA : False).elim
+      | error f => rw [Interaction.bind_done_error]; exact ⟨.error f, rfl, hRA⟩
+
+private theorem multifill'_nil_eq
+    (X : Except EvmYul.Yul.Exception (State × List Word)) :
+    EvmYul.Yul.multifill' [] X =
+      (match X with
+       | .ok a => .ok (EvmYul.Yul.State.multifill [] a.2 a.1)
+       | .error e => .error e) := by
+  cases X with
+  | ok a => cases a; rfl
+  | error e => rfl
+
+private theorem doneAgrees_errorFail {α : Type} {e : EvmYul.Yul.Exception}
+    (s : State) :
+    DoneAgrees (α := α) (.error e) (InteractionSemantics.Primitive.fail s e) :=
+  ⟨.error { exception := e, state := s }, rfl, rfl⟩
+
+/-- The primitive boundary fact the whole knot is parameterized by. -/
+abbrev PrimBoundary : Prop :=
+  ∀ {op : EvmYul.Operation .Yul}, BridgeOp op →
+    ∀ (fuel : Nat) (s : State) (args : List Word) (s' : State) (out : List Word),
+      EvmYul.Yul.primCall fuel s op args = .ok (s', out) → CodeBridge s → CodeBridge s'
+
+theorem caseEvalTail (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
+    ∀ (args : List Expr) (code : Option YulContract)
+      (nr : Except EvmYul.Yul.Exception (State × Word)) (or : Open (State × Word)),
+      BridgeExprs args → BridgeCode code →
+      (∀ p, nr = .ok p → CodeBridge p.1) → DoneAgrees nr or →
+      ∃ m, DoneAgrees (EvmYul.Yul.evalTail n args code nr) (evalTail m args code or) := by
+  intro args code nr or hArgs hCode hPres hDA
+  match n with
+  | 0 =>
+    refine ⟨0, ?_⟩
+    obtain ⟨r, hor, hRA⟩ := hDA
+    subst hor
+    cases nr with
+    | error e =>
+        cases r with
+        | ok b => exact (hRA : False).elim
+        | error f =>
+            rw [Native.evalTail_error, eqEvalTail_zero,
+              Simulation.Interaction.bind_done_error]
+            exact ⟨.error f, rfl, hRA⟩
+    | ok p =>
+        cases r with
+        | error f => exact (hRA : False).elim
+        | ok b =>
+            have hb : b = p := hRA
+            subst b
+            rw [Native.evalTail_zero_ok, eqEvalTail_zero,
+              Simulation.Interaction.bind_done_ok]
+            exact doneAgrees_fail_outOfFuel _
+  | k + 1 =>
+    have ihk : BridgeAgreesAt k := ih k (Nat.lt_succ_self k)
+    obtain ⟨r, hor, hRA⟩ := hDA
+    subst hor
+    cases nr with
+    | error e =>
+        refine ⟨1, ?_⟩
+        cases r with
+        | ok b => exact (hRA : False).elim
+        | error f =>
+            rw [Native.evalTail_error, eqEvalTail_succ,
+              Simulation.Interaction.bind_done_error]
+            exact ⟨.error f, rfl, hRA⟩
+    | ok p =>
+        cases r with
+        | error f => exact (hRA : False).elim
+        | ok b =>
+            have hb : b = p := hRA
+            subst b
+            have hCB : CodeBridge p.1 := hPres p rfl
+            obtain ⟨m₂, hEA⟩ := ihk.evalArgs args code p.1 hArgs hCode hCB
+            refine ⟨m₂ + 1, ?_⟩
+            rw [Native.evalTail_ok, eqEvalTail_succ,
+              Simulation.Interaction.bind_done_ok]
+            exact doneAgrees_cons' hEA
+
+end KnotProper
+
 end VerityBridge
 end Yul
 end EvmCompiler
