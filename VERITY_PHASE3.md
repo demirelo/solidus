@@ -3,7 +3,33 @@
 Annex to `VERITY_ROADMAP.md`. Workflow: `$verified-compiler-lab`.
 Recon performed 2026-07-05 directly against the code on both sides.
 
-## STATUS (2026-07-06, stage 5 of PART B)
+## STATUS (2026-07-06): PHASE 3 COMPLETE
+
+The interpreter-equivalence bridge is finished, `sorry`/`admit`/`axiom`-free, on
+branch `verity-composition`. `#print axioms` on every public theorem of the seven
+`VerityBridge` modules is a subset of `[propext, Classical.choice, Quot.sound]`
+(no `sorryAx`, no stray axiom); the public spine below prints exactly those three.
+
+**Final public theorems (`EvmCompiler.Yul.VerityBridge`):**
+- The eight unconditional agreement corollaries: `evalTail_agrees`,
+  `evalArgs_agrees`, `evalValues_agrees`, `eval_agrees`, `call_agrees`,
+  `execSeq_agrees`, `exec_agrees`, `loop_agrees` — each
+  `∀ n …, ∃ m, DoneAgrees (native.f n …) (ours.f m …)` under the relevant
+  `Bridge*` predicate + `BridgeCode` + `CodeBridge`.
+- The knot `bridgeAgreesAt : PrimBoundary → ∀ n, BridgeAgreesAt n`, discharged by
+  `primBoundary` (= `primCall_preserves_codeBridge`) into `bridgeAgrees`.
+- W4 `callDispatcher_agrees` and the **W5 endpoint**
+  `native_run_to_interaction_run (n) (contract) (s) : BridgeContract contract →
+  s.executionEnv.code = contract → CodeBridge s → ∃ m, DoneAgrees
+  (EvmYul.Yul.callDispatcher n (some contract) s)
+  (InteractionSemantics.Program.openRun m contract s)`.
+
+Files: `RequestFree`, `PrimAgrees`, `ExecAgrees`, `FuelMono`, `ExecAgreesFamily`,
+`ExecAgreesCases` (case lemmas + knot + corollaries), `NativeRun` (W4/W5).
+
+---
+
+## Historical status (2026-07-06, stage 5 of PART B)
 
 The ratified **unbounded ∃-fuel** bridge form (commit 6769774bf) is the vehicle;
 PART A (our-side fuel monotonicity), the primitive layer (W2), and the native
