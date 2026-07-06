@@ -1770,6 +1770,103 @@ theorem caseEvalArgs (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
             rw [he]
             exact doneAgrees_fail_outOfFuel s
 
+/-! ### `caseExecSeq` -/
+
+/-- Combinator for the `execSeq` cons step (native nested-match vs our bind), at
+a common fuel `m` for the head `exec` and the tail `execSeq`. Mirrors
+`callBodyClose`'s inlined casing to sidestep matcher-defeq. -/
+private theorem execSeqConsClose {k m : Nat} {stmt : Stmt} {rest : List Stmt}
+    {code : Option YulContract} {s : State}
+    (h₁ : DoneAgrees (EvmYul.Yul.exec k stmt code s) (exec m stmt code s))
+    (hrec : ∀ sh vs, EvmYul.Yul.exec k stmt code s = .ok (.Ok sh vs) →
+      DoneAgrees (EvmYul.Yul.execSeq k rest code (.Ok sh vs))
+        (execSeq m rest code (.Ok sh vs))) :
+    DoneAgrees (EvmYul.Yul.execSeq (k + 1) (stmt :: rest) code s)
+      (execSeq (m + 1) (stmt :: rest) code s) := by
+  rw [Native.execSeq_cons, ExecSeq.cons_succ]
+  obtain ⟨r, hr, hRA⟩ := h₁
+  rw [hr]
+  cases hnex : EvmYul.Yul.exec k stmt code s with
+  | error e =>
+      rw [hnex] at hRA
+      cases r with
+      | ok b => exact (hRA : False).elim
+      | error f => rw [Simulation.Interaction.bind_done_error]; exact ⟨.error f, rfl, hRA⟩
+  | ok s₁ =>
+      rw [hnex] at hRA
+      cases r with
+      | error f => exact (hRA : False).elim
+      | ok b =>
+          have hbeq : b = s₁ := hRA
+          subst b
+          rw [Simulation.Interaction.bind_done_ok]
+          cases s₁ with
+          | OutOfFuel => exact ⟨.ok _, rfl, rfl⟩
+          | Checkpoint j => exact ⟨.ok _, rfl, rfl⟩
+          | Ok sh vs => exact hrec sh vs hnex
+
+theorem caseExecSeq (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
+    ∀ (stmts : List Stmt) (code : Option YulContract) (s : State),
+      BridgeStmts stmts → BridgeCode code → CodeBridge s →
+      ∃ m, DoneAgrees (EvmYul.Yul.execSeq n stmts code s) (execSeq m stmts code s) := by
+  intro stmts code s hStmts hCode hCB
+  match n with
+  | 0 => exact ⟨0, by rw [Native.execSeq_zero, ExecSeq.zero]; exact doneAgrees_errorFail s⟩
+  | k + 1 =>
+    have ihk : BridgeAgreesAt k := ih k (Nat.lt_succ_self k)
+    have hB0 := nativePreservesAt_of_prim hPrim
+    cases stmts with
+    | nil => exact ⟨1, by rw [Native.execSeq_nil, ExecSeq.nil_succ]; exact doneAgrees_pure s⟩
+    | cons stmt rest =>
+      have hb : bridgeStmts? (stmt :: rest) = true := hStmts
+      simp only [bridgeStmts?, Bool.and_eq_true] at hb
+      obtain ⟨m₁, h₁⟩ := ihk.exec stmt code s hb.1 hCode hCB
+      have hsub : NativeSettled (EvmYul.Yul.exec k stmt code s) ∨
+          EvmYul.Yul.exec k stmt code s = .error .OutOfFuel := by
+        by_cases hh : EvmYul.Yul.exec k stmt code s = .error .OutOfFuel
+        · exact Or.inr hh
+        · exact Or.inl (fun e he => by rintro rfl; exact hh he)
+      cases hsub with
+      | inr hh =>
+          have hw : EvmYul.Yul.execSeq (k + 1) (stmt :: rest) code s = .error .OutOfFuel := by
+            simp only [Native.execSeq_cons, hh]
+          exact ⟨0, by rw [ExecSeq.zero, hw]; exact doneAgrees_fail_outOfFuel s⟩
+      | inl hNs =>
+          cases hns : EvmYul.Yul.exec k stmt code s with
+          | error e =>
+              exact ⟨m₁ + 1, execSeqConsClose h₁
+                (fun sh vs h => by simp only [hns, reduceCtorEq] at h)⟩
+          | ok s₁ =>
+              cases s₁ with
+              | OutOfFuel =>
+                  exact ⟨m₁ + 1, execSeqConsClose h₁
+                    (fun sh vs h => by simp only [hns, Except.ok.injEq, reduceCtorEq] at h)⟩
+              | Checkpoint j =>
+                  exact ⟨m₁ + 1, execSeqConsClose h₁
+                    (fun sh vs h => by simp only [hns, Except.ok.injEq, reduceCtorEq] at h)⟩
+              | Ok sh vs =>
+                  have hSB : StateBridge (EvmYul.Yul.State.Ok sh vs) :=
+                    ((hB0 k).exec stmt code s hb.1 hCode hCB _ (by rw [hns])).1
+                  have hCB₁ : CodeBridge (EvmYul.Yul.State.Ok sh vs) := codeBridge_okState hSB
+                  have hrec0 := ihk.execSeq rest code (.Ok sh vs) hb.2 hCode hCB₁
+                  by_cases hrs : NativeSettled (EvmYul.Yul.execSeq k rest code (.Ok sh vs))
+                  · obtain ⟨m₂, h₂⟩ := hrec0
+                    refine ⟨max m₁ m₂ + 1, execSeqConsClose
+                      (exec_lift hNs (le_max_left _ _) h₁) (fun sh' vs' h => ?_)⟩
+                    rw [hns] at h
+                    have hEq : EvmYul.Yul.State.Ok sh vs = EvmYul.Yul.State.Ok sh' vs' :=
+                      Except.ok.inj h
+                    cases hEq
+                    exact execSeq_lift hrs (le_max_right _ _) h₂
+                  · refine ⟨0, ?_⟩
+                    simp only [NativeSettled, not_forall, not_not] at hrs
+                    obtain ⟨e, he, rfl⟩ := hrs
+                    have hw : EvmYul.Yul.execSeq (k + 1) (stmt :: rest) code s =
+                        .error .OutOfFuel := by
+                      simp only [Native.execSeq_cons, hns, he]
+                    rw [ExecSeq.zero, hw]
+                    exact doneAgrees_fail_outOfFuel s
+
 end KnotProper
 
 end VerityBridge
