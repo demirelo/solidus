@@ -3041,6 +3041,65 @@ theorem bridgeAgreesAt (hPrim : PrimBoundary) : ∀ n, BridgeAgreesAt n := by
         exec := caseExec hPrim n ih
         loop := caseLoop hPrim n ih }
 
+/-! ## The primitive boundary, discharged
+
+`primCall_preserves_codeBridge` (PrimAgrees — the one file that opens `primCall`)
+supplies the `PrimBoundary` fact the whole knot is parameterized by, so the public
+corollaries below are unconditional. -/
+
+theorem primBoundary : PrimBoundary :=
+  fun {_op} hOp fuel s args s' out h hcb =>
+    (primCall_preserves_codeBridge hOp fuel s args s' out h).2 hcb
+
+/-- Agreement at every native fuel, unconditionally. -/
+theorem bridgeAgrees (n : Nat) : BridgeAgreesAt n := bridgeAgreesAt primBoundary n
+
+/-! ## The eight unconditional public corollaries -/
+
+theorem evalTail_agrees (n : Nat) (args : List Expr) (code : Option YulContract)
+    (nr : Except EvmYul.Yul.Exception (State × Word)) (or : Open (State × Word))
+    (hArgs : BridgeExprs args) (hCode : BridgeCode code)
+    (hPres : ∀ p, nr = .ok p → CodeBridge p.1) (hDA : DoneAgrees nr or) :
+    ∃ m, DoneAgrees (EvmYul.Yul.evalTail n args code nr) (evalTail m args code or) :=
+  (bridgeAgrees n).evalTail args code nr or hArgs hCode hPres hDA
+
+theorem evalArgs_agrees (n : Nat) (args : List Expr) (code : Option YulContract)
+    (s : State) (hArgs : BridgeExprs args) (hCode : BridgeCode code) (hCB : CodeBridge s) :
+    ∃ m, DoneAgrees (EvmYul.Yul.evalArgs n args code s) (evalArgs m args code s) :=
+  (bridgeAgrees n).evalArgs args code s hArgs hCode hCB
+
+theorem evalValues_agrees (n : Nat) (expr : Expr) (code : Option YulContract)
+    (s : State) (hExpr : BridgeExpr expr) (hCode : BridgeCode code) (hCB : CodeBridge s) :
+    ∃ m, DoneAgrees (EvmYul.Yul.evalValues n expr code s) (evalValues m expr code s) :=
+  (bridgeAgrees n).evalValues expr code s hExpr hCode hCB
+
+theorem eval_agrees (n : Nat) (expr : Expr) (code : Option YulContract) (s : State)
+    (hExpr : BridgeExpr expr) (hCode : BridgeCode code) (hCB : CodeBridge s) :
+    ∃ m, DoneAgrees (EvmYul.Yul.eval n expr code s) (eval m expr code s) :=
+  (bridgeAgrees n).eval expr code s hExpr hCode hCB
+
+theorem call_agrees (n : Nat) (args : List Word) (fn? : Option YulFunctionName)
+    (code : Option YulContract) (s : State) (hCode : BridgeCode code) (hCB : CodeBridge s) :
+    ∃ m, DoneAgrees (EvmYul.Yul.call n args fn? code s) (call m args fn? code s) :=
+  (bridgeAgrees n).call args fn? code s hCode hCB
+
+theorem execSeq_agrees (n : Nat) (stmts : List Stmt) (code : Option YulContract)
+    (s : State) (hStmts : BridgeStmts stmts) (hCode : BridgeCode code) (hCB : CodeBridge s) :
+    ∃ m, DoneAgrees (EvmYul.Yul.execSeq n stmts code s) (execSeq m stmts code s) :=
+  (bridgeAgrees n).execSeq stmts code s hStmts hCode hCB
+
+theorem exec_agrees (n : Nat) (stmt : Stmt) (code : Option YulContract) (s : State)
+    (hStmt : BridgeStmt stmt) (hCode : BridgeCode code) (hCB : CodeBridge s) :
+    ∃ m, DoneAgrees (EvmYul.Yul.exec n stmt code s) (exec m stmt code s) :=
+  (bridgeAgrees n).exec stmt code s hStmt hCode hCB
+
+theorem loop_agrees (n : Nat) (cond : Expr) (post body : List Stmt)
+    (code : Option YulContract) (s : State) (hCond : BridgeExpr cond)
+    (hPost : BridgeStmts post) (hPostBC : BreakContinueFreeStmts post)
+    (hBody : BridgeStmts body) (hCode : BridgeCode code) (hCB : CodeBridge s) :
+    ∃ m, DoneAgrees (EvmYul.Yul.loop n cond post body code s) (loop m cond post body code s) :=
+  (bridgeAgrees n).loop cond post body code s hCond hPost hPostBC hBody hCode hCB
+
 end Knot
 
 end VerityBridge
