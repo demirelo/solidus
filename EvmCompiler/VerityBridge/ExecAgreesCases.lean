@@ -3017,6 +3017,32 @@ theorem caseLoop (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
 
 end KnotProper
 
+/-! ## The strong-induction knot -/
+
+section Knot
+
+open EvmYul.Yul.Ast
+open InteractionSemantics
+
+/-- The knot: agreement at every native fuel, by strong induction on the native
+fuel, assembling the eight case lemmas. Feeding `fun k _ => bridgeAgreesAt hPrim k`
+as the `BridgeIH n` argument closes the recursion. -/
+theorem bridgeAgreesAt (hPrim : PrimBoundary) : ∀ n, BridgeAgreesAt n := by
+  intro n
+  induction n using Nat.strong_induction_on with
+  | _ n ih =>
+    exact
+      { evalTail := caseEvalTail hPrim n ih
+        evalArgs := caseEvalArgs hPrim n ih
+        evalValues := caseEvalValues hPrim n ih
+        eval := caseEval hPrim n ih
+        call := caseCall hPrim n ih
+        execSeq := caseExecSeq hPrim n ih
+        exec := caseExec hPrim n ih
+        loop := caseLoop hPrim n ih }
+
+end Knot
+
 end VerityBridge
 end Yul
 end EvmCompiler
