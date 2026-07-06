@@ -1635,6 +1635,94 @@ theorem caseEvalTail (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
               Simulation.Interaction.bind_done_ok]
             exact doneAgrees_cons' hEA
 
+/-- Shared close for one internal-call body: wrap the agreeing `exec` of the
+selected body into the caller-frame restoration pair. Inlined concrete casing so
+the native side stays `call`-shaped (no matcher-defeq against a rewritten form). -/
+private theorem callBodyClose {k m : Nat} {c : YulContract} {s init : State}
+    {rets : List EvmYul.Identifier} {body : List Stmt}
+    (hex : DoneAgrees (EvmYul.Yul.exec k (.Block body) (some c) init)
+      (exec m (.Block body) (some c) init)) :
+    DoneAgrees
+      (match EvmYul.Yul.exec k (.Block body) (some c) init with
+       | .error e => .error e
+       | .ok s₂ => .ok ((s₂.reviveJump.overwrite? s).setStore s,
+           List.map s₂.lookup! rets))
+      (Interaction.bind (exec m (.Block body) (some c) init)
+        (fun sab => Interaction.pure
+          ((sab.reviveJump.overwrite? s).setStore s, List.map sab.lookup! rets))) := by
+  obtain ⟨r, hr, hRA⟩ := hex
+  rw [hr]
+  cases hnex : EvmYul.Yul.exec k (.Block body) (some c) init with
+  | error e =>
+      rw [hnex] at hRA
+      cases r with
+      | ok b => exact (hRA : False).elim
+      | error f => rw [Interaction.bind_done_error]; exact ⟨.error f, rfl, hRA⟩
+  | ok s₂ =>
+      rw [hnex] at hRA
+      cases r with
+      | error f => exact (hRA : False).elim
+      | ok b =>
+          have hb : b = s₂ := hRA
+          subst b
+          rw [Interaction.bind_done_ok]
+          exact ⟨.ok _, rfl, rfl⟩
+
+theorem caseCall (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
+    ∀ (args : List Word) (fn? : Option YulFunctionName)
+      (code : Option YulContract) (s : State),
+      BridgeCode code → CodeBridge s →
+      ∃ m, DoneAgrees (EvmYul.Yul.call n args fn? code s) (call m args fn? code s) := by
+  intro args fn? code s hCode hCB
+  match n with
+  | 0 =>
+      exact ⟨0, by rw [Native.call_zero, Call.zero]; exact doneAgrees_errorFail s⟩
+  | k + 1 =>
+      have ihk : BridgeAgreesAt k := ih k (Nat.lt_succ_self k)
+      obtain ⟨c, rfl, hc⟩ := hCode
+      have hc' := hc
+      simp only [BridgeContract, bridgeContract?, Bool.and_eq_true] at hc'
+      cases hf : s.sharedState.accountMap.find? s.executionEnv.codeOwner with
+      | none => exact absurd hf hCB
+      | some yc =>
+          cases fn? with
+          | none =>
+              have hbody : BridgeStmt (.Block [c.dispatcher]) := by
+                show bridgeStmts? [c.dispatcher] = true
+                simp only [bridgeStmts?, Bool.and_eq_true]; exact ⟨hc'.1, trivial⟩
+              obtain ⟨m, hex⟩ := ihk.exec (.Block [c.dispatcher]) (some c)
+                (EvmYul.Yul.State.mkOk (s.initcall [] [] args)) hbody ⟨c, rfl, hc⟩
+                (codeBridge_initcall hCB [] [] args)
+              refine ⟨m + 1, ?_⟩
+              rw [Native.call_succ, hf, eqCall_succ, Yul.Source.Effectful.resolveActiveCode?_some]
+              dsimp only [Option.getD_some]
+              exact callBodyClose (rets := []) (s := s) hex
+          | some fnName =>
+              cases hlk : c.functions.lookup fnName with
+              | none =>
+                  refine ⟨1, ?_⟩
+                  rw [Native.call_succ, hf, eqCall_succ,
+                    Yul.Source.Effectful.resolveActiveCode?_some]
+                  dsimp only [Option.getD_some]
+                  rw [hlk]
+                  dsimp only [Option.getD_some]
+                  exact doneAgrees_errorFail s
+              | some f =>
+                  cases f with
+                  | Def params rets body =>
+                      have hbody : BridgeStmt (.Block body) :=
+                        bridgeContract_lookup hc hlk
+                      obtain ⟨m, hex⟩ := ihk.exec (.Block body) (some c)
+                        (EvmYul.Yul.State.mkOk (s.initcall params rets args)) hbody
+                        ⟨c, rfl, hc⟩ (codeBridge_initcall hCB params rets args)
+                      refine ⟨m + 1, ?_⟩
+                      rw [Native.call_succ, hf, eqCall_succ,
+                        Yul.Source.Effectful.resolveActiveCode?_some]
+                      dsimp only [Option.getD_some]
+                      rw [hlk]
+                      dsimp only [Option.getD_some]
+                      exact callBodyClose (rets := rets) (s := s) hex
+
 end KnotProper
 
 end VerityBridge
