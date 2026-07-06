@@ -2078,6 +2078,458 @@ theorem caseExecSeq (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
                     rw [ExecSeq.zero, hw]
                     exact doneAgrees_fail_outOfFuel s
 
+/-! ### `caseExec` — the eleven statement constructors
+
+Structure mirrors `caseExecSeq`: at native fuel `n = k + 1`, unfold one native step
+(`Native.exec_*`), reduce our side (`Exec.*`), and combine IH witnesses. The
+`.error`-first / pair-destructured native matches (`exec_if`, `exec_switch`,
+`exec_expr_internal`) don't unify with `doneAgrees_bind`'s `.ok`-first conclusion,
+so those arms use dedicated manual-casing closers named by AST constructor
+(`exec_if_close`, `exec_switch_close`, `exec_exprInternal_close`), exactly as
+`execSeqConsClose`/`callBodyClose` do. -/
+
+/-- Wrap an agreeing `Except`-of-`(State × List Word)` result into the
+`multifill'` writeback (native) versus our `bind`-then-`pure`-multifill. Mirrors
+`doneAgrees_cons'`. `stateModel.multifill names st vals = st.multifill names vals`
+by definition, so the `.ok` values coincide. -/
+private theorem doneAgrees_multifill (names : List EvmYul.Identifier)
+    {nEV : Except EvmYul.Yul.Exception (State × List Word)}
+    {oEV : Open (State × List Word)} (h : DoneAgrees nEV oEV) :
+    DoneAgrees (EvmYul.Yul.multifill' names nEV)
+      (Interaction.bind oEV
+        (fun result => Interaction.pure (stateModel.multifill names result.1 result.2))) := by
+  obtain ⟨r, hr, hRA⟩ := h
+  rw [hr]
+  cases hn : nEV with
+  | error e =>
+      rw [hn] at hRA
+      cases r with
+      | ok b => exact (hRA : False).elim
+      | error f =>
+          rw [Simulation.Interaction.bind_done_error]
+          simp only [EvmYul.Yul.multifill']
+          exact ⟨.error f, rfl, hRA⟩
+  | ok p =>
+      rw [hn] at hRA
+      cases r with
+      | error f => exact (hRA : False).elim
+      | ok b =>
+          have hbp : b = p := hRA
+          subst b
+          rw [Simulation.Interaction.bind_done_ok]
+          obtain ⟨st, vals⟩ := p
+          simp only [EvmYul.Yul.multifill']
+          exact ⟨.ok _, rfl, rfl⟩
+
+/-! #### Our-side one-step equations for the check-error / invalid-expression arms
+
+Native's `exec_let_*`/`exec_assign` keep the `checkDeclaration`/`checkAssignment`
+match `.error`-first; on the error branch our side `fail`s with the same
+exception. `exec_expr_var`/`exec_expr_lit` are the `InvalidExpression` leaves. -/
+
+private theorem our_let_none_fail (fuel : Nat) (names : List EvmYul.Identifier)
+    (code : Option YulContract) (s : State) (e : EvmYul.Yul.Exception)
+    (hCk : EvmYul.Yul.checkDeclaration s names = .error e) :
+    exec (fuel + 1) (.Let names none) code s =
+      InteractionSemantics.Primitive.fail s e := by
+  simp only [exec, Yul.Source.Canonical.exec, Yul.Source.Effectful.exec, hCk,
+    stateModel, id_eq, Yul.Source.Effectful.Control.fail,
+    InteractionSemantics.Primitive.fail]
+  rfl
+
+private theorem our_let_some_fail (fuel : Nat) (names : List EvmYul.Identifier)
+    (expr : Expr) (code : Option YulContract) (s : State) (e : EvmYul.Yul.Exception)
+    (hCk : EvmYul.Yul.checkDeclaration s names = .error e) :
+    exec (fuel + 1) (.Let names (some expr)) code s =
+      InteractionSemantics.Primitive.fail s e := by
+  simp only [exec, Yul.Source.Canonical.exec, Yul.Source.Effectful.exec, hCk,
+    stateModel, id_eq, Yul.Source.Effectful.Control.fail,
+    InteractionSemantics.Primitive.fail]
+  rfl
+
+private theorem our_assign_fail (fuel : Nat) (names : List EvmYul.Identifier)
+    (expr : Expr) (code : Option YulContract) (s : State) (e : EvmYul.Yul.Exception)
+    (hCk : EvmYul.Yul.checkAssignment s names = .error e) :
+    exec (fuel + 1) (.Assign names expr) code s =
+      InteractionSemantics.Primitive.fail s e := by
+  simp only [exec, Yul.Source.Canonical.exec, Yul.Source.Effectful.exec, hCk,
+    stateModel, id_eq, Yul.Source.Effectful.Control.fail,
+    InteractionSemantics.Primitive.fail]
+  rfl
+
+private theorem our_expr_var_fail (fuel : Nat) (id : EvmYul.Identifier)
+    (code : Option YulContract) (s : State) :
+    exec (fuel + 1) (.ExprStmtCall (.Var id)) code s =
+      InteractionSemantics.Primitive.fail s .InvalidExpression := by
+  simp only [exec, Yul.Source.Canonical.exec, Yul.Source.Effectful.exec,
+    stateModel, Yul.Source.Effectful.Control.fail,
+    InteractionSemantics.Primitive.fail]
+  rfl
+
+private theorem our_expr_lit_fail (fuel : Nat) (v : EvmYul.Literal)
+    (code : Option YulContract) (s : State) :
+    exec (fuel + 1) (.ExprStmtCall (.Lit v)) code s =
+      InteractionSemantics.Primitive.fail s .InvalidExpression := by
+  simp only [exec, Yul.Source.Canonical.exec, Yul.Source.Effectful.exec,
+    stateModel, Yul.Source.Effectful.Control.fail,
+    InteractionSemantics.Primitive.fail]
+  rfl
+
+/-- Native derived identity: a primitive expression-statement is value
+evaluation followed by the empty-destination writeback, at the *same* fuel. -/
+private theorem exec_exprPrim_eq (k : Nat) (op : EvmYul.Operation .Yul)
+    (args : List Expr) (code : Option YulContract) (s : State) :
+    EvmYul.Yul.exec (k + 1) (.ExprStmtCall (.Call (.inl op) args)) code s =
+      EvmYul.Yul.multifill' [] (EvmYul.Yul.evalValues (k + 1) (.Call (.inl op) args) code s) := by
+  rw [Native.exec_expr_prim, Native.evalValues_prim]
+  cases EvmYul.Yul.reverse' (EvmYul.Yul.evalArgs k args.reverse code s) with
+  | error e => simp only [Native.execPrimCall_error, EvmYul.Yul.multifill']
+  | ok p => obtain ⟨st, vals⟩ := p; simp only [Native.execPrimCall_ok]
+
+/-- Manual-casing closer for the `If` arm: eval-then-block, bridging the native
+`⟨0⟩` and our `UInt256.ofNat 0` zero literals (defeq). -/
+private theorem exec_if_close {k m : Nat} {cond : Expr} {body : List Stmt}
+    {code : Option YulContract} {s : State}
+    (h₁ : DoneAgrees (EvmYul.Yul.eval k cond code s) (eval m cond code s))
+    (hrec : ∀ s' c, EvmYul.Yul.eval k cond code s = .ok (s', c) → c ≠ (⟨0⟩ : Word) →
+      DoneAgrees (EvmYul.Yul.exec k (.Block body) code s')
+        (exec m (.Block body) code s')) :
+    DoneAgrees (EvmYul.Yul.exec (k + 1) (.If cond body) code s)
+      (exec (m + 1) (.If cond body) code s) := by
+  rw [Native.exec_if, Exec.if_succ]
+  obtain ⟨r, hr, hRA⟩ := h₁
+  rw [hr]
+  cases hnE : EvmYul.Yul.eval k cond code s with
+  | error e =>
+      rw [hnE] at hRA
+      cases r with
+      | ok b => exact (hRA : False).elim
+      | error f => rw [Simulation.Interaction.bind_done_error]; exact ⟨.error f, rfl, hRA⟩
+  | ok p =>
+      rw [hnE] at hRA
+      cases r with
+      | error f => exact (hRA : False).elim
+      | ok b =>
+          have hbp : b = p := hRA
+          subst b
+          obtain ⟨s', c⟩ := p
+          simp only [Simulation.Interaction.bind_done_ok,
+            show EvmYul.UInt256.ofNat 0 = (⟨0⟩ : Word) from rfl]
+          split_ifs with h
+          · exact hrec s' c hnE h
+          · exact ⟨.ok s', rfl, rfl⟩
+
+/-- Manual-casing closer for the `Switch` arm: eval-then-selected-block. -/
+private theorem exec_switch_close {k m : Nat} {cond : Expr}
+    {cases : List (Literal × List Stmt)} {defaultBody : List Stmt}
+    {code : Option YulContract} {s : State}
+    (h₁ : DoneAgrees (EvmYul.Yul.eval k cond code s) (eval m cond code s))
+    (hrec : ∀ s' c, EvmYul.Yul.eval k cond code s = .ok (s', c) →
+      DoneAgrees (EvmYul.Yul.exec k (.Block (EvmYul.Yul.selectSwitchCase c defaultBody cases)) code s')
+        (exec m (.Block (EvmYul.Yul.selectSwitchCase c defaultBody cases)) code s')) :
+    DoneAgrees (EvmYul.Yul.exec (k + 1) (.Switch cond cases defaultBody) code s)
+      (exec (m + 1) (.Switch cond cases defaultBody) code s) := by
+  rw [Native.exec_switch, Exec.switch_succ]
+  obtain ⟨r, hr, hRA⟩ := h₁
+  rw [hr]
+  cases hnE : EvmYul.Yul.eval k cond code s with
+  | error e =>
+      rw [hnE] at hRA
+      cases r with
+      | ok b => exact (hRA : False).elim
+      | error f => rw [Simulation.Interaction.bind_done_error]; exact ⟨.error f, rfl, hRA⟩
+  | ok p =>
+      rw [hnE] at hRA
+      cases r with
+      | error f => exact (hRA : False).elim
+      | ok b =>
+          have hbp : b = p := hRA
+          subst b
+          obtain ⟨s', c⟩ := p
+          rw [Simulation.Interaction.bind_done_ok]
+          exact hrec s' c hnE
+
+/-- Manual-casing closer for the internal-call expression-statement arm. Native
+`exec (j+2)` runs `evalArgs (j+1)` then `call j` then the empty writeback; our
+`exec (m+2)` mirrors it via `Exec.expr_internal_succ`. -/
+private theorem exec_exprInternal_close {j m : Nat} {fn : YulFunctionName}
+    {args : List Expr} {code : Option YulContract} {s : State}
+    (hE : DoneAgrees (EvmYul.Yul.evalArgs (j + 1) args.reverse code s)
+      (evalArgs (m + 1) args.reverse code s))
+    (hrec : ∀ st a, EvmYul.Yul.evalArgs (j + 1) args.reverse code s = .ok (st, a) →
+      DoneAgrees (EvmYul.Yul.call j a.reverse (some fn) code st)
+        (call m a.reverse (some fn) code st)) :
+    DoneAgrees (EvmYul.Yul.exec (j + 2) (.ExprStmtCall (.Call (.inr fn) args)) code s)
+      (exec (m + 2) (.ExprStmtCall (.Call (.inr fn) args)) code s) := by
+  rw [show j + 2 = (j + 1) + 1 from rfl, Native.exec_expr_internal, Exec.expr_internal_succ]
+  obtain ⟨r, hr, hRA⟩ := hE
+  rw [hr]
+  cases hnEA : EvmYul.Yul.evalArgs (j + 1) args.reverse code s with
+  | error e =>
+      rw [hnEA] at hRA
+      cases r with
+      | ok b => exact (hRA : False).elim
+      | error f =>
+          rw [Simulation.Interaction.bind_done_error]
+          simp only [EvmYul.Yul.reverse']
+          rw [Native.execCall_error]
+          exact ⟨.error f, rfl, hRA⟩
+  | ok p =>
+      rw [hnEA] at hRA
+      cases r with
+      | error f => exact (hRA : False).elim
+      | ok b =>
+          have hbp : b = p := hRA
+          subst b
+          obtain ⟨st, a⟩ := p
+          rw [Simulation.Interaction.bind_done_ok]
+          simp only [EvmYul.Yul.reverse']
+          rw [Native.execCall_ok_succ]
+          exact doneAgrees_multifill [] (hrec st a hnEA)
+
+theorem caseExec (hPrim : PrimBoundary) (n : Nat) (ih : BridgeIH n) :
+    ∀ (stmt : Stmt) (code : Option YulContract) (s : State),
+      BridgeStmt stmt → BridgeCode code → CodeBridge s →
+      ∃ m, DoneAgrees (EvmYul.Yul.exec n stmt code s) (exec m stmt code s) := by
+  intro stmt code s hStmt hCode hCB
+  match n with
+  | 0 => exact ⟨0, by rw [Native.exec_zero, Exec.zero]; exact doneAgrees_errorFail s⟩
+  | k + 1 =>
+    have ihk : BridgeAgreesAt k := ih k (Nat.lt_succ_self k)
+    have hB0 := nativePreservesAt_of_prim hPrim
+    cases stmt with
+    | Block body =>
+        obtain ⟨m, hs⟩ := ihk.execSeq body code s hStmt hCode hCB
+        refine ⟨m + 1, ?_⟩
+        rw [Native.exec_block, Exec.block_succ]
+        obtain ⟨r, hr, hRA⟩ := hs
+        rw [hr]
+        cases hns : EvmYul.Yul.execSeq k body code s with
+        | error e =>
+            rw [hns] at hRA
+            cases r with
+            | ok b => exact (hRA : False).elim
+            | error f => rw [Simulation.Interaction.bind_done_error]; exact ⟨.error f, rfl, hRA⟩
+        | ok s₁ =>
+            rw [hns] at hRA
+            cases r with
+            | error f => exact (hRA : False).elim
+            | ok b =>
+                have hb : b = s₁ := hRA
+                subst b
+                rw [Simulation.Interaction.bind_done_ok]
+                exact ⟨.ok (s₁.restrictStoreTo s.store), rfl, rfl⟩
+    | Let names expr? =>
+        cases expr? with
+        | none =>
+            cases hck : EvmYul.Yul.checkDeclaration s names with
+            | error e =>
+                refine ⟨1, ?_⟩
+                rw [Native.exec_let_none, hck, our_let_none_fail 0 names code s e hck]
+                exact doneAgrees_errorFail s
+            | ok u =>
+                cases u
+                refine ⟨1, ?_⟩
+                rw [Native.exec_let_none, hck, Exec.let_none_succ 0 names code s hck]
+                exact doneAgrees_pure _
+        | some expr =>
+            have hE : BridgeExpr expr := hStmt
+            cases hck : EvmYul.Yul.checkDeclaration s names with
+            | error e =>
+                refine ⟨1, ?_⟩
+                rw [Native.exec_let_some, hck, our_let_some_fail 0 names expr code s e hck]
+                exact doneAgrees_errorFail s
+            | ok u =>
+                cases u
+                obtain ⟨m, hv⟩ := ihk.evalValues expr code s hE hCode hCB
+                refine ⟨m + 1, ?_⟩
+                rw [Native.exec_let_some, hck, Exec.let_some_succ m names expr code s hck]
+                exact doneAgrees_multifill names hv
+    | Assign names expr =>
+        have hE : BridgeExpr expr := hStmt
+        cases hck : EvmYul.Yul.checkAssignment s names with
+        | error e =>
+            refine ⟨1, ?_⟩
+            rw [Native.exec_assign, hck, our_assign_fail 0 names expr code s e hck]
+            exact doneAgrees_errorFail s
+        | ok u =>
+            cases u
+            obtain ⟨m, hv⟩ := ihk.evalValues expr code s hE hCode hCB
+            refine ⟨m + 1, ?_⟩
+            rw [Native.exec_assign, hck, Exec.assign_succ m names expr code s hck]
+            exact doneAgrees_multifill names hv
+    | If cond body =>
+        have hS : bridgeExpr? cond = true ∧ bridgeStmts? body = true := by
+          have h : bridgeStmt? (.If cond body) = true := hStmt
+          simpa only [bridgeStmt?, Bool.and_eq_true] using h
+        obtain ⟨m₁, h₁⟩ := ihk.eval cond code s hS.1 hCode hCB
+        by_cases hNe : NativeSettled (EvmYul.Yul.exec (k + 1) (.If cond body) code s)
+        · have hNev : NativeSettled (EvmYul.Yul.eval k cond code s) := by
+            intro e he; rintro rfl
+            exact (hNe .OutOfFuel (by rw [Native.exec_if, he])) rfl
+          cases hev : EvmYul.Yul.eval k cond code s with
+          | error e =>
+              refine ⟨m₁ + 1, exec_if_close (eval_lift hNev (Nat.le_refl _) h₁)
+                (fun s' c hh => by rw [hev] at hh; exact nomatch hh)⟩
+          | ok p =>
+              obtain ⟨s', c⟩ := p
+              have hCBs' : CodeBridge s' :=
+                (hB0 k).eval cond code s hS.1 hCode hCB s' c (by rw [hev])
+              by_cases hc0 : c = (⟨0⟩ : Word)
+              · -- condition is zero: native `If` returns `.ok s'`, body unreached.
+                refine ⟨m₁ + 1, exec_if_close (eval_lift hNev (Nat.le_refl _) h₁)
+                  (fun s'' c'' hh hne => ?_)⟩
+                rw [hev] at hh
+                obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj hh
+                exact absurd hc0 hne
+              · obtain ⟨m₂, h₂⟩ := ihk.exec (.Block body) code s' hS.2 hCode hCBs'
+                by_cases hrs : NativeSettled (EvmYul.Yul.exec k (.Block body) code s')
+                · refine ⟨max m₁ m₂ + 1, exec_if_close
+                    (eval_lift hNev (le_max_left _ _) h₁) (fun s'' c'' hh _ => ?_)⟩
+                  rw [hev] at hh
+                  obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj hh
+                  exact exec_lift hrs (le_max_right _ _) h₂
+                · refine ⟨0, ?_⟩
+                  simp only [NativeSettled, not_forall, not_not] at hrs
+                  obtain ⟨e, he, rfl⟩ := hrs
+                  have hw : EvmYul.Yul.exec (k + 1) (.If cond body) code s = .error .OutOfFuel := by
+                    simp only [Native.exec_if, hev]
+                    rw [if_pos (show c ≠ (⟨0⟩ : Word) from hc0), he]
+                  rw [Exec.zero, hw]
+                  exact doneAgrees_fail_outOfFuel s
+        · refine ⟨0, ?_⟩
+          simp only [NativeSettled, not_forall, not_not] at hNe
+          obtain ⟨e, he, rfl⟩ := hNe
+          rw [Exec.zero, he]
+          exact doneAgrees_fail_outOfFuel s
+    | ExprStmtCall e =>
+        cases e with
+        | Var id =>
+            refine ⟨1, ?_⟩
+            rw [Native.exec_expr_var, our_expr_var_fail 0 id code s]
+            exact doneAgrees_error s
+        | Lit v =>
+            refine ⟨1, ?_⟩
+            rw [Native.exec_expr_lit, our_expr_lit_fail 0 v code s]
+            exact doneAgrees_error s
+        | Call sop args =>
+            cases sop with
+            | inl op =>
+                have hE : BridgeExpr (.Call (.inl op) args) := hStmt
+                obtain ⟨m, hv⟩ := caseEvalValues hPrim (k + 1) ih (.Call (.inl op) args) code s hE hCode hCB
+                refine ⟨m, ?_⟩
+                rw [exec_exprPrim_eq, Exec.expr_primitive]
+                exact doneAgrees_multifill [] hv
+            | inr fn =>
+                have hBArgs : BridgeExprs args.reverse := bridgeExprs?_reverse hStmt
+                cases k with
+                | zero =>
+                    refine ⟨0, ?_⟩
+                    have hw : EvmYul.Yul.exec 1 (.ExprStmtCall (.Call (.inr fn) args)) code s = .error .OutOfFuel := by
+                      rw [Native.exec_expr_internal, Native.evalArgs_zero]
+                      simp only [EvmYul.Yul.reverse']
+                      rw [Native.execCall_error]
+                    rw [Exec.zero, hw]
+                    exact doneAgrees_fail_outOfFuel s
+                | succ j =>
+                    obtain ⟨m₁, hE⟩ := ihk.evalArgs args.reverse code s hBArgs hCode hCB
+                    by_cases hNe : NativeSettled (EvmYul.Yul.exec (j + 2) (.ExprStmtCall (.Call (.inr fn) args)) code s)
+                    · have hNea : NativeSettled (EvmYul.Yul.evalArgs (j + 1) args.reverse code s) := by
+                        intro e he; rintro rfl
+                        refine (hNe .OutOfFuel ?_) rfl
+                        rw [show j + 2 = (j + 1) + 1 from rfl, Native.exec_expr_internal, he]
+                        simp only [EvmYul.Yul.reverse']
+                        rw [Native.execCall_error]
+                      cases hns : EvmYul.Yul.evalArgs (j + 1) args.reverse code s with
+                      | error e =>
+                          refine ⟨m₁ + 2, exec_exprInternal_close
+                            (evalArgs_lift hNea (Nat.le_succ m₁) hE)
+                            (fun st a hh => by rw [hns] at hh; exact nomatch hh)⟩
+                      | ok p =>
+                          obtain ⟨st, a⟩ := p
+                          have hCBst : CodeBridge st :=
+                            (hB0 (j + 1)).evalArgs args.reverse code s hBArgs hCode hCB st a (by rw [hns])
+                          obtain ⟨m₂, hc⟩ := (ih j (by omega)).call a.reverse (some fn) code st hCode hCBst
+                          have hNc : NativeSettled (EvmYul.Yul.call j a.reverse (some fn) code st) := by
+                            intro e he; rintro rfl
+                            refine (hNe .OutOfFuel ?_) rfl
+                            rw [show j + 2 = (j + 1) + 1 from rfl, Native.exec_expr_internal, hns]
+                            simp only [EvmYul.Yul.reverse']
+                            rw [Native.execCall_ok_succ, he]
+                            simp only [EvmYul.Yul.multifill']
+                          refine ⟨max m₁ m₂ + 2, exec_exprInternal_close
+                            (evalArgs_lift hNea (by omega) hE) (fun st' a' hh => ?_)⟩
+                          rw [hns] at hh
+                          obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj hh
+                          exact call_lift hNc (le_max_right _ _) hc
+                    · refine ⟨0, ?_⟩
+                      simp only [NativeSettled, not_forall, not_not] at hNe
+                      obtain ⟨e, he, rfl⟩ := hNe
+                      rw [Exec.zero, he]
+                      exact doneAgrees_fail_outOfFuel s
+    | Switch cond cases' default' =>
+        have hS : (bridgeExpr? cond = true ∧ bridgeCases? cases' = true) ∧
+            bridgeStmts? default' = true := by
+          have h : bridgeStmt? (.Switch cond cases' default') = true := hStmt
+          simpa only [bridgeStmt?, Bool.and_eq_true] using h
+        obtain ⟨m₁, h₁⟩ := ihk.eval cond code s hS.1.1 hCode hCB
+        by_cases hNe : NativeSettled (EvmYul.Yul.exec (k + 1) (.Switch cond cases' default') code s)
+        · have hNev : NativeSettled (EvmYul.Yul.eval k cond code s) := by
+            intro e he; rintro rfl
+            exact (hNe .OutOfFuel (by rw [Native.exec_switch, he])) rfl
+          cases hev : EvmYul.Yul.eval k cond code s with
+          | error e =>
+              refine ⟨m₁ + 1, exec_switch_close (eval_lift hNev (Nat.le_refl _) h₁)
+                (fun s' c hh => by rw [hev] at hh; exact nomatch hh)⟩
+          | ok p =>
+              obtain ⟨s', c⟩ := p
+              have hCBs' : CodeBridge s' :=
+                (hB0 k).eval cond code s hS.1.1 hCode hCB s' c (by rw [hev])
+              have hsel : BridgeStmts (EvmYul.Yul.selectSwitchCase c default' cases') :=
+                bridgeStmts_selectSwitchCase hS.1.2 hS.2 c
+              obtain ⟨m₂, h₂⟩ := ihk.exec (.Block (EvmYul.Yul.selectSwitchCase c default' cases'))
+                code s' hsel hCode hCBs'
+              by_cases hrs : NativeSettled (EvmYul.Yul.exec k
+                  (.Block (EvmYul.Yul.selectSwitchCase c default' cases')) code s')
+              · refine ⟨max m₁ m₂ + 1, exec_switch_close
+                  (eval_lift hNev (le_max_left _ _) h₁) (fun s'' c'' hh => ?_)⟩
+                rw [hev] at hh
+                obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ Except.ok.inj hh
+                exact exec_lift hrs (le_max_right _ _) h₂
+              · refine ⟨0, ?_⟩
+                simp only [NativeSettled, not_forall, not_not] at hrs
+                obtain ⟨e, he, rfl⟩ := hrs
+                have hw : EvmYul.Yul.exec (k + 1) (.Switch cond cases' default') code s = .error .OutOfFuel := by
+                  simp only [Native.exec_switch, hev]; rw [he]
+                rw [Exec.zero, hw]
+                exact doneAgrees_fail_outOfFuel s
+        · refine ⟨0, ?_⟩
+          simp only [NativeSettled, not_forall, not_not] at hNe
+          obtain ⟨e, he, rfl⟩ := hNe
+          rw [Exec.zero, he]
+          exact doneAgrees_fail_outOfFuel s
+    | For cond post body =>
+        have h4 : ((bridgeExpr? cond = true ∧ bridgeStmts? post = true) ∧
+            breakContinueFreeStmts? post = true) ∧ bridgeStmts? body = true := by
+          have h : bridgeStmt? (.For cond post body) = true := hStmt
+          simpa only [bridgeStmt?, Bool.and_eq_true] using h
+        obtain ⟨m, hl⟩ := ihk.loop cond post body code s h4.1.1.1 h4.1.1.2 h4.1.2 h4.2 hCode hCB
+        refine ⟨m + 1, ?_⟩
+        rw [Native.exec_for, Exec.for_succ]
+        exact hl
+    | Continue =>
+        refine ⟨1, ?_⟩
+        rw [Native.exec_continue, Exec.cont_succ 0 code s]
+        exact doneAgrees_pure _
+    | Break =>
+        refine ⟨1, ?_⟩
+        rw [Native.exec_break, Exec.brk_succ 0 code s]
+        exact doneAgrees_pure _
+    | Leave =>
+        refine ⟨1, ?_⟩
+        rw [Native.exec_leave, Exec.leave_succ 0 code s]
+        exact doneAgrees_pure _
+
 end KnotProper
 
 end VerityBridge
