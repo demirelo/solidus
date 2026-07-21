@@ -12,6 +12,7 @@ import EvmCompiler.TypedCfg.PeepholeNoopSwapProgram
 import EvmCompiler.TypedCfg.PeepholeSeamCancel
 import EvmCompiler.TypedCfg.PeepholeSeamCancelEff
 import EvmCompiler.TypedCfg.ShuffleCanonChain
+import EvmCompiler.TypedCfg.BlockReorderCanon
 import EvmCompiler.Assembly.Bytecode
 
 namespace EvmCompiler
@@ -35,12 +36,14 @@ structure Artifact where
   certified : TypedCfg.Program.CertifiedArtifact
   target : Assembly.TargetProgram
 
-/-- The certified artifact chosen for a generated CFG under the chain-canon
-splice (design (ii), fail-open on savings): the seam-cancelled corrected
-program `Q` always lowers (its certificate `qc` is retained), and the
-chain-canonicalised `chainCanonProgram Q` is taken whenever it *also* lowers,
-falling back to `qc` otherwise.  So the chosen certificate can never regress
-below the shipped seam path. -/
+/-- The certified artifact chosen for a generated CFG under the chain-canon +
+block-reorder splice (design (ii), fail-open on savings): the seam-cancelled
+corrected program `Q` always lowers (its certificate `qc` is retained); the
+chain-canonicalised `chainCanonProgram Q` is taken whenever it *also* lowers
+(certificate `cc`); and the block-reordered `reorderProgram (chainCanonProgram Q)`
+is taken on top of `cc` whenever *it* lowers, falling back to `cc` (then to `qc`)
+otherwise.  Each layer can only be entered when the layer beneath it lowered, so
+the chosen certificate can never regress below the shipped seam path. -/
 def CertifiedChoice (cfg : TypedCfg.Program)
     (certified : TypedCfg.Program.CertifiedArtifact) : Prop :=
   ∃ qc,
@@ -51,7 +54,13 @@ def CertifiedChoice (cfg : TypedCfg.Program)
         ((TypedCfg.ShuffleCanon.chainCanonProgram
           (TypedCfg.Peephole.seamCancelProgramEff
             (TypedCfg.Peephole.peepholeProgram
-              (TypedCfg.Peephole.normalizeProgram cfg)))).compileCertified?).getD qc
+              (TypedCfg.Peephole.normalizeProgram cfg)))).compileCertified?).elim qc
+          (fun cc =>
+            ((TypedCfg.BlockReorder.reorderProgram
+              (TypedCfg.ShuffleCanon.chainCanonProgram
+                (TypedCfg.Peephole.seamCancelProgramEff
+                  (TypedCfg.Peephole.peepholeProgram
+                    (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified?).getD cc)
 
 def compile? (source : Functions.Program) : Option Artifact := do
   if Functions.SourceAcceptedCheck.Program.sourceAccepted? source then
@@ -87,7 +96,13 @@ def compile? (source : Functions.Program) : Option Artifact := do
     ((TypedCfg.ShuffleCanon.chainCanonProgram
       (TypedCfg.Peephole.seamCancelProgramEff
         (TypedCfg.Peephole.peepholeProgram
-          (TypedCfg.Peephole.normalizeProgram cfg)))).compileCertified?).getD qcertified
+          (TypedCfg.Peephole.normalizeProgram cfg)))).compileCertified?).elim qcertified
+      (fun cc =>
+        ((TypedCfg.BlockReorder.reorderProgram
+          (TypedCfg.ShuffleCanon.chainCanonProgram
+            (TypedCfg.Peephole.seamCancelProgramEff
+              (TypedCfg.Peephole.peepholeProgram
+                (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified?).getD cc)
   let target ← Assembly.compileExecutable? certified.target
   if Assembly.Bytecode.targetFitsDecodeWindow? target then
     if Functions.OpenSupportCheck.Program.openSupported? source then
@@ -185,7 +200,15 @@ theorem compile?_parts
                           (TypedCfg.Peephole.seamCancelProgramEff
                             (TypedCfg.Peephole.peepholeProgram
                               (TypedCfg.Peephole.normalizeProgram
-                                generated.cfg)))).compileCertified?).getD qc with hCertifiedDef
+                                generated.cfg)))).compileCertified?).elim qc
+                          (fun cc =>
+                            ((TypedCfg.BlockReorder.reorderProgram
+                              (TypedCfg.ShuffleCanon.chainCanonProgram
+                                (TypedCfg.Peephole.seamCancelProgramEff
+                                  (TypedCfg.Peephole.peepholeProgram
+                                    (TypedCfg.Peephole.normalizeProgram
+                                      generated.cfg))))).compileCertified?).getD cc)
+                          with hCertifiedDef
                       cases hTarget :
                           Assembly.compileExecutable? certified.target with
                       | none => simp [hTarget] at hCompile
