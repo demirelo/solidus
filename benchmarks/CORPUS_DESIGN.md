@@ -182,20 +182,20 @@ Constraint validation:
 
 | rule | target | measured | verdict |
 |---|---|---|---|
-| max single-contract share | ≤ ~10% | **9.48%** (`DynamicStorageSurfaceBox`, deploy-bound at 9783 B) | PASS |
-| `AdversarialStackPressure` share | ≤ 5% | **1.54%** (runtime collapsed 8557→1121 B via chainCanon) | PASS |
+| max single-contract share | ≤ ~10% | **9.38%** (`DynamicStorageSurfaceBox`, deploy-bound at 9565 B) | PASS |
+| `AdversarialStackPressure` share | ≤ 5% | **1.55%** (runtime collapsed 8557→1121 B via chainCanon) | PASS |
 | inherent-burn share (precompile + CREATE exec) | < 25% | **4.1%** | PASS |
 | compile everything (fail-closed) | 100% | 40/40 | PASS |
 | determinism double-compile (sample) | byte-identical | 4/4 (ProcedureReuseBox, WideDispatchBox, Counter, DynamicStorageSurfaceBox) | PASS |
 
-Share extremes: top = `DynamicStorageSurfaceBox` 9.48%; then `WideDispatchBox`
-6.7%, `LoopBox` 6.6%, `ProcedureReuseBox` 6.1%; smallest scored contracts
-`MathLib`/`PriceMath` at 0.26% each (deploy-only libraries). Deploy gas (priced
+Share extremes: top = `DynamicStorageSurfaceBox` 9.38%; then `WideDispatchBox`
+6.75%, `LoopBox` 6.64%, `ProcedureReuseBox` 6.05%; smallest scored contracts
+`MathLib`/`PriceMath` at 0.27% each (deploy-only libraries). Deploy gas (priced
 at 200 gas/byte) is the majority (65%) and is the primary compiler-sensitive
 signal; the remaining exec is spread across real workloads (loops, SSTORE, deep
 call graph, dispatch, bounded precompile/CREATE correctness paths).
 
 The two 30M-OOG inherent-burn vectors that were ~66% of the *pre-redesign* total
 are gone: `ExternalCallBox` fell 33.0% → 2.9% and `CreateLifecycleSurfaceBox`
-33.8% → 4.0%.
+33.8% → 3.9%.
 <!-- /BASELINE_TOTALS -->
