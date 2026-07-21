@@ -2,9 +2,17 @@
 # Lines beginning with # are comments. Edit freely to add/remove coverage.
 # Sources are compiled self-contained (single-file Standard JSON 'content').
 #
+# Season-1 redesign (see benchmarks/CORPUS_DESIGN.md for the measured rationale):
+# pruned 18 near-duplicate sources from the scored corpus, retuned the two
+# 30M-OOG "inherent-burn" vectors, and added a deep-call-graph contract
+# (ProcedureReuseBox) and a dispatcher-heavy contract (WideDispatchBox).
+# 32 sources -> 40 deployable contracts. Pruned .sol files are RETAINED on disk
+# (they remain fixtures for non-scored differential/smoke scripts and CI
+# determinism sentinels); they are only removed from this scored manifest.
+#
 # Excluded from this manifest (kept here for the record, do not compile via
 # the single-file harness):
-#   examples/EigenLayerBN254Corpus.sol  external import (eigen/...) + requires solc >= 0.8.27 (pinned 0.8.26)
+#   examples/EigenLayerBN254Corpus.sol external import (eigen/...) + requires solc >= 0.8.27 (pinned 0.8.26)
 #   examples/UsesLibrary.sol            relative import ./MathLib.sol not resolved in single-file mode
 #   examples/UsesRemapping.sol          remapped import sample-lib/ScaleLib.sol not resolved in single-file mode
 #   examples/Object.yul                 raw Yul source, not a Solidity Standard-JSON input
@@ -15,51 +23,44 @@
 #                                       for ANY backend under contest settings; see
 #                                       scripts/test_semantic_surface_backend.sh which asserts this
 #
+# Pruned from the scored corpus in the Season-1 redesign (retained on disk;
+# subsumed by a kept family representative — see CORPUS_DESIGN.md):
+#   Simple, ConstructorCounter, ConstructorAbiBox, ForkNeutralBox,
+#   Opcode44Surface, EnumBytesBox, StructBox, ArrayBox, BytesBox, EventCounter,
+#   RevertReason, InterfaceCase, BitwiseBox, EffectOrderingSurfaceBox,
+#   AbiControlSurfaceBox, StorageArrayBox, StorageStructBox, ImmutableBox
+#   (Counter is retained IN the corpus below as the minimal storage rep + CI
+#    determinism sentinel.)
+#
 examples/AbiBox.sol
-examples/AbiControlSurfaceBox.sol
 examples/AdvancedTypeSurfaceBox.sol
 examples/AdversarialStackPressure.sol
 examples/ArithmeticBox.sol
-examples/ArrayBox.sol
-examples/BitwiseBox.sol
-examples/BytesBox.sol
 examples/CancunOpcodeSurface.sol
-examples/ConstructorAbiBox.sol
-examples/ConstructorCounter.sol
 examples/Counter.sol
 examples/CreateLifecycleSurfaceBox.sol
 examples/DynamicStorageSurfaceBox.sol
-examples/EffectOrderingSurfaceBox.sol
-examples/EnumBytesBox.sol
 examples/EnvBox.sol
 examples/ErrorPanicBox.sol
-examples/EventCounter.sol
 examples/EventMatrix.sol
 examples/ExternalCallBox.sol
 examples/ExternalMathLib.sol
 examples/FactoryBox.sol
 examples/FallbackBox.sol
-examples/ForkNeutralBox.sol
-examples/ImmutableBox.sol
 examples/InlineAssemblyBox.sol
-examples/InterfaceCase.sol
 examples/LoopBox.sol
 examples/MappingCounter.sol
 examples/MathLib.sol
 examples/MiniToken.sol
 examples/ModifierBox.sol
-examples/Opcode44Surface.sol
 examples/PackedStorageBox.sol
 examples/PayableVault.sol
 examples/PostCancunPrecompileBoundary.sol
+examples/ProcedureReuseBox.sol
 examples/ProxyLifecycleSurfaceBox.sol
 examples/ReentrantTryCatchSurfaceBox.sol
-examples/RevertReason.sol
 examples/SelfDestructBox.sol
 examples/SemanticSurfaceBox.sol
-examples/Simple.sol
-examples/StorageArrayBox.sol
-examples/StorageStructBox.sol
 examples/StringBox.sol
-examples/StructBox.sol
 examples/TryCatchBox.sol
+examples/WideDispatchBox.sol
