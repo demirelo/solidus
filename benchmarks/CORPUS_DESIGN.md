@@ -1,0 +1,172 @@
+# Solidus Arena — Season-1 corpus design
+
+This document is the measured rationale for the public optimization corpus
+(`benchmarks/corpus.txt` + `examples/*.sol` + `benchmarks/vectors/*.json`). It
+records *why* each contract is in the suite, the vector-mix rules that keep the
+metric honest, and the known diagnostics gap. It is descriptive, not frozen —
+edit it alongside any corpus change.
+
+The scoring metric itself is frozen and unchanged (see `scripts/opt_harness.py`,
+`scripts/opt_gas_runner.py`): every contract scores
+`total_gas = deploy_gas + exec_gas`, where `deploy_gas` prices the deployment
+transaction arithmetically (21000 + 32000 + calldata + initcode-words +
+**200·runtime_bytes**) and `exec_gas` is the summed Foundry-measured cost of a
+fixed ordered vector set (each vector capped at a 30M block budget). There is no
+per-contract deployment-weight knob in the harness; the only corpus levers are
+(a) which sources are listed in `corpus.txt` and (b) each contract's vectors.
+
+## Why the redesign (measured observations from the 100-session campaign)
+
+Numbers below are from the pre-redesign baseline (old compiler epoch, commit
+`6a65d5c0`, `benchmarks/opt_baseline.json` at that revision) and the peephole
+campaign log `EvmCompiler/TypedCfg/PEEPHOLE_PROGRESS.md`.
+
+1. **Single-contract dominance.** Two contracts were ~66% of all corpus gas:
+   `CreateLifecycleSurfaceBox` (33.8%) and `ExternalCallBox` (33.0%). Their
+   weight came almost entirely from *inherent-burn* execution vectors, not from
+   compiler-sensitive code (see §2). Separately, `AdversarialStackPressure` was
+   the size-optimization outlier — **90.4% SWAP** opcodes, 8557 runtime bytes,
+   15.4× vs solc, and single-handedly ~24% of the optimizer's byte win
+   (`PEEPHOLE_PROGRESS.md` §74). Post-`chainCanon` (§94/§95) that contract
+   collapsed to **1121 bytes** — the SWAP vein is consumed — so on the current
+   optimized compiler it no longer dominates either axis; it is retained purely
+   as a stack-pressure stress case.
+
+2. **Inherent burns diluted the compiler signal.** ~65% of the old baseline gas
+   was execution any compiler pays *identically*:
+   - `ExternalCallBox` vector 5 = `staticcall` to the ecPairing precompile
+     `0x08` with malformed input → the precompile OOG-burns **29,553,764 gas**
+     (measured; `ok=false`). The other five vectors cost ~24k each.
+   - `CreateLifecycleSurfaceBox` `create2Collision` → CREATE2 to an existing
+     address is an EIP-684 collision that **consumes all forwarded gas**
+     (~29.5M measured).
+   These 30M OOG paths are invariant to code quality — they measure the EVM, not
+   the compiler — so they drowned the size/gas signal the contest exists to
+   reward. (Deployment gas, by contrast, prices code size at 200 gas/byte and
+   *is* the primary compiler-sensitive signal.)
+
+3. **Coverage gaps.** No contract exercised a deep internal call graph
+   (procedure reuse across many call sites — where the remaining ~1.9× size gap
+   vs solc lives, `PEEPHOLE_PROGRESS.md` §99) and none stressed the external
+   selector dispatcher with many entry points.
+
+4. **Redundancy.** 48 sources / 56 contracts, with many small `*Box` contracts
+   near-identical in post-optimization opcode distribution.
+
+## Design rules (enforced by the numbers, checked at bench time)
+
+- **Dominance cap:** no contract exceeds ~10% of corpus `total_gas`;
+  `AdversarialStackPressure` is held to ≤5%.
+- **Inherent-burn share < 25%:** OOG/collision/precompile-intrinsic execution is
+  kept as *bounded, valid* correctness paths (real precompile calls, real CREATE
+  costs — tens of thousands of gas, not 30M OOG floods). Some is retained
+  deliberately (it tests correctness), but it no longer sets the metric.
+- **One representative per semantic family** (see roster) — storage, memory,
+  strings, structs, enums, events, errors, try/catch, proxy, create,
+  selfdestruct, precompiles, inline-assembly, modifiers, payable, fallback,
+  reentrancy, library-linkage.
+- **~40 contracts** (down from 56), each earning its place by exercising
+  something distinct. Faster bench = faster CI.
+- Frozen invariants kept: deploy+exec total-gas metric, determinism
+  double-compile, fail-closed compile-everything validity.
+
+## Roster
+
+### Added (2)
+
+| contract | family / rationale |
+|---|---|
+| `ProcedureReuseBox` | **Deep call-graph / procedure reuse** (goal 3a). ~11 non-recursive internal helpers (`_clamp`/`_mulDiv`/`_blend`/`_accrue`/`_score`/…) each called from multiple external entry points, so solc emits shared internal Yul functions reused across sites — the structure where the ~1.9× size gap vs solc concentrates (§99). Non-recursive ⟹ passes the stack-headroom cert. |
+| `WideDispatchBox` | **Dispatcher-heavy** (goal 3b). 40 external selectors with tiny bodies, stressing solc's selector-sort/dispatch tree while keeping runtime small. |
+
+### Pruned (18 sources retired from `benchmarks/corpus.txt`)
+
+`ConstructorCounter`, `ConstructorAbiBox`, `ForkNeutralBox`, `Opcode44Surface`,
+`EnumBytesBox`, `StructBox`, `ArrayBox`, `BytesBox`, `EventCounter`,
+`RevertReason`, `InterfaceCase`, `BitwiseBox`, `EffectOrderingSurfaceBox`,
+`AbiControlSurfaceBox`, `StorageArrayBox`, `StorageStructBox`, `ImmutableBox`,
+`Simple`.
+
+Each is subsumed by a kept representative of the same family (e.g.
+`EnumBytesBox`/`StructBox`/`StorageStructBox` → `PackedStorageBox` covers
+enum+struct+packed storage; `EventCounter` → `EventMatrix`; `RevertReason` →
+`ErrorPanicBox`; `BitwiseBox` → `ArithmeticBox`; `ArrayBox`/`StorageArrayBox` →
+`DynamicStorageSurfaceBox` + `LoopBox`; `EffectOrderingSurfaceBox`/
+`AbiControlSurfaceBox` → `SemanticSurfaceBox` + `InlineAssemblyBox` +
+`ModifierBox`).
+
+**Note:** pruned `.sol` files are *retained on disk* — they remain fixtures for
+non-scored differential/smoke scripts (`scripts/test_solidity_contract_call_compare.sh`,
+etc.) and CI sentinels (`Simple.sol`/`Counter.sol` are the determinism-check
+sentinels). Pruning removes them only from the *scored* corpus and deletes their
+`benchmarks/vectors/*.json`. This avoids red states in the wider (non-frozen)
+test suite while achieving the faster-bench / better-signal goal.
+
+### Kept (30 sources → 38 contracts), by family
+
+- **storage:** `Counter`, `MappingCounter`, `PackedStorageBox`,
+  `DynamicStorageSurfaceBox` (the deliberate large storage/nested-ABI stress)
+- **arithmetic:** `ArithmeticBox`
+- **memory / strings:** `StringBox`, `AbiBox`
+- **loops:** `LoopBox`
+- **events:** `EventMatrix`
+- **errors:** `ErrorPanicBox`
+- **try/catch + reentrancy:** `TryCatchBox` (+`TryCatchTarget`),
+  `ReentrantTryCatchSurfaceBox`
+- **proxy:** `ProxyLifecycleSurfaceBox` (+`ProxyLifecycleLogicV1`/`V2`)
+- **create / factory:** `FactoryBox` (+`ChildBox`), `CreateLifecycleSurfaceBox`
+  (+`CreateLifecycleChild`) — *burn vectors retuned*
+- **selfdestruct:** `SelfDestructBox`
+- **fallback:** `FallbackBox`
+- **modifiers / inheritance:** `ModifierBox` (+`ModifierBase`)
+- **payable / context:** `PayableVault`, `EnvBox`
+- **inline assembly / low-level:** `InlineAssemblyBox`, `CancunOpcodeSurface`
+  (transient storage TLOAD/TSTORE + MCOPY), `SemanticSurfaceBox`
+- **precompiles / external calls:** `PostCancunPrecompileBoundary`,
+  `ExternalCallBox` — *burn vector retuned*
+- **library linkage:** `MathLib`, `ExternalMathLib` (+`ExternalMathBox`)
+- **token:** `MiniToken`
+- **advanced types:** `AdvancedTypeSurfaceBox` (+`PriceMath`, user-defined value
+  types + interface + abstract)
+- **adversarial stress:** `AdversarialStackPressure` (SWAP stress; collapsed by
+  `chainCanon`, retained as a stress case, held ≤5%)
+
+## Vector retunes (burn taming — vector-only, no source rewrite)
+
+- **`ExternalCallBox`:** the ecPairing-`0x08`-invalid OOG vector (calldata
+  `0xad258fff…0008…`) is replaced with a *valid* precompile call
+  (identity/SHA-256/valid-ecPairing empty input). External-call coverage
+  (call/staticcall/delegatecall + returndata assembly) is preserved; exec drops
+  from 29.67M → ~0.1M.
+- **`CreateLifecycleSurfaceBox`:** the `create2Collision` (`0x1410fe88`) OOG
+  vector is dropped. `createSuccess`, `createFailure` (constructor-revert
+  rollback) and `parentBalance` remain, so the CREATE lifecycle + revert-data +
+  balance-retention paths are still exercised at real, bounded cost.
+
+The remaining inherent burns (valid precompile intrinsics in
+`PostCancunPrecompileBoundary`/`ExternalCallBox`, real CREATE costs in
+`FactoryBox`/`CreateLifecycleSurfaceBox`, SSTORE in the storage contracts) are
+kept — they are correctness paths — but bounded so their combined share is
+< 25% of total.
+
+## Diagnostics gap (kept, documented)
+
+Three contracts — `CreateLifecycleSurfaceBox`, `FactoryBox`,
+`ProxyLifecycleSurfaceBox` — return `FUNCTIONS_FAILED` from the *optional*
+`functionsForStackDiagnostics?` probe (a creation-object / linker artifact in
+that diagnostic path; `PEEPHOLE_PROGRESS.md` §98/§99). This is a probe-only gap:
+all three compile, deploy, and execute cleanly through the real
+`solidus-backend raw-image` pipeline and score normally. They are retained; only
+the auxiliary stack-diagnostics scanner (not the compile path, not the theorem)
+declines to introspect them.
+
+## Baseline (new season, optimized compiler)
+
+Regenerated with the promoted chain-canon compiler on the new corpus via
+`scripts/opt_harness.sh bench`/`baseline`. See the "New-baseline validation"
+section below for the measured totals, per-contract share extremes, and
+inherent-burn share.
+
+<!-- BASELINE_TOTALS -->
+_(filled in by the baseline-regeneration commit)_
+<!-- /BASELINE_TOTALS -->
