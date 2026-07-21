@@ -1,0 +1,90 @@
+# =============================================================================
+# Solidus Arena — submission archival (PRs targeting the `arena` branch)
+# =============================================================================
+#
+# WHAT THIS IS
+#   Every arena submission is a public PR, but a PR's head ref lives in the
+#   CONTRIBUTOR'S FORK. Record winners get merged to `arena` and tagged, but a
+#   non-winning submission would otherwise exist only as GitHub's retained
+#   pull refs — outside this repository's own history. The challenge promises
+#   a public, cumulative lineage where abandoned branches can be revived
+#   (CHALLENGE.md "Why this is interesting"), so every submission's exact code
+#   must be durably archived IN this repo.
+#
+#   This workflow tags each submission's head commit as
+#       submissions/pr-<number>-<sha7>
+#   whenever a PR to `arena` is closed (merged or not) or labeled for scoring.
+#   Tags are immutable snapshots; one PR may accumulate several (one per
+#   scored/closed head). Anyone can then fetch and build on any submission:
+#       git fetch origin 'refs/tags/submissions/*:refs/tags/submissions/*'
+#
+# TRUST MODEL / SAFETY
+#   Uses pull_request_target for write scope, but NEVER checks out or executes
+#   PR code: the job checks out the BASE repo, fetches the pull head as pure
+#   git data, and pushes a tag. Fetching untrusted commits as data is safe;
+#   nothing from the PR is run. Do not add build/test steps to this workflow.
+# =============================================================================
+
+name: arena-archive
+
+on:
+  pull_request_target:
+    branches: [arena]
+    types: [closed, labeled]
+
+permissions:
+  contents: write
+
+concurrency:
+  # Serialize per-PR so two events don't race the same tag push.
+  group: arena-archive-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    name: Archive submission head as a tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # For `labeled`, only the scoring label matters; `closed` always archives.
+    if: >-
+      github.event.action == 'closed' ||
+      github.event.label.name == 'scoring-requested'
+    steps:
+      - name: Checkout base repo (no PR code)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Fetch PR head as data and push archival tag
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          SHORT="$(printf '%s' "${HEAD_SHA}" | cut -c1-7)"
+          TAG="submissions/pr-${PR_NUMBER}-${SHORT}"
+
+          # Fetch the exact head commit as pure git data (no checkout, no exec).
+          git fetch --no-tags origin "pull/${PR_NUMBER}/head"
+
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::PR head ${HEAD_SHA} not reachable from pull ref;"
+            echo "::error::refusing to tag a commit we could not fetch."
+            exit 1
+          fi
+
+          # Idempotent: if the tag exists and matches, done; mismatch is an error
+          # (tags are immutable snapshots — never move one).
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            EXISTING="$(git ls-remote --tags origin "refs/tags/${TAG}" | cut -f1)"
+            if [ "${EXISTING}" = "${HEAD_SHA}" ]; then
+              echo "Tag ${TAG} already archives ${HEAD_SHA} — nothing to do."
+              exit 0
+            fi
+            echo "::error::Tag ${TAG} exists but points at ${EXISTING}, not ${HEAD_SHA}."
+            exit 1
+          fi
+
+          git tag "${TAG}" "${HEAD_SHA}"
+          git push origin "refs/tags/${TAG}"
+          echo "Archived PR #${PR_NUMBER} head ${HEAD_SHA} as ${TAG}."

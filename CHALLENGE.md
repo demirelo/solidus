@@ -86,6 +86,13 @@ them, delete them, replace them, as long as the frozen theorems still prove.
 One private scoring per PR per green public CI. The private suite is
 refreshed between seasons, never within one.
 
+Every submission is public and permanent: entries are public PRs, and each
+submission's exact head commit is archived in this repository as a
+`submissions/pr-N-<sha>` tag when the PR is scored or closed — win or lose.
+Anyone can build on any past submission
+(`git fetch origin 'refs/tags/submissions/*:refs/tags/submissions/*'`);
+only record holders are merged to `arena`.
+
 Practical notes:
 
 - **Drive the harness with solc 0.8.26.** The raw-AST path requires the
