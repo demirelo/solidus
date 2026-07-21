@@ -7868,3 +7868,40 @@ The one previously-feared risk — a `chainCanon`-style body-rewrite simulation 
 
 ### Files touched (session 100)
 `EvmCompiler/TypedCfg/BlockReorderCanon.lean` (extended: +2 imports `InteractionSemantics`/`Certificate`, the equality core + literal-semantics-equality + static-gate preservation; still imported by nobody); `EvmCompiler/TypedCfg/PEEPHOLE_PROGRESS.md` (this note). Uncommitted scratch under the session scratchpad (`core*.lean`, `sem.lean`, `probe*.lean`, `ax*.lean`, logs). No frozen file touched. `compile_correct`/`compile_correct_creation` axioms UNCHANGED = `[propext, Classical.choice, Quot.sound]`.
+
+## Session-101 update (2026-07-21): **THE SPLICE IS LIVE — block-reorder is the THIRD live transform. All green + axiom-clean; corpus moves −7.47 % → −7.76 % (reorder = −1 219 B / −1.69 % runtime bytes, −270 402 gas over the full ~90-contract corpus).**
+
+The §100 cfg-altitude equalities are now wired into the `compile_correct` cone. `scripts/opt_harness.sh check` = **OK** (43 public theorems; axioms ⊆ `[propext, Classical.choice, Quot.sound]`). `#print axioms Solidus.compile_correct` / `compile_correct_creation` = `[propext, Classical.choice, Quot.sound]` — **UNCHANGED**. No frozen file touched.
+
+### WHAT LANDED (commit `3317edaf`)
+1. **`CertifiedChoice` restructure** (`Compiler/StackArtifact.lean`, NOT frozen). A nested reorder layer atop the chain layer:
+   `certified = ((chainCanonProgram Q).compileCertified?).elim qc (fun cc => ((reorderProgram (chainCanonProgram Q)).compileCertified?).getD cc)`
+   — reorder is chosen only when BOTH seam (`qc`) and chain (`cc`) lowered (fail-open on savings; can never regress below the shipped chain path — the `some cc` branch is what supplies `chainCanon Q`'s `lower?.isSome` to the reorder twin's fuel bound). `compile?` mirrors; `compile?_parts` gets the extra `.elim`/`getD` layer.
+2. **4 `_reorder` twins + 4 dispatcher rewires** (`Compiler/OpenInteractionComposition.lean`, NOT frozen; the "8 OIC sites"). Each `_reorder` twin mirrors its `_chain` twin but is *shorter by construction*: the source-side congruence (`openRunN[Prefix]_chainCombinedEff_congr_of_source`, cfg ≈ `chainCanon Q`) is IDENTICAL, and the only additions are (a) the banked **literal equalities** `TypedCfg.BlockReorder.openRunN_reorderProgram` / `openRunNPrefix_reorderProgram` (rw the source congruence onto `reorderProgram`'s own openRun) and (b) `fuelBudget_reorderProgram_eq` (the exact fuel bound). PCI/`WellTyped` for `reorderProgram (chainCanon Q)` come from `programCounterIndependent_reorderProgram` / `chainCanonProgram_WellTyped`. No new step-relation — the §100 "equality not simulation" finding is what made the twins mechanical. The 4 crown consumers (`CertifiedChoice` threaders) needed NO change (the predicate's *type* is unchanged; only its *definition* grew a layer).
+
+### MEASUREMENTS (full `scripts/opt_harness.sh bench`, both endpoints re-benched fresh)
+| metric | a437abc2 (chain-only) | 3317edaf (+reorder) | **Δ** |
+|---|---|---|---|
+| corpus runtime bytes | 71 978 | 70 759 | **−1 219 B (−1.69 %)** |
+| corpus total gas | 84 951 590 | 84 681 188 | **−270 402 gas (−0.318 %)** |
+| % total_gas vs baseline | **−7.47 %** | **−7.76 %** | **+0.29 pp (record improves)** |
+| solc-parity ratio (ours/solc) | 1.99 | 1.96 | −0.03 |
+
+The a437abc2 numbers reproduce the shipped **−7.47 %** record exactly (validation that the chain-only endpoint is intact). The −1 219 B / −1.69 % runtime-byte reorder delta lands squarely inside the §99 probe forecast (891 B on the 15-contract probe subset ⇒ ≈ −1.5 %…−1.8 % corpus-wide).
+
+**4-contract byte deltas vs §94 baselines** (a437abc2 reproduces §94 exactly):
+| contract | §94 / a437abc2 | 3317edaf | Δ |
+|---|---|---|---|
+| AdversarialStackPressure | 1121 | 1121 | 0 |
+| ExternalCallBox (ECB) | 2273 | 2202 | **−71** |
+| MiniToken | 1701 | 1674 | **−27** |
+| LoopBox | 831 | 815 | **−16** |
+
+The ECB −71 and MiniToken −27 match the §99 real-pipeline probe **to the byte** (probe: ExternalCallBox 71, MiniToken 27) — the live splice recovers exactly the measured-sound reorder delta. ASP unchanged (§99 probe: 0 non-adjacent jump edges).
+
+**Determinism:** double-compile through the real driver (`solc_lean_standard_json.py → solidus-backend raw-image`) is **byte-identical** (sha256-equal) on MiniToken (1674 B), LoopBox (815 B), ExternalCallBox (2202 B). `reorderProgram` (fuel-based greedy `layoutBlocks`) is a pure deterministic function ⇒ no nondeterminism introduced.
+
+**§99 creation-object caveat resolved:** the three creation-object contracts that returned `FUNCTIONS_FAILED` under the *probe* harness — CreateLifecycle / Factory / ProxyLifecycle — all compile GREEN through the REAL pipeline and are present in the bench with negative gas deltas vs baseline (CreateLifecycleSurfaceBox −472 419, FactoryBox −82 748, ProxyLifecycleSurfaceBox −56 464 gas). No `MISSING`/regression rows in the bench.
+
+### Files touched (session 101)
+`EvmCompiler/Compiler/StackArtifact.lean` (CertifiedChoice nested reorder layer + `compile?` + `compile?_parts`; NOT frozen), `EvmCompiler/Compiler/OpenInteractionComposition.lean` (4 `_reorder` twins + 4 dispatcher rewires; NOT frozen), `EvmCompiler/TypedCfg/PEEPHOLE_PROGRESS.md` (this note). `EvmCompiler/TypedCfg/BlockReorderCanon.lean` unchanged (its §99/§100 lemmas are now consumed by the cone). No frozen file touched. `compile_correct`/`compile_correct_creation` axioms UNCHANGED = `[propext, Classical.choice, Quot.sound]`.
