@@ -174,9 +174,9 @@ corpus; forge 1.5.1 / cancun, solc 0.8.26):
 | metric | value |
 |---|---|
 | contracts | **40** (32 sources), 0 compile failures, 0 empty |
-| total_gas | **25,232,727** = deploy 16,437,678 (65%) + exec 8,795,049 (35%) |
-| runtime bytes | 66,229 (was 103,211 pre-redesign) |
-| solc-parity (ours/solc runtime bytes) | **2.06** (was 2.86 pre-redesign) |
+| total_gas | **24,986,512** = deploy 16,198,298 (65%) + exec 8,788,214 (35%) |
+| runtime bytes | 65,126 (was 103,211 pre-redesign) |
+| solc-parity (ours/solc runtime bytes) | **2.03** (was 2.86 pre-redesign) |
 
 Constraint validation:
 
