@@ -168,5 +168,34 @@ section below for the measured totals, per-contract share extremes, and
 inherent-burn share.
 
 <!-- BASELINE_TOTALS -->
-_(filled in by the baseline-regeneration commit)_
+Measured `benchmarks/opt_baseline.json` (optimized chain-canon compiler, new
+corpus; forge 1.5.1 / cancun, solc 0.8.26):
+
+| metric | value |
+|---|---|
+| contracts | **40** (32 sources), 0 compile failures, 0 empty |
+| total_gas | **25,232,727** = deploy 16,437,678 (65%) + exec 8,795,049 (35%) |
+| runtime bytes | 66,229 (was 103,211 pre-redesign) |
+| solc-parity (ours/solc runtime bytes) | **2.06** (was 2.86 pre-redesign) |
+
+Constraint validation:
+
+| rule | target | measured | verdict |
+|---|---|---|---|
+| max single-contract share | ≤ ~10% | **9.48%** (`DynamicStorageSurfaceBox`, deploy-bound at 9783 B) | PASS |
+| `AdversarialStackPressure` share | ≤ 5% | **1.54%** (runtime collapsed 8557→1121 B via chainCanon) | PASS |
+| inherent-burn share (precompile + CREATE exec) | < 25% | **4.1%** | PASS |
+| compile everything (fail-closed) | 100% | 40/40 | PASS |
+| determinism double-compile (sample) | byte-identical | 4/4 (ProcedureReuseBox, WideDispatchBox, Counter, DynamicStorageSurfaceBox) | PASS |
+
+Share extremes: top = `DynamicStorageSurfaceBox` 9.48%; then `WideDispatchBox`
+6.7%, `LoopBox` 6.6%, `ProcedureReuseBox` 6.1%; smallest scored contracts
+`MathLib`/`PriceMath` at 0.26% each (deploy-only libraries). Deploy gas (priced
+at 200 gas/byte) is the majority (65%) and is the primary compiler-sensitive
+signal; the remaining exec is spread across real workloads (loops, SSTORE, deep
+call graph, dispatch, bounded precompile/CREATE correctness paths).
+
+The two 30M-OOG inherent-burn vectors that were ~66% of the *pre-redesign* total
+are gone: `ExternalCallBox` fell 33.0% → 2.9% and `CreateLifecycleSurfaceBox`
+33.8% → 4.0%.
 <!-- /BASELINE_TOTALS -->

@@ -98,6 +98,12 @@ Practical notes:
   event (push or rebase). Editing the PR body re-runs the gates against
   the previously computed merge; if `arena` has advanced in the meantime,
   the freshness check will fail the run and ask for a rebase.
+- **Corpus rationale.** The public `examples/` corpus (40 scored contracts,
+  `benchmarks/corpus.txt`) is designed for a fair, compiler-sensitive metric —
+  no single contract dominates, inherent-burn (precompile/CREATE) gas is bounded
+  well under a quarter of the total, and coverage spans every semantic family.
+  The design rules, roster, and measured baseline are documented in
+  `benchmarks/CORPUS_DESIGN.md`.
 
 ## Language coverage note
 
