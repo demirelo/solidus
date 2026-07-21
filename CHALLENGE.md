@@ -49,7 +49,9 @@ runner independently re-checks from configuration you cannot touch):
   semantics modules — see `benchmarks/frozen_manifest.txt`);
 - the `EvmYul` dependency pin and `lean-toolchain`;
 - the CI workflow files and the evaluation harness (`scripts/opt_harness.sh`
-  and what it invokes).
+  and what it invokes). Harness files are hash-pinned; the workflow files
+  cannot pin themselves, so their freeze is enforced by the private scoring
+  runner, which re-verifies everything from configuration you cannot touch.
 
 Everything else — every compiler pass, every IR, every internal proof — is
 yours to rewrite. Internal proofs are implementation detail: restructure
@@ -128,8 +130,9 @@ refuses to emit code it cannot prove safe. Write recursive logic as loops.
 
 - Your submission becomes part of the public lineage under this repo's
   license; later records will build on your code. That is the point.
-- The compiler must be deterministic: CI compiles the corpus twice and
-  requires byte-identical output. Gas is measured on a pinned executor
+- The compiler must be deterministic: public CI double-compiles sentinel
+  contracts, and the private runner double-compiles the full suite,
+  requiring byte-identical output. Gas is measured on a pinned executor
   version named in the season config; measurements are deterministic given
   the vectors, so record comparisons are exact.
 - Search/superoptimization inside the compiler is allowed within the time

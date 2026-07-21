@@ -1,7 +1,7 @@
 {
  "schema_version": 2,
  "input_epoch": "optimized-yul",
- "commit": "e2e2a62e0186ee3c0b862e217f684dc272b46d94",
+ "commit": "15f4dbd8",
  "date": "2026-07-21T17:52:30Z",
  "solc_version": "0.8.26+commit.8a97fa7a.Darwin.appleclang",
  "executor": {
@@ -670,5 +670,6 @@
  "solc_parity_ratio": 2.029,
  "wall_ms": 743563,
  "compile_wall_ms": 713831,
- "gas_wall_ms": 29732
+ "gas_wall_ms": 29732,
+ "commit_note": "generated from the tree finalized as 15f4dbd8 (launch record-0 baseline); measurement validity rests on tree content"
 }

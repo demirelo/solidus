@@ -47,6 +47,7 @@
     "proof_artifacts/stack_backend_production_smoke.lean": "12423a49d3bf6a1ebb3a9ffdb65548553139fe60a25ee0a88c0dc9a5d0933f73",
     "scripts/check_frozen_closure.py": "02728b6ed39e29952257ee1fef53f8b6f8217fe1c89d148ed32a01301c66faa6",
     "scripts/check_frozen_defs.lean": "2a9803dd0beb9d6eb702d37319e9d88cd52c10334a99dbe088537017f09c0747",
+    "scripts/opt_gas_runner.py": "cacade57749cd24a64c3d173b15dcd809b4eb55fd0883f7c96443c09a0f01f06",
     "scripts/opt_harness.py": "f9b8f498dc7b24c05c9b93b799b3ea7083d4623be782d542b11f2bed2b3f992c",
     "scripts/opt_harness.sh": "e52e7411ac9e665b62e4a73a85d41820f8c12e851bc63a5dd7950f74b9abcbce"
   }
