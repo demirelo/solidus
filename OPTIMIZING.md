@@ -151,7 +151,7 @@ $ scripts/opt_harness.sh bench
 === BENCH ===
 commit 1a2b3c4d5e6f  2026-07-06T02:41:08Z  solc 0.8.26+commit.8a97fa7a...
 executor: foundry-forge-test forge Version: 1.5.1-stable  evm=cancun  deploy=computed
-contracts: 48   wall time: 365.0s (compile 340s + gas 25s)
+contracts: 40   wall time: 365.0s (compile 340s + gas 25s)
 
   contract                                   total_gas    deploy    exec runtime  creat  solcRT  ratio
 ------------------------------------------------------------------------------------------------------
