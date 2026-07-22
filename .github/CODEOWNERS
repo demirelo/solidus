@@ -5,8 +5,7 @@
 # and the CI that guards them. Everything else — compiler passes, internal
 # proofs — is open for contestants to rewrite and does not need owner review.
 #
-# TODO(maintainer): replace @danrobinson with the real GitHub handle / team
-# before making the repo public. This is a placeholder.
+# Owner: @danrobinson (challenge maintainer).
 # =============================================================================
 
 # The freeze surface: the manifest, the toolchain/dependency pins, and the
