@@ -40,7 +40,11 @@
 name: ci
 
 on:
+  # PRs targeting `arena` get the full gate set via arena-submission.yml's
+  # `gates` job (workflow_call below) — running ci.yml directly there too
+  # would duplicate the ~90-minute Lean gates on every submission.
   pull_request:
+    branches-ignore: [arena]
   push:
     branches: [main, arena]
   workflow_call: {}
