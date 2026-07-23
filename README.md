@@ -4,9 +4,7 @@ Solidus is a work-in-progress compiler from Solidity to the EVM, implemented
 and formally verified in [Lean 4](https://lean-lang.org/).
 
 > **⚠️ Pre-alpha.** Solidus is a research project, not production software. Do
-> not use it to compile contracts that hold real value. The formal verification
-> has known and (likely) unknown gaps — part of the point of opening this
-> project up is to pressure-test them.
+> not use it to compile contracts that hold real value.
 
 ## What is here today
 
@@ -14,7 +12,11 @@ The **backend** of Solidus — from Yul (the intermediate representation used by
 the Solidity compiler) down to EVM bytecode — is essentially complete and
 formally verified. A single Lean theorem, `Solidus.compile_correct`, connects
 the source program's semantics to the emitted bytes on a pinned EVM
-interpreter. The repository also contains a proposed formal semantics for Yul.
+interpreter. The EVM and Yul semantics live in their own repository —
+[`paradigmxyz/EVMYulLean`](https://github.com/paradigmxyz/EVMYulLean), a fork
+of [Nethermind's EVMYulLean](https://github.com/NethermindEth/EVMYulLean) with
+some corrections — and this repository builds its Yul program semantics (the
+source side of the theorem) on top of that base.
 
 The **frontend** (Solidity → Yul) does not exist yet. Today the supported
 pipeline takes the `irOptimizedAst` Yul object emitted by a pinned `solc` and
