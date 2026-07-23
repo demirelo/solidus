@@ -5,7 +5,7 @@ require «evm-interaction» from git
   "https://github.com/danrobinson/evm-interaction.git" @ "c939817c55f966dab97e1ba8df05ceca1fdfbdb2"
 
 require evmyul from git
-  "https://github.com/danrobinson/EVMYulLean.git" @ "b08573c65e33feb5331abe2b7c1d76be89bb8eff"
+  "https://github.com/paradigmxyz/EVMYulLean.git" @ "b08573c65e33feb5331abe2b7c1d76be89bb8eff"
 
 package «solidus» {
   moreLeanArgs := #[

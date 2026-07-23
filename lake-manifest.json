@@ -15,7 +15,7 @@
       "configFile": "lakefile.lean"
     },
     {
-      "url": "https://github.com/danrobinson/EVMYulLean.git",
+      "url": "https://github.com/paradigmxyz/EVMYulLean.git",
       "type": "git",
       "subDir": null,
       "scope": "",
