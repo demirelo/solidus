@@ -819,12 +819,12 @@ private theorem emitBlocksFrom?_byteDiff
           (.push va) = some [{ pc := cpc, instr := .push 32 va }] := by
         simp [Assembly.Compact.emitSourceBlock?,
           Assembly.Compact.emitInstrRev?, Assembly.Compact.pushWidthAt?,
-          hMem]
+          Assembly.Compact.pushInstrOfWidth, hMem]
       have hCodeB : Assembly.Compact.emitSourceBlock? pins bw spc' cpc table
           (.push vb) = some [{ pc := cpc, instr := .push 32 vb }] := by
         simp [Assembly.Compact.emitSourceBlock?,
           Assembly.Compact.emitInstrRev?, Assembly.Compact.pushWidthAt?,
-          hMem]
+          Assembly.Compact.pushInstrOfWidth, hMem]
       rw [Assembly.Compact.emitBlocksFrom?, hSizeA, hCodeA] at hA
       rw [Assembly.Compact.emitBlocksFrom?, hSizeB, hCodeB] at hB
       simp only [Option.pure_def, Option.bind_eq_bind, Option.bind_some,

@@ -506,6 +506,64 @@ theorem heightPoint_push_step
     HeightPoint cert.table next := by
   obtain ⟨width, located, hWidth, hMem, hLocatedPc, hLocatedInstr⟩ :=
     compact_push_entry_mem hCompile hBlock hInstr
+  by_cases hZeroWidth : width = 0
+  · subst hZeroWidth
+    have hValueZero := Compact.pushWidthAt?_zero_value hWidth
+    subst hValueZero
+    have hInstr0 : located.instr = .push0 := by
+      simpa [Compact.pushInstrOfWidth] using hLocatedInstr
+    obtain ⟨decoded, hInstrDecoded, hBytesDecoded⟩ :=
+      hDecode.decodes located hMem
+    rw [hInstr0] at hInstrDecoded
+    simp [Compact.Instr.decoded?] at hInstrDecoded
+    subst decoded
+    have hStatePc : state.pc = EvmYul.UInt256.ofNat located.pc :=
+      hPc.trans (congrArg EvmYul.UInt256.ofNat hLocatedPc.symm)
+    have hDecoded : EvmYul.EVM.decode state.executionEnv.code state.pc =
+        some (EvmYul.Operation.PUSH0, none) := by
+      simpa [hCode, hStatePc] using hBytesDecoded
+    cases stepFuel with
+    | zero => simp [EvmYul.EVM.step] at hStep
+    | succ fuel =>
+        rw [hDecoded] at hStep
+        simp only [Option.getD_some] at hStep
+        rw [evm_step_push0_eq_next fuel state] at hStep
+        have hNext :
+            next = gasfulPushNext 0 (EvmYul.UInt256.ofNat 0) state := by
+          simpa using hStep.symm
+        subst next
+        obtain ⟨astack, hMemPc, hAgrees⟩ := hHeight
+        have hEntry :
+            memStack cert.table (EvmYul.UInt256.ofNat block.compactPc)
+              astack = true := by
+          rw [← hPc]; exact hMemPc
+        have hSize : Compact.sourceInstrSizeAt? artifact.pinnedPushPcs
+            artifact.branchWidth block.sourcePc block.sourceInstr =
+              some (0 + 1) := by
+          simp [hInstr, Compact.sourceInstrSizeAt?, hWidth]
+        have hOk := check?_blockOk hCheck hBlock
+        rw [hInstr] at hSize
+        simp only [blockOk?, hInstr, hSize] at hOk
+        have hSucc := all_stacksAt_apply hOk hEntry
+        have hNextPc :
+            (gasfulPushNext 0 (EvmYul.UInt256.ofNat 0) state).pc =
+              EvmYul.UInt256.ofNat (block.compactPc + (0 + 1)) := by
+          simp [gasfulPushNext, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC, afterEVMInstructionChargeAt,
+            afterMemoryChargeAt, chargeGas, hPc, uint256_ofNat_add,
+            Nat.add_assoc]
+        have hNextStack :
+            (gasfulPushNext 0 (EvmYul.UInt256.ofNat 0) state).stack =
+              EvmYul.UInt256.ofNat 0 :: state.stack := by
+          simp [gasfulPushNext, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC, EvmYul.Stack.push,
+            afterEVMInstructionChargeAt, afterMemoryChargeAt, chargeGas]
+        refine ⟨some (EvmYul.UInt256.ofNat 0) :: astack, ?_, ?_⟩
+        · rw [hNextPc]
+          exact hSucc
+        · rw [hNextStack]
+          exact agrees_cons rfl hAgrees
+  simp only [Compact.pushInstrOfWidth, if_neg hZeroWidth] at hLocatedInstr
   have hLocatedValid :=
     (List.forall_iff_forall_mem.mp
       (Compact.compile?_valid hCompile).wellFormed.1) located hMem
@@ -1648,6 +1706,31 @@ theorem decoded_alpha_le_delta_succ
       | push value =>
           obtain ⟨width, located, hWidth, hMem, hLocatedPc, hLocatedInstr⟩ :=
             compact_push_entry_mem hCompile hBlock hInstr
+          by_cases hZeroWidth : width = 0
+          · subst hZeroWidth
+            have hValueZero := Compact.pushWidthAt?_zero_value hWidth
+            subst hValueZero
+            have hInstr0 : located.instr = .push0 := by
+              simpa [Compact.pushInstrOfWidth] using hLocatedInstr
+            obtain ⟨decoded, hInstrDecoded, hBytesDecoded⟩ :=
+              hDecode.decodes located hMem
+            rw [hInstr0] at hInstrDecoded
+            simp [Compact.Instr.decoded?] at hInstrDecoded
+            subst decoded
+            have hStatePc : state.pc = EvmYul.UInt256.ofNat located.pc :=
+              hPc.trans (congrArg EvmYul.UInt256.ofNat hLocatedPc.symm)
+            have hDecoded :
+                EvmYul.EVM.decode state.executionEnv.code state.pc =
+                  some (EvmYul.Operation.PUSH0, none) := by
+              simpa [hCode, hStatePc] using hBytesDecoded
+            have hGoal :
+                (EvmYul.EVM.α EvmYul.Operation.PUSH0).getD 0 ≤
+                    (EvmYul.EVM.δ EvmYul.Operation.PUSH0).getD 0 + 1 ∧
+                  (EvmYul.EVM.δ EvmYul.Operation.PUSH0).getD 0 ≤ 20 :=
+              ⟨by decide, by decide⟩
+            simpa [decodedOperationAt, hDecoded] using hGoal
+          simp only [Compact.pushInstrOfWidth, if_neg hZeroWidth]
+            at hLocatedInstr
           have hLocatedValid :=
             (List.forall_iff_forall_mem.mp
               (Compact.compile?_valid hCompile).wellFormed.1) located hMem
@@ -1908,6 +1991,29 @@ theorem step_error_ne_stackOverflow_at
       | push value =>
           obtain ⟨width, located, hWidth, hMem, hLocatedPc, hLocatedInstr⟩ :=
             compact_push_entry_mem hCompile hBlock hInstr
+          by_cases hZeroWidth : width = 0
+          · subst hZeroWidth
+            have hValueZero := Compact.pushWidthAt?_zero_value hWidth
+            subst hValueZero
+            have hInstr0 : located.instr = .push0 := by
+              simpa [Compact.pushInstrOfWidth] using hLocatedInstr
+            obtain ⟨decoded, hInstrDecoded, hBytesDecoded⟩ :=
+              hDecode.decodes located hMem
+            rw [hInstr0] at hInstrDecoded
+            simp [Compact.Instr.decoded?] at hInstrDecoded
+            subst decoded
+            have hStatePc : state.pc = EvmYul.UInt256.ofNat located.pc :=
+              hPc.trans (congrArg EvmYul.UInt256.ofNat hLocatedPc.symm)
+            have hDecoded :
+                EvmYul.EVM.decode state.executionEnv.code state.pc =
+                  some (EvmYul.Operation.PUSH0, none) := by
+              simpa [hCode, hStatePc] using hBytesDecoded
+            rw [hDecoded] at hStep
+            simp only [Option.getD_some] at hStep
+            rw [evm_step_push0_eq_next fuel state] at hStep
+            cases hStep
+          simp only [Compact.pushInstrOfWidth, if_neg hZeroWidth]
+            at hLocatedInstr
           have hLocatedValid :=
             (List.forall_iff_forall_mem.mp
               (Compact.compile?_valid hCompile).wellFormed.1) located hMem

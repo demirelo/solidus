@@ -164,8 +164,10 @@ theorem compact_block_entry_mem
           simp [Compact.emitSourceBlock?, Compact.emitInstrRev?, hWidth]
             at hCode
           subst code
-          exact ⟨{ pc := compactPc, instr := .push width value },
-            hArtifact.mem_program_of_mem_block hBlock (by simp), rfl⟩
+          exact
+            ⟨{ pc := compactPc
+               instr := Compact.pushInstrOfWidth width value },
+              hArtifact.mem_program_of_mem_block hBlock (by simp), rfl⟩
   | pushLabel target =>
       simp [Compact.emitSourceBlock?, Compact.emitInstrRev?] at hCode
   | jump target =>
@@ -276,7 +278,7 @@ theorem compact_push_entry_mem
           some width ∧
         located ∈ artifact.program.code ∧
         located.pc = block.compactPc ∧
-        located.instr = .push width value := by
+        located.instr = Compact.pushInstrOfWidth width value := by
   have hArtifact := Compact.compile?_valid hCompile
   obtain ⟨_compactSize, hSize, hCode⟩ :=
     (Compact.compile?_blocksValid hCompile).block_emit_of_mem hBlock
@@ -289,7 +291,8 @@ theorem compact_push_entry_mem
   | some width =>
       simp [Compact.emitSourceBlock?, Compact.emitInstrRev?, hWidth] at hCode
       subst code
-      exact ⟨width, { pc := compactPc, instr := .push width value },
+      exact ⟨width,
+        { pc := compactPc, instr := Compact.pushInstrOfWidth width value },
         rfl, hArtifact.mem_program_of_mem_block hBlock (by simp), rfl, rfl⟩
 
 /-- The second instruction of every checked fixed-label branch block is also
@@ -1002,6 +1005,44 @@ theorem artifactFramePoint_push_step
     ArtifactFramePoint artifact bytes next := by
   obtain ⟨width, located, hWidth, hMem, hLocatedPc, hLocatedInstr⟩ :=
     compact_push_entry_mem hCompile hBlock hInstr
+  by_cases hZeroWidth : width = 0
+  · subst hZeroWidth
+    have hValueZero := Compact.pushWidthAt?_zero_value hWidth
+    subst hValueZero
+    have hInstr0 : located.instr = .push0 := by
+      simpa [Compact.pushInstrOfWidth] using hLocatedInstr
+    obtain ⟨decoded, hInstrDecoded, hBytesDecoded⟩ :=
+      hDecode.decodes located hMem
+    rw [hInstr0] at hInstrDecoded
+    simp [Compact.Instr.decoded?] at hInstrDecoded
+    subst decoded
+    have hStatePc : state.pc = EvmYul.UInt256.ofNat located.pc :=
+      hPc.trans (congrArg EvmYul.UInt256.ofNat hLocatedPc.symm)
+    have hDecoded : EvmYul.EVM.decode state.executionEnv.code state.pc =
+        some (EvmYul.Operation.PUSH0, none) := by
+      simpa [hCode, hStatePc] using hBytesDecoded
+    cases stepFuel with
+    | zero => simp [EvmYul.EVM.step] at hStep
+    | succ fuel =>
+        rw [hDecoded] at hStep
+        simp only [Option.getD_some] at hStep
+        rw [evm_step_push0_eq_next fuel state] at hStep
+        have hNext :
+            next = gasfulPushNext 0 (EvmYul.UInt256.ofNat 0) state := by
+          simpa using hStep.symm
+        subst next
+        have hSize : Compact.sourceInstrSizeAt? artifact.pinnedPushPcs
+            artifact.branchWidth block.sourcePc block.sourceInstr =
+              some (0 + 1) := by
+          simp [hInstr, Compact.sourceInstrSizeAt?, hWidth]
+        apply artifactFramePoint_of_block_next hCompile hBlock hSize
+        · simpa [gasfulPushNext, afterEVMInstructionChargeAt,
+            afterMemoryChargeAt, chargeGas] using hCode
+        · simp [gasfulPushNext, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC, afterEVMInstructionChargeAt,
+            afterMemoryChargeAt, chargeGas, hPc, uint256_ofNat_add,
+            Nat.add_assoc]
+  simp only [Compact.pushInstrOfWidth, if_neg hZeroWidth] at hLocatedInstr
   have hLocatedValid :=
     (List.forall_iff_forall_mem.mp
       (Compact.compile?_valid hCompile).wellFormed.1) located hMem
