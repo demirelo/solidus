@@ -1874,6 +1874,262 @@ theorem returnDispatch_missing_token_eventually
           hDupError]
       · simp [Block.runTerm, hDepth, hGet, Outcome.Simulates]
 
+theorem returnDispatch_shared_present_eventually
+    {shape : Shape} {returnCount depth : Nat}
+    {sites : List ReturnSite} {token : Word}
+    {code pre post : Assembly.Program} {state : EVMState}
+    (hDepth : shape.returnTokenDepth? = some depth)
+    (hCount : depth = returnCount)
+    (hCode :
+      code = TypedCfg.Terminator.returnDispatchSharedCode depth sites)
+    (hBound : depth < 16)
+    (hGet : state.stack[depth]? = some token)
+    (hFits : Assembly.Program.PCFitsFrom pre code)
+    (hPc : state.pc = pre.pcAfter)
+    (hResolvedTargets :
+      Preservation.Terminator.ResolvedTargets
+        (pre ++ code ++ post)
+        (.returnDispatch returnCount sites))
+    (hResolvedCases :
+      Preservation.Terminator.ResolvedCaseLabels
+        (pre ++ code ++ post) sites)
+    (hLabels : ((pre ++ code ++ post).labels).Nodup) :
+    Assembly.Source.Eventually (pre ++ code ++ post) state
+      (Outcome.Simulates (pre ++ code ++ post)
+        (Block.runTerm shape
+          (.returnDispatch returnCount sites) state)) := by
+  subst code
+  subst returnCount
+  rcases List.getElem?_eq_some_split hGet with
+    ⟨front, suffix, hStack, hFront⟩
+  have hPrepareFits :
+      Assembly.Program.PCFitsFrom pre
+        (Assembly.StackShuffle.guardedLiftBuriedToTop depth) :=
+    Assembly.Program.PCFitsFrom.left
+      (by
+        simpa [TypedCfg.Terminator.returnDispatchSharedCode,
+          List.append_assoc] using hFits)
+  have hDispatchFits :
+      Assembly.Program.PCFitsFrom
+        (pre ++ Assembly.StackShuffle.guardedLiftBuriedToTop depth)
+        (TypedCfg.Terminator.returnDispatchCode 0 sites) :=
+    Assembly.Program.PCFitsFrom.right
+      (by
+        simpa [TypedCfg.Terminator.returnDispatchSharedCode,
+          List.append_assoc] using hFits)
+  have hPrepare :=
+    Assembly.StackShuffle.guardedLiftBuriedToTop_source_exists
+      (state := state) (front := front) (suffix := suffix)
+      (token := token) (pre := pre)
+      (post := TypedCfg.Terminator.returnDispatchCode 0 sites ++ post)
+      (by simpa [hFront] using hPrepareFits)
+      (by simpa [hStack, List.append_assoc] using hPc)
+      (by omega)
+  have hStateRecord :
+      { state with stack := front ++ token :: suffix } = state := by
+    rw [← hStack]
+  rw [hStateRecord] at hPrepare
+  let topShape : Shape := { slots := [.returnToken] }
+  have hTopDepth : topShape.returnTokenDepth? = some 0 := rfl
+  refine
+    Assembly.Source.Eventually.bind_running
+      (program :=
+        pre ++
+          TypedCfg.Terminator.returnDispatchSharedCode depth sites ++ post)
+      (middle := fun prepared =>
+        prepared.stack = token :: front ++ suffix ∧
+          Assembly.eraseRuntimeControl prepared =
+            Assembly.eraseRuntimeControl
+              { state with stack := token :: front ++ suffix } ∧
+          prepared.pc =
+            (pre ++
+              Assembly.StackShuffle.guardedLiftBuriedToTop depth).pcAfter)
+      ?_ ?_
+  · exact Assembly.Source.Eventually.mono
+      (by
+        simpa [TypedCfg.Terminator.returnDispatchSharedCode, hFront,
+          List.append_assoc] using hPrepare)
+      (by
+        intro outcome hOutcome
+        cases outcome with
+        | error err => cases hOutcome
+        | ok result =>
+            cases result with
+            | halted halt => cases hOutcome
+            | running prepared => exact hOutcome)
+  · intro prepared hPrepared
+    have hGetTop : prepared.stack[0]? = some token := by
+      simp [hPrepared.1]
+    have hResolvedTargets' :
+        Preservation.Terminator.ResolvedTargets
+          ((pre ++
+              Assembly.StackShuffle.guardedLiftBuriedToTop depth) ++
+            TypedCfg.Terminator.returnDispatchCode 0 sites ++ post)
+          (.returnDispatch 0 sites) := by
+      simpa [TypedCfg.Terminator.returnDispatchSharedCode,
+        List.append_assoc] using hResolvedTargets
+    have hResolvedCases' :
+        Preservation.Terminator.ResolvedCaseLabels
+          ((pre ++
+              Assembly.StackShuffle.guardedLiftBuriedToTop depth) ++
+            TypedCfg.Terminator.returnDispatchCode 0 sites ++ post)
+          sites := by
+      simpa [TypedCfg.Terminator.returnDispatchSharedCode,
+        List.append_assoc] using hResolvedCases
+    have hLabels' :
+        ((((pre ++
+              Assembly.StackShuffle.guardedLiftBuriedToTop depth) ++
+            TypedCfg.Terminator.returnDispatchCode 0 sites ++ post).labels).Nodup) := by
+      simpa [TypedCfg.Terminator.returnDispatchSharedCode,
+        List.append_assoc] using hLabels
+    cases hFind : Block.ReturnSite.findTarget? token sites with
+    | none =>
+        have hDispatch :=
+          returnDispatch_unknown_token_eventually
+            (shape := topShape) (returnCount := 0) (depth := 0)
+            (sites := sites) (token := token)
+            (code := TypedCfg.Terminator.returnDispatchCode 0 sites)
+            (pre :=
+              pre ++ Assembly.StackShuffle.guardedLiftBuriedToTop depth)
+            (post := post) (state := prepared)
+            hTopDepth rfl rfl (by omega) hGetTop hFind
+            hDispatchFits hPrepared.2.2 hResolvedCases'
+        exact Assembly.Source.Eventually.mono
+          (by
+            simpa [TypedCfg.Terminator.returnDispatchSharedCode,
+              List.append_assoc] using hDispatch)
+          (by
+            intro outcome hOutcome
+            simpa [Block.runTerm, hTopDepth, hGetTop, hFind,
+              hDepth, hGet, Outcome.Simulates] using hOutcome)
+    | some target =>
+        have hDispatch :=
+          returnDispatch_selected_eventually
+            (shape := topShape) (returnCount := 0) (depth := 0)
+            (sites := sites) (token := token) (target := target)
+            (code := TypedCfg.Terminator.returnDispatchCode 0 sites)
+            (pre :=
+              pre ++ Assembly.StackShuffle.guardedLiftBuriedToTop depth)
+            (post := post) (state := prepared)
+            hTopDepth rfl rfl (by omega) hGetTop hFind
+            hDispatchFits hPrepared.2.2 hResolvedTargets'
+            hResolvedCases' hLabels'
+        exact Assembly.Source.Eventually.mono
+          (by
+            simpa [TypedCfg.Terminator.returnDispatchSharedCode,
+              List.append_assoc] using hDispatch)
+          (by
+            intro outcome hOutcome
+            have hErase :
+                state.stack.eraseIdx depth = front ++ suffix := by
+              rw [hStack, ← hFront]
+              exact List.eraseIdx_append_at_length front suffix token
+            have hPreparedCleanData :
+                Assembly.SameRuntimeData
+                  { prepared with stack := front ++ suffix }
+                  { state with stack := front ++ suffix } :=
+              Assembly.eraseRuntimeControl_with_stack_congr
+                (left := prepared)
+                (right :=
+                  { state with stack := token :: front ++ suffix })
+                (stack := front ++ suffix)
+                hPrepared.2.1
+            simp [Block.runTerm, hTopDepth, hGetTop, hFind,
+              hDepth, hGet, hPrepared.1, Outcome.Simulates] at hOutcome ⊢
+            rcases hOutcome with ⟨dest, hDest, hRun⟩
+            have hDest' :
+                (pre ++
+                    (TypedCfg.Terminator.returnDispatchSharedCode depth sites ++
+                      post)).labelPc target =
+                  some dest := by
+              simpa [TypedCfg.Terminator.returnDispatchSharedCode,
+                List.append_assoc] using hDest
+            refine ⟨dest, hDest', ?_⟩
+            cases outcome with
+            | error err => cases hRun
+            | ok result =>
+                cases result with
+                | halted halt => cases hRun
+                | running final =>
+                    rcases hRun with ⟨hPcFinal, hData⟩
+                    exact
+                      ⟨hPcFinal,
+                        by
+                          simpa [hErase, hPrepared.1] using
+                            Assembly.SameRuntimeData.trans
+                              hData hPreparedCleanData⟩)
+
+theorem returnDispatch_shared_missing_token_eventually
+    {shape : Shape} {returnCount depth : Nat}
+    {sites : List ReturnSite}
+    {code pre post : Assembly.Program} {state : EVMState}
+    (hDepth : shape.returnTokenDepth? = some depth)
+    (hCount : depth = returnCount)
+    (hSites : sites ≠ [])
+    (hCode :
+      code = TypedCfg.Terminator.returnDispatchSharedCode depth sites)
+    (hBound : depth < 16)
+    (hGet : state.stack[depth]? = none)
+    (hFits : Assembly.Program.PCFitsFrom pre code)
+    (hPc : state.pc = pre.pcAfter) :
+    Assembly.Source.Eventually (pre ++ code ++ post) state
+      (Outcome.Simulates (pre ++ code ++ post)
+        (Block.runTerm shape
+          (.returnDispatch returnCount sites) state)) := by
+  subst code
+  subst returnCount
+  cases sites with
+  | nil =>
+      exact (hSites rfl).elim
+  | cons site rest =>
+      let duplicate :=
+        Assembly.StackShuffle.dupInstr (depth + 1)
+      let restCode : Assembly.Program :=
+        Assembly.Instr.prim .pop ::
+          (Assembly.StackShuffle.liftBuriedToTop depth ++
+            TypedCfg.Terminator.returnDispatchCode 0 (site :: rest))
+      have hCodeHead :
+          TypedCfg.Terminator.returnDispatchSharedCode depth (site :: rest) =
+            duplicate :: restCode := by
+        simp [duplicate, restCode,
+          TypedCfg.Terminator.returnDispatchSharedCode,
+          Assembly.StackShuffle.guardedLiftBuriedToTop,
+          Assembly.StackShuffle.guardBuried, List.append_assoc]
+      have hLen : state.stack.length ≤ depth := by
+        rw [List.getElem?_eq_none_iff] at hGet
+        exact hGet
+      have hDupError :
+          Assembly.Target.stepInstr
+              (Assembly.StackShuffle.targetInstr duplicate)
+              state =
+            .error .StackUnderflow := by
+        rw [show
+          duplicate =
+            Assembly.StackShuffle.dupInstr (depth + 1) from rfl]
+        rw [Assembly.StackShuffle.dupInstr_step_eq_dup
+          (by omega) (by omega)]
+        simp [EvmYul.dup,
+          show ¬depth + 1 ≤ state.stack.length by omega]
+      refine ⟨1, .error .StackUnderflow, ?_, ?_⟩
+      · rw [show
+          pre ++
+              TypedCfg.Terminator.returnDispatchSharedCode depth
+                (site :: rest) ++ post =
+            pre ++ duplicate :: (restCode ++ post) by
+            rw [hCodeHead]
+            simp [List.append_assoc]]
+        rw [source_runNResult_one_at_boundary hFits.1 hPc]
+        have hLocal :
+            Assembly.StackShuffle.SourceLocalInstr duplicate := by
+          simpa [duplicate] using
+            (Assembly.StackShuffle.dupInstr_sourceLocal
+              (n := depth + 1) (by omega) (by omega))
+        simp only [Assembly.Source.stepAtResult]
+        rw [Assembly.StackShuffle.source_stepAt_eq_targetInstr hLocal,
+          hDupError]
+        rfl
+      · simp [Block.runTerm, hDepth, hGet, Outcome.Simulates]
+
 theorem lowerAt?_eventually_of_direct
     {shape : Shape} {term : TypedCfg.Terminator}
     {code pre post : Assembly.Program} {state : EVMState}
@@ -2225,13 +2481,14 @@ theorem lowerAt?_eventually
           by_cases hBound : depth < 16
           · have hFacts :
                 (sites ≠ [] ∧ depth = returnCount) ∧
-                  TypedCfg.Terminator.returnDispatchCode depth sites = code := by
+                  TypedCfg.Terminator.returnDispatchLoweredCode depth sites =
+                    code := by
               simpa [TypedCfg.Terminator.lowerAt?, hDepth,
                 TypedCfg.Terminator.returnDispatchCode?, hBound] using hLower
             have hGood : sites ≠ [] ∧ depth = returnCount := hFacts.1
-            have hCodeEq :
+            have hLoweredCodeEq :
                 code =
-                  TypedCfg.Terminator.returnDispatchCode depth sites :=
+                  TypedCfg.Terminator.returnDispatchLoweredCode depth sites :=
               hFacts.2.symm
             have hResolvedCases :
                 Preservation.Terminator.ResolvedCaseLabels
@@ -2241,22 +2498,42 @@ theorem lowerAt?_eventually
                 (by
                   simp only [TypedCfg.Terminator.definedLabels]
                   exact List.mem_map.mpr ⟨site, hMem, rfl⟩)
-            cases hGet : state.stack[depth]? with
-            | none =>
-                exact returnDispatch_missing_token_eventually
-                  hDepth hGood.2 hGood.1 hCodeEq hBound hGet
-                  hFits hPc
-            | some token =>
-                cases hFind :
-                    Block.ReturnSite.findTarget? token sites with
+            by_cases hShared : 2 < depth * (sites.length - 1)
+            · have hCodeEq :
+                  code =
+                    TypedCfg.Terminator.returnDispatchSharedCode depth sites := by
+                rw [hLoweredCodeEq]
+                simp [TypedCfg.Terminator.returnDispatchLoweredCode, hShared]
+              cases hGet : state.stack[depth]? with
                 | none =>
-                    exact returnDispatch_unknown_token_eventually
-                      hDepth hGood.2 hCodeEq hBound hGet hFind
-                      hFits hPc hResolvedCases
-                | some target =>
-                    exact returnDispatch_selected_eventually
-                      hDepth hGood.2 hCodeEq hBound hGet hFind
-                      hFits hPc hResolved.1 hResolvedCases hLabels
+                    exact returnDispatch_shared_missing_token_eventually
+                      hDepth hGood.2 hGood.1 hCodeEq hBound hGet
+                      hFits hPc
+                | some token =>
+                    exact returnDispatch_shared_present_eventually
+                      hDepth hGood.2 hCodeEq hBound hGet hFits hPc
+                      hResolved.1 hResolvedCases hLabels
+            · have hCodeEq :
+                  code =
+                    TypedCfg.Terminator.returnDispatchCode depth sites := by
+                rw [hLoweredCodeEq]
+                simp [TypedCfg.Terminator.returnDispatchLoweredCode, hShared]
+              cases hGet : state.stack[depth]? with
+              | none =>
+                  exact returnDispatch_missing_token_eventually
+                    hDepth hGood.2 hGood.1 hCodeEq hBound hGet
+                    hFits hPc
+              | some token =>
+                  cases hFind :
+                      Block.ReturnSite.findTarget? token sites with
+                  | none =>
+                      exact returnDispatch_unknown_token_eventually
+                        hDepth hGood.2 hCodeEq hBound hGet hFind
+                        hFits hPc hResolvedCases
+                  | some target =>
+                      exact returnDispatch_selected_eventually
+                        hDepth hGood.2 hCodeEq hBound hGet hFind
+                        hFits hPc hResolved.1 hResolvedCases hLabels
           · simp [TypedCfg.Terminator.lowerAt?, hDepth,
               TypedCfg.Terminator.returnDispatchCode?, hBound] at hLower
 

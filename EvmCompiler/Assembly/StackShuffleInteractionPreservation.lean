@@ -419,6 +419,197 @@ theorem dispatchTest_openRunUntilTransferWithPolicy
   rw [hJumpFinalEq]
 
 /--
+The return-dispatch stack guard consumes its temporary duplicate and resumes
+with the original stack. Both instructions are closed and therefore silent
+under every transfer policy.
+-/
+theorem guardBuried_openRunUntilTransferWithPolicy
+    (continueTransfer : Instr → Bool)
+    {front suffix : List Word} {token : Word}
+    {pre post : Program} {state : EVMState} (fuel : Nat)
+    (hFits : Program.PCFitsFrom pre (guardBuried front.length))
+    (hPc :
+      ({ state with stack := front ++ token :: suffix }).pc =
+        pre.pcAfter)
+    (hBound : front.length < 16) :
+    let start : EVMState :=
+      { state with stack := front ++ token :: suffix }
+    let afterDup : EVMState :=
+      start.replaceStackAndIncrPC
+        (token :: front ++ token :: suffix)
+    let final : EVMState :=
+      { state with
+        stack := front ++ token :: suffix
+        pc := (pre ++ guardBuried front.length).pcAfter }
+    InteractionSemantics.Source.openRunUntilTransferWithPolicy
+        continueTransfer
+        (pre ++ guardBuried front.length ++ post)
+        (fuel + 2) start =
+      InteractionSemantics.Source.openRunUntilTransferWithPolicy
+        continueTransfer
+        (pre ++ guardBuried front.length ++ post)
+        fuel final := by
+  let duplicate := dupInstr (front.length + 1)
+  let start : EVMState :=
+    { state with stack := front ++ token :: suffix }
+  let afterDup : EVMState :=
+    start.replaceStackAndIncrPC (token :: front ++ token :: suffix)
+  let guarded : EVMState :=
+    afterDup.replaceStackAndIncrPC (front ++ token :: suffix)
+  let final : EVMState :=
+    { state with
+      stack := front ++ token :: suffix
+      pc := (pre ++ guardBuried front.length).pcAfter }
+  have hDupStep :
+      Target.stepInstr (targetInstr duplicate) start = .ok afterDup := by
+    rw [show duplicate = dupInstr (front.length + 1) from rfl]
+    rw [dupInstr_step_eq_dup (by omega) (by omega)]
+    simpa [afterDup, start, List.append_assoc] using
+      (dup_append_token (state := state) (front := front)
+        (suffix := suffix) (token := token))
+  have hPopStep :
+      Target.stepInstr (targetInstr (.prim .pop)) afterDup =
+        .ok guarded := by
+    simp [targetInstr, guarded, afterDup, start, Target.stepInstr,
+      PrimOp.step, PrimOp.continuingStep?, PrimStep.run,
+      EvmYul.Stack.pop, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, List.append_assoc]
+  have hDupByte : duplicate.byteSize = 1 :=
+    dupInstr_byteSize (by omega) (by omega)
+  have hAfterDupPc : afterDup.pc = (pre ++ [duplicate]).pcAfter := by
+    have hPcState : state.pc = pre.pcAfter := by simpa [start] using hPc
+    calc
+      afterDup.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+        simp [afterDup, start, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      _ = pre.pcAfter + EvmYul.UInt256.ofNat 1 := by rw [hPcState]
+      _ = EvmYul.UInt256.ofNat (pre.byteLength + 1) := by
+        rw [Program.pcAfter, UInt256_ofNat_add]
+      _ = (pre ++ [duplicate]).pcAfter := by
+        simp [Program.pcAfter, Program.byteLength_append,
+          Program.byteLength, hDupByte]
+  have hGuardedPc :
+      guarded.pc = (pre ++ guardBuried front.length).pcAfter := by
+    calc
+      guarded.pc = afterDup.pc + EvmYul.UInt256.ofNat 1 := by
+        simp [guarded, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      _ = (pre ++ [duplicate]).pcAfter + EvmYul.UInt256.ofNat 1 := by
+        rw [hAfterDupPc]
+      _ =
+          EvmYul.UInt256.ofNat ((pre ++ [duplicate]).byteLength + 1) := by
+        rw [Program.pcAfter, UInt256_ofNat_add]
+      _ = (pre ++ guardBuried front.length).pcAfter := by
+        simp [guardBuried, duplicate, Program.pcAfter,
+          Program.byteLength_append, Program.byteLength, Instr.byteSize,
+          Nat.add_assoc]
+  have hGuardedEq : guarded = final := by
+    apply state_eq_of_fields
+    · simp [guarded, final, afterDup, start,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+    · simpa [final] using hGuardedPc
+    · simp [guarded, final, afterDup, start,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+    · simp [guarded, final, afterDup, start,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+  have hDupPlain :
+      Source.stepAtResult
+          (pre ++ duplicate :: (.prim .pop :: post))
+          pre.byteLength duplicate start =
+        .ok (.running afterDup) := by
+    have hWhole :=
+      source_stepResult_local
+        (instr := duplicate) (pre := pre)
+        (post := .prim .pop :: post)
+        (state := start) (final := afterDup)
+        (dupInstr_sourceLocal (by omega) (by omega))
+        (dupInstr_haltKind?_none (by omega) (by omega))
+        (by simpa [guardBuried, duplicate] using hFits.1)
+        (by simpa [start] using hPc) hDupStep
+    have hWhole' :
+        Source.stepResult
+            (pre ++ duplicate :: (.prim .pop :: post))
+            start =
+          .ok (.running afterDup) := by
+      simpa using hWhole
+    rw [source_stepResult_at_boundary
+      (by simpa [guardBuried, duplicate] using hFits.1)
+      (by simpa [start] using hPc)] at hWhole'
+    exact hWhole'
+  have hDupOpen :
+      InteractionSemantics.Source.openStepAtResult
+          (pre ++ duplicate :: (.prim .pop :: post))
+          pre.byteLength duplicate start =
+        .done (.ok (.running afterDup)) := by
+    rw [source_openStepAtResult_eq_done_of_stepAt
+      (openStepAt_dupInstr_eq_done (by omega) (by omega))]
+    exact congrArg Simulation.Interaction.done hDupPlain
+  have hPopFits : (pre ++ [duplicate]).PCFits := by
+    simpa [guardBuried, duplicate] using hFits.2.1
+  have hPopPlain :
+      Source.stepAtResult
+          ((pre ++ [duplicate]) ++ .prim .pop :: post)
+          (pre ++ [duplicate]).byteLength (.prim .pop) afterDup =
+        .ok (.running guarded) := by
+    have hWhole :=
+      source_stepResult_local
+        (instr := Instr.prim .pop) (pre := pre ++ [duplicate])
+        (post := post) (state := afterDup) (final := guarded)
+        (by simp [SourceLocalInstr]) rfl
+        hPopFits hAfterDupPc hPopStep
+    have hWhole' :
+        Source.stepResult
+            ((pre ++ [duplicate]) ++ .prim .pop :: post)
+            afterDup =
+          .ok (.running guarded) := by
+      simpa using hWhole
+    rw [source_stepResult_at_boundary hPopFits hAfterDupPc] at hWhole'
+    exact hWhole'
+  have hPopOpen :
+      InteractionSemantics.Source.openStepAtResult
+          ((pre ++ [duplicate]) ++ .prim .pop :: post)
+          (pre ++ [duplicate]).byteLength (.prim .pop) afterDup =
+        .done (.ok (.running guarded)) := by
+    rw [source_openStepAtResult_eq_done_of_stepAt
+      (source_openStepAt_prim_closed (by rfl) (by decide) (by decide))]
+    exact congrArg Simulation.Interaction.done hPopPlain
+  have hDupFlow :
+      duplicate.classifyFlowWith continueTransfer start
+          (.running afterDup) =
+        .next afterDup := by
+    let n := front.length
+    have hn : n < 16 := by simpa [n] using hBound
+    change
+      (dupInstr (n + 1)).classifyFlowWith continueTransfer start
+          (.running afterDup) =
+        .next afterDup
+    interval_cases n <;> rfl
+  have hPopFlow :
+      (Instr.prim .pop).classifyFlowWith continueTransfer afterDup
+          (.running guarded) =
+        .next guarded := by
+    rfl
+  dsimp only
+  rw [show
+    pre ++ guardBuried front.length ++ post =
+      pre ++ duplicate :: (.prim .pop :: post) by
+    simp [guardBuried, duplicate]]
+  rw [show fuel + 2 = (fuel + 1) + 1 by omega]
+  rw [source_openRunUntilTransferWithPolicy_succ_of_step_running
+    continueTransfer (fuel + 1)
+    (by simpa [guardBuried, duplicate] using hFits.1)
+    (by simpa [start] using hPc) hDupOpen hDupFlow]
+  rw [show
+    pre ++ duplicate :: (.prim .pop :: post) =
+      (pre ++ [duplicate]) ++ .prim .pop :: post by simp]
+  rw [source_openRunUntilTransferWithPolicy_succ_of_step_running
+    continueTransfer fuel hPopFits hAfterDupPc hPopOpen hPopFlow]
+  rw [hGuardedEq]
+
+/--
 The straight-line stack shuffle that lifts a buried word consumes exactly its
 instruction-list length and then resumes the shared transfer runner.
 -/
@@ -633,6 +824,93 @@ theorem liftBuriedToTop_openRunUntilTransferWithPolicy
         (by simp [mid])
         hSwapOpen hSwapFlow]
       rw [hFinalEq]
+
+/--
+The guarded lift first validates the buried item without changing the stack,
+then reuses the certified lift sequence to place that item on top.
+-/
+theorem guardedLiftBuriedToTop_openRunUntilTransferWithPolicy
+    (continueTransfer : Instr → Bool)
+    {front suffix : List Word} {token : Word}
+    {pre post : Program} {state : EVMState} (fuel : Nat)
+    (hFits :
+      Program.PCFitsFrom pre (guardedLiftBuriedToTop front.length))
+    (hPc :
+      ({ state with stack := front ++ token :: suffix }).pc =
+        pre.pcAfter)
+    (hBound : front.length < 16) :
+    let final : EVMState :=
+      { state with
+        stack := token :: front ++ suffix
+        pc := (pre ++ guardedLiftBuriedToTop front.length).pcAfter }
+    InteractionSemantics.Source.openRunUntilTransferWithPolicy
+        continueTransfer
+        (pre ++ guardedLiftBuriedToTop front.length ++ post)
+        (fuel + (guardedLiftBuriedToTop front.length).length)
+        { state with stack := front ++ token :: suffix } =
+      InteractionSemantics.Source.openRunUntilTransferWithPolicy
+        continueTransfer
+        (pre ++ guardedLiftBuriedToTop front.length ++ post)
+        fuel final := by
+  have hGuardFits :
+      Program.PCFitsFrom pre (guardBuried front.length) :=
+    Program.PCFitsFrom.left
+      (by simpa [guardedLiftBuriedToTop, List.append_assoc] using hFits)
+  have hLiftFits :
+      Program.PCFitsFrom (pre ++ guardBuried front.length)
+        (liftBuriedToTop front.length) :=
+    Program.PCFitsFrom.right
+      (by simpa [guardedLiftBuriedToTop, List.append_assoc] using hFits)
+  let mid : EVMState :=
+    { state with
+      stack := front ++ token :: suffix
+      pc := (pre ++ guardBuried front.length).pcAfter }
+  let final : EVMState :=
+    { state with
+      stack := token :: front ++ suffix
+      pc := (pre ++ guardedLiftBuriedToTop front.length).pcAfter }
+  have hGuard :=
+    guardBuried_openRunUntilTransferWithPolicy
+      continueTransfer
+      (front := front) (suffix := suffix) (token := token)
+      (pre := pre) (post := liftBuriedToTop front.length ++ post)
+      (state := state)
+      (fuel := fuel + (liftBuriedToTop front.length).length)
+      hGuardFits hPc hBound
+  have hGuard' :
+      InteractionSemantics.Source.openRunUntilTransferWithPolicy
+          continueTransfer
+          (pre ++ guardedLiftBuriedToTop front.length ++ post)
+          ((fuel + (liftBuriedToTop front.length).length) + 2)
+          { state with stack := front ++ token :: suffix } =
+        InteractionSemantics.Source.openRunUntilTransferWithPolicy
+          continueTransfer
+          (pre ++ guardedLiftBuriedToTop front.length ++ post)
+          (fuel + (liftBuriedToTop front.length).length) mid := by
+    simpa [guardedLiftBuriedToTop, mid, List.append_assoc] using hGuard
+  have hLift :=
+    liftBuriedToTop_openRunUntilTransferWithPolicy
+      continueTransfer
+      (front := front) (suffix := suffix) (token := token)
+      (pre := pre ++ guardBuried front.length) (post := post)
+      (state := mid) (fuel := fuel)
+      hLiftFits (by simp [mid]) (by omega)
+  have hLift' :
+      InteractionSemantics.Source.openRunUntilTransferWithPolicy
+          continueTransfer
+          (pre ++ guardedLiftBuriedToTop front.length ++ post)
+          (fuel + (liftBuriedToTop front.length).length) mid =
+        InteractionSemantics.Source.openRunUntilTransferWithPolicy
+          continueTransfer
+          (pre ++ guardedLiftBuriedToTop front.length ++ post)
+          fuel final := by
+    simpa [guardedLiftBuriedToTop, mid, final, List.append_assoc] using hLift
+  rw [show
+    fuel + (guardedLiftBuriedToTop front.length).length =
+      (fuel + (liftBuriedToTop front.length).length) + 2 by
+    simp [guardedLiftBuriedToTop, guardBuried]
+    omega]
+  rw [hGuard', hLift']
 
 /--
 Removing a buried word consumes the lift sequence and one final `POP`, then

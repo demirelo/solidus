@@ -208,6 +208,133 @@ theorem uint256_eq_ne_zero (left right : Word) :
     simp [EvmYul.UInt256.eq, hOne]
   · simp [EvmYul.UInt256.eq, hEq, hZero]
 
+theorem guardBuried_source_exists {state : EVMState}
+    {front suffix : List Word} {token : Word}
+    {pre post : Program}
+    (hFits : Program.PCFitsFrom pre (guardBuried front.length))
+    (hPc :
+      ({ state with stack := front ++ token :: suffix }).pc =
+        pre.pcAfter)
+    (hBound : front.length < 16) :
+    Source.Eventually
+      (pre ++ guardBuried front.length ++ post)
+      { state with stack := front ++ token :: suffix }
+      (fun outcome =>
+        match outcome with
+        | .ok (.running final) =>
+            final.stack = front ++ token :: suffix ∧
+              eraseRuntimeControl final =
+                eraseRuntimeControl
+                  { state with stack := front ++ token :: suffix } ∧
+              final.pc = (pre ++ guardBuried front.length).pcAfter
+        | _ => False) := by
+  let duplicate := dupInstr (front.length + 1)
+  let start : EVMState :=
+    { state with stack := front ++ token :: suffix }
+  let afterDup : EVMState :=
+    start.replaceStackAndIncrPC (token :: front ++ token :: suffix)
+  let finalState : EVMState :=
+    afterDup.replaceStackAndIncrPC (front ++ token :: suffix)
+  have hDupStep :
+      Target.stepInstr (targetInstr duplicate) start = .ok afterDup := by
+    rw [show duplicate = dupInstr (front.length + 1) from rfl]
+    rw [dupInstr_step_eq_dup (by omega) (by omega)]
+    simpa [afterDup, start, List.append_assoc] using
+      (dup_append_token (state := state) (front := front)
+        (suffix := suffix) (token := token))
+  have hPopStep :
+      Target.stepInstr (targetInstr (.prim .pop)) afterDup =
+        .ok finalState := by
+    simp [targetInstr, finalState, afterDup, start, Target.stepInstr,
+      PrimOp.step, PrimOp.continuingStep?, PrimStep.run,
+      EvmYul.Stack.pop, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, List.append_assoc]
+  have hDupByte : duplicate.byteSize = 1 :=
+    dupInstr_byteSize (by omega) (by omega)
+  have hAfterDupPc : afterDup.pc = (pre ++ [duplicate]).pcAfter := by
+    have hPcState : state.pc = pre.pcAfter := by simpa [start] using hPc
+    calc
+      afterDup.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+        simp [afterDup, start, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      _ = pre.pcAfter + EvmYul.UInt256.ofNat 1 := by rw [hPcState]
+      _ = EvmYul.UInt256.ofNat (pre.byteLength + 1) := by
+        rw [Program.pcAfter, UInt256_ofNat_add]
+      _ = (pre ++ [duplicate]).pcAfter := by
+        simp [Program.pcAfter, Program.byteLength_append,
+          Program.byteLength, hDupByte]
+  have hFinalPc :
+      finalState.pc = (pre ++ [duplicate, .prim .pop]).pcAfter := by
+    calc
+      finalState.pc = afterDup.pc + EvmYul.UInt256.ofNat 1 := by
+        simp [finalState, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      _ = (pre ++ [duplicate]).pcAfter + EvmYul.UInt256.ofNat 1 := by
+        rw [hAfterDupPc]
+      _ =
+          EvmYul.UInt256.ofNat ((pre ++ [duplicate]).byteLength + 1) := by
+        rw [Program.pcAfter, UInt256_ofNat_add]
+      _ = (pre ++ [duplicate, .prim .pop]).pcAfter := by
+        simp [Program.pcAfter, Program.byteLength_append,
+          Program.byteLength, Instr.byteSize, Nat.add_assoc]
+  have hDupSource :
+      Source.stepResult
+          (pre ++ [duplicate] ++ ([Instr.prim .pop] ++ post))
+          start =
+        .ok (.running afterDup) := by
+    exact source_stepResult_local
+      (instr := duplicate) (pre := pre)
+      (post := [Instr.prim .pop] ++ post)
+      (state := start) (final := afterDup)
+      (dupInstr_sourceLocal (by omega) (by omega))
+      (dupInstr_haltKind?_none (by omega) (by omega))
+      (by simpa [guardBuried, duplicate] using hFits.1)
+      (by simpa [start] using hPc) hDupStep
+  have hPopSource :
+      Source.stepResult
+          (pre ++ [duplicate] ++ ([Instr.prim .pop] ++ post))
+          afterDup =
+        .ok (.running finalState) := by
+    simpa [List.append_assoc] using
+      (source_stepResult_local
+        (instr := Instr.prim .pop) (pre := pre ++ [duplicate])
+        (post := post) (state := afterDup) (final := finalState)
+        (by simp [SourceLocalInstr]) rfl
+        (by simpa [guardBuried, duplicate] using hFits.2.1)
+        hAfterDupPc hPopStep)
+  refine ⟨2, .ok (.running finalState), ?_, ?_⟩
+  · unfold Source.runNResult Control.runNResultWith
+    rw [show
+      pre ++ guardBuried front.length ++ post =
+        pre ++ [duplicate] ++ ([.prim .pop] ++ post) by
+      simp [guardBuried, duplicate, List.append_assoc]]
+    change
+      (do
+        let result ←
+          Source.stepResult
+            (pre ++ [duplicate] ++ ([Instr.prim .pop] ++ post))
+            start
+        match result with
+        | .running state' =>
+            Source.runNResult
+              (pre ++ [duplicate] ++ ([Instr.prim .pop] ++ post))
+              1 state'
+        | .halted halt => .ok (.halted halt)) =
+        .ok (.running finalState)
+    rw [hDupSource]
+    simp only [Bind.bind, Except.bind]
+    unfold Control.runNResultWith
+    rw [hPopSource]
+    rfl
+  · refine ⟨?_, ?_, ?_⟩
+    · simp [finalState, afterDup, start,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+    · simp [finalState, afterDup, start, eraseRuntimeControl,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+    · simpa [guardBuried, duplicate] using hFinalPc
+
 theorem dispatchCondition_source_exists {state : EVMState}
     {front suffix : List Word} {token probe : Word}
     {pre post : Program}
@@ -685,6 +812,111 @@ theorem liftBuriedToTop_source_exists {state : EVMState}
               _ = (pre ++ liftBuriedToTop (front ++ [last]).length).pcAfter := by
                 rw [hCodeEq]
                 simp [List.append_assoc]
+
+theorem guardedLiftBuriedToTop_source_exists {state : EVMState}
+    {front suffix : List Word} {token : Word}
+    {pre post : Program}
+    (hFits :
+      Program.PCFitsFrom pre (guardedLiftBuriedToTop front.length))
+    (hPc :
+      ({ state with stack := front ++ token :: suffix }).pc =
+        pre.pcAfter)
+    (hBound : front.length < 16) :
+    Source.Eventually
+      (pre ++ guardedLiftBuriedToTop front.length ++ post)
+      { state with stack := front ++ token :: suffix }
+      (fun outcome =>
+        match outcome with
+        | .ok (.running final) =>
+            final.stack = token :: front ++ suffix ∧
+              eraseRuntimeControl final =
+                eraseRuntimeControl
+                  { state with stack := token :: front ++ suffix } ∧
+              final.pc =
+                (pre ++ guardedLiftBuriedToTop front.length).pcAfter
+        | _ => False) := by
+  have hGuardFits :
+      Program.PCFitsFrom pre (guardBuried front.length) :=
+    Program.PCFitsFrom.left
+      (by simpa [guardedLiftBuriedToTop, List.append_assoc] using hFits)
+  have hLiftFits :
+      Program.PCFitsFrom (pre ++ guardBuried front.length)
+        (liftBuriedToTop front.length) :=
+    Program.PCFitsFrom.right
+      (by simpa [guardedLiftBuriedToTop, List.append_assoc] using hFits)
+  have hGuard :=
+    guardBuried_source_exists
+      (state := state) (front := front) (suffix := suffix)
+      (token := token) (pre := pre)
+      (post := liftBuriedToTop front.length ++ post)
+      hGuardFits hPc hBound
+  refine
+    Source.Eventually.bind_running
+      (program :=
+        pre ++ guardedLiftBuriedToTop front.length ++ post)
+      (middle := fun guarded =>
+        guarded.stack = front ++ token :: suffix ∧
+          eraseRuntimeControl guarded =
+            eraseRuntimeControl
+              { state with stack := front ++ token :: suffix } ∧
+          guarded.pc = (pre ++ guardBuried front.length).pcAfter)
+      ?_ ?_
+  · exact Source.Eventually.mono
+      (by
+        simpa [guardedLiftBuriedToTop, List.append_assoc] using hGuard)
+      (by
+        intro outcome hOutcome
+        cases outcome with
+        | error err => cases hOutcome
+        | ok result =>
+            cases result with
+            | halted halt => cases hOutcome
+            | running guarded => exact hOutcome)
+  · intro guarded hGuarded
+    have hGuardedRecord :
+        { guarded with stack := front ++ token :: suffix } = guarded := by
+      rw [← hGuarded.1]
+    have hLift :=
+      liftBuriedToTop_source_exists
+        (state := guarded) (front := front) (suffix := suffix)
+        (token := token) (pre := pre ++ guardBuried front.length)
+        (post := post) hLiftFits
+        (by simpa [hGuarded.1] using hGuarded.2.2)
+        (by omega)
+    rw [hGuardedRecord] at hLift
+    exact Source.Eventually.mono
+      (by
+        simpa [guardedLiftBuriedToTop, List.append_assoc] using hLift)
+      (by
+        intro outcome hOutcome
+        cases outcome with
+        | error err => cases hOutcome
+        | ok result =>
+            cases result with
+            | halted halt => cases hOutcome
+            | running final =>
+                rcases hOutcome with ⟨hStack, hErase, hPcFinal⟩
+                refine ⟨hStack, ?_, ?_⟩
+                · calc
+                    eraseRuntimeControl final =
+                        eraseRuntimeControl
+                          { guarded with
+                            stack := token :: front ++ suffix } :=
+                      hErase
+                    _ =
+                        eraseRuntimeControl
+                          { state with
+                            stack := token :: front ++ suffix } := by
+                      exact
+                        eraseRuntimeControl_with_stack_congr
+                          (left := guarded)
+                          (right :=
+                            { state with
+                              stack := front ++ token :: suffix })
+                          (stack := token :: front ++ suffix)
+                          hGuarded.2.1
+                · simpa [guardedLiftBuriedToTop, List.append_assoc] using
+                    hPcFinal)
 
 theorem pop_cons_step {state : EVMState} {top : Word}
     {suffix : List Word} :
