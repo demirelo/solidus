@@ -63,11 +63,16 @@ namespace EvmCompiler.TypedCfg.BlockReorder
 open EvmCompiler.TypedCfg
 open List
 
-/-- The unconditional-jump fallthrough candidate of a block: the target label of
-its terminator when that terminator is an unconditional `jump`. -/
+/-- The fallthrough candidate of a block: the label its terminator's *final*
+lowered instruction jumps to.  `fallthrough`/`jump` lower to `[jump t]` and
+`jumpi target next` lowers to `[jumpi target, jump next]`, so in all three cases
+placing that label next lets the frozen serializer elide the trailing
+`jump L; label L` seam. -/
 def succLabel? (b : Block) : Option Label :=
   match b.term with
+  | .fallthrough t => some t
   | .jump t => some t
+  | .jumpi _ next => some next
   | _ => none
 
 /-- List-`find?` block lookup by label (returns an actual member of `blocks`,
