@@ -1,7 +1,7 @@
 {
  "schema_version": 2,
  "input_epoch": "optimized-yul",
- "commit": "15f4dbd8",
+ "commit": "7022b5fc",
  "date": "2026-07-21T17:52:30Z",
  "solc_version": "0.8.26+commit.8a97fa7a.Darwin.appleclang",
  "executor": {
@@ -671,5 +671,5 @@
  "wall_ms": 743563,
  "compile_wall_ms": 713831,
  "gas_wall_ms": 29732,
- "commit_note": "generated from the tree finalized as 15f4dbd8 (launch record-0 baseline); measurement validity rests on tree content"
+ "commit_note": "generated from the tree finalized as 7022b5fc (launch record-0 baseline); measurement validity rests on tree content"
 }
