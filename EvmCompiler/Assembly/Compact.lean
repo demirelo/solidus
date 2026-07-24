@@ -79,6 +79,7 @@ def pushOp? : Nat -> Option EVMOp
 
 inductive Instr where
   | push (width : Nat) (value : Word)
+  | push0
   | jump
   | jumpi
   | jumpdest
@@ -89,11 +90,11 @@ namespace Instr
 
 def byteSize : Instr -> Nat
   | .push width _ => width + 1
-  | .jump | .jumpi | .jumpdest | .prim _ => 1
+  | .push0 | .jump | .jumpi | .jumpdest | .prim _ => 1
 
 def Valid : Instr -> Prop
   | .push width value => FitsWidth width value.toNat
-  | .jump | .jumpi | .jumpdest | .prim _ => True
+  | .push0 | .jump | .jumpi | .jumpdest | .prim _ => True
 
 def PCIndependent : Instr -> Prop
   | .prim .pc => False
@@ -107,6 +108,7 @@ def decoded? : Instr -> Option (Prod EVMOp (Option (Prod Word Nat)))
   | .push width value => do
       let op <- pushOp? width
       some (op, some (value, width))
+  | .push0 => some (EvmYul.Operation.PUSH0, none)
   | .jump => some (EvmYul.Operation.JUMP, none)
   | .jumpi => some (EvmYul.Operation.JUMPI, none)
   | .jumpdest => some (EvmYul.Operation.JUMPDEST, none)
@@ -123,7 +125,9 @@ def ofDecoded? (op : EVMOp) (arg : Option (Prod Word Nat)) : Option Instr :=
   match arg with
   | some (value, width) =>
       if pushOp? width = some op then some (.push width value) else none
-  | none => (TargetInstr.ofDecoded? op none).bind ofTarget?
+  | none =>
+      if op = EvmYul.Operation.PUSH0 then some .push0
+      else (TargetInstr.ofDecoded? op none).bind ofTarget?
 
 theorem ofDecoded?_of_decoded?
     {instr : Instr} {decoded : Prod EVMOp (Option (Prod Word Nat))}
@@ -138,6 +142,10 @@ theorem ofDecoded?_of_decoded?
           simp [decoded?, hOp] at hDecoded
           subst decoded
           simp [ofDecoded?, hOp]
+  | push0 =>
+      simp [decoded?] at hDecoded
+      cases hDecoded
+      rfl
   | jump | jumpi | jumpdest =>
       simp [decoded?, ofDecoded?, ofTarget?] at hDecoded ⊢
       cases hDecoded
@@ -148,7 +156,9 @@ theorem ofDecoded?_of_decoded?
       unfold ofDecoded?
       have hTarget := TargetInstr.ofDecoded?_op_arg (.prim op)
       change TargetInstr.ofDecoded? op.toEVM none = some (.prim op) at hTarget
-      rw [hTarget]
+      have hNe : op.toEVM ≠ EvmYul.Operation.PUSH0 := by
+        cases op <;> simp [PrimOp.toEVM]
+      rw [if_neg hNe, hTarget]
       rfl
 
 theorem byteSize_pos (instr : Instr) : 0 < instr.byteSize := by
@@ -156,7 +166,7 @@ theorem byteSize_pos (instr : Instr) : 0 < instr.byteSize := by
 
 def valid? : Instr -> Bool
   | .push width value => fitsWidth? width value.toNat
-  | .jump | .jumpi | .jumpdest | .prim _ => true
+  | .push0 | .jump | .jumpi | .jumpdest | .prim _ => true
 
 def pcIndependent? : Instr -> Bool
   | .prim .pc => false
@@ -349,7 +359,60 @@ abbrev LabelTable := List (Prod Label Nat)
 
 def pushWidthAt? (pinnedPushPcs : List Nat) (sourcePc : Nat)
     (value : Word) : Option Nat :=
-  if pinnedPushPcs.contains sourcePc then some 32 else widthForWord? value
+  if pinnedPushPcs.contains sourcePc then some 32
+  else if value.toNat = 0 then some 0
+  else widthForWord? value
+
+/-- Physical instruction for a source push laid out at `width` bytes of
+immediate. Width `0` is the `PUSH0` opcode, which only carries the value
+zero. -/
+def pushInstrOfWidth (width : Nat) (value : Word) : Instr :=
+  if width = 0 then .push0 else .push width value
+
+theorem pushInstrOfWidth_byteSize (width : Nat) (value : Word) :
+    (pushInstrOfWidth width value).byteSize = width + 1 := by
+  unfold pushInstrOfWidth
+  by_cases hZero : width = 0
+  · simp [hZero, Instr.byteSize]
+  · simp [hZero, Instr.byteSize]
+
+theorem pushWidthAt?_zero_value {pinnedPushPcs : List Nat} {sourcePc : Nat}
+    {value : Word}
+    (hWidth : pushWidthAt? pinnedPushPcs sourcePc value = some 0) :
+    value = EvmYul.UInt256.ofNat 0 := by
+  unfold pushWidthAt? at hWidth
+  split at hWidth
+  · exact absurd hWidth (by simp)
+  · split at hWidth
+    · next hZero => rw [← Bytecode.uint256_ofNat_toNat value, hZero]
+    · have hFits :=
+        widthForNat?_fits (value := value.toNat)
+          (by simpa [widthForWord?] using hWidth)
+      exact absurd hFits.1 (by omega)
+
+theorem pushInstrOfWidth_valid {pinnedPushPcs : List Nat} {sourcePc : Nat}
+    {value : Word} {width : Nat}
+    (hWidth : pushWidthAt? pinnedPushPcs sourcePc value = some width) :
+    (pushInstrOfWidth width value).Valid := by
+  unfold pushInstrOfWidth
+  by_cases hZero : width = 0
+  · simp [hZero, Instr.Valid]
+  · simp only [hZero, if_false]
+    show FitsWidth width value.toNat
+    unfold pushWidthAt? at hWidth
+    split at hWidth
+    · have hWidth32 : width = 32 := (Option.some.inj hWidth).symm
+      subst hWidth32
+      exact
+        { left := by omega
+          right :=
+            { left := by omega
+              right := by
+                have hLt := Bytecode.uint256_toNat_lt_256_pow_32 value
+                simpa using hLt } }
+    · split at hWidth
+      · exact absurd (Option.some.inj hWidth).symm hZero
+      · exact widthForNat?_fits (by simpa [widthForWord?] using hWidth)
 
 def sourceInstrSizeAt? (pinnedPushPcs : List Nat) (branchWidth sourcePc : Nat) :
     Assembly.Instr -> Option Nat
@@ -457,7 +520,7 @@ def emitInstrRev? (pinnedPushPcs : List Nat)
       some ({ pc := compactPc, instr := .prim op } :: acc)
   | .push value => do
       let width <- pushWidthAt? pinnedPushPcs sourcePc value
-      some ({ pc := compactPc, instr := .push width value } :: acc)
+      some ({ pc := compactPc, instr := pushInstrOfWidth width value } :: acc)
   | .pushLabel _ => none
   | .jump target => do
       let dest <- lookupLabel? table target
@@ -795,7 +858,7 @@ theorem emitSourceBlock?_codeByteLength
             at hSize hCode
           subst compactSize
           subst code
-          rfl
+          simp [Program.codeByteLength, pushInstrOfWidth_byteSize]
   | pushLabel target =>
       simp [sourceInstrSizeAt?] at hSize
   | jump target | jumpi target =>
@@ -1036,6 +1099,11 @@ def encodePush (width : Nat) (value : Word) : List UInt8 :=
   UInt8.ofNat (0x5f + width) ::
     (Bytecode.toBytesLE width value.toNat).reverse
 
+theorem encodePush_zero :
+    encodePush 0 (EvmYul.UInt256.ofNat 0) =
+      [EvmYul.EVM.serializeInstr EvmYul.Operation.PUSH0] := by
+  rfl
+
 theorem encodePush_length (width : Nat) (value : Word) :
     (encodePush width value).length = width + 1 := by
   simp [encodePush, Bytecode.toBytesLE_length, Nat.add_comm]
@@ -1137,6 +1205,7 @@ theorem decodePushAtPrefix
 
 def encodeInstr : Instr -> List UInt8
   | .push width value => encodePush width value
+  | .push0 => encodePush 0 (EvmYul.UInt256.ofNat 0)
   | .jump => Bytecode.encodeInstr .jump
   | .jumpi => Bytecode.encodeInstr .jumpi
   | .jumpdest => Bytecode.encodeInstr .jumpdest
@@ -1147,6 +1216,7 @@ theorem encodeInstr_length (instr : Instr) :
   cases instr with
   | push width value =>
       exact encodePush_length width value
+  | push0 => exact encodePush_length 0 (EvmYul.UInt256.ofNat 0)
   | jump | jumpi | jumpdest => rfl
   | prim op => rfl
 
@@ -1171,6 +1241,12 @@ theorem decodeInstrAtPrefix
       · simp [Instr.decoded?, hOp]
       · apply decodePushAtPrefix pre suffix width value op hValid hOp hPc hStart
         simpa [Instr.byteSize, Nat.add_assoc] using hEnd
+  | push0 =>
+      refine ⟨(EvmYul.Operation.PUSH0, none), rfl, ?_⟩
+      rw [show encodeInstr .push0 = encodePush 0 (EvmYul.UInt256.ofNat 0)
+            from rfl, encodePush_zero]
+      exact Bytecode.decode_single_byte_at_prefix pre suffix
+        EvmYul.Operation.PUSH0 hPc rfl rfl
   | jump =>
       refine ⟨(EvmYul.Operation.JUMP, none), rfl, ?_⟩
       simpa [encodeInstr, Instr.byteSize] using
@@ -3000,6 +3076,7 @@ namespace Instr
 
 def toLogical : Instr -> TargetInstr
   | .push _ value => .push32 value
+  | .push0 => .push32 (EvmYul.UInt256.ofNat 0)
   | .jump => .jump
   | .jumpi => .jumpi
   | .jumpdest => .jumpdest
@@ -3013,6 +3090,9 @@ def openStep : Instr -> EVMState -> Assembly.InteractionSemantics.OpenStep
   | .push width value, state =>
       Assembly.InteractionSemantics.Target.openStepPush
         width value state
+  | .push0, state =>
+      Assembly.InteractionSemantics.Target.openStepPush 0
+        (EvmYul.UInt256.ofNat 0) state
   | .jump, state =>
       Assembly.InteractionSemantics.Target.openStepInstr .jump state
   | .jumpi, state =>
@@ -3066,6 +3146,13 @@ theorem openStep_runtimeRel
       exact
         SameRuntimeData.replaceStackAndIncrPC_of_deltas hRel
           (congrArg (fun stack => stack.push value)
+            (SameRuntimeData.stack_eq hRel))
+  | push0 =>
+      apply Simulation.Interaction.Rel.done
+      apply Simulation.Interaction.ExceptRel.ok
+      exact
+        SameRuntimeData.replaceStackAndIncrPC_of_deltas hRel
+          (congrArg (fun stack => stack.push (EvmYul.UInt256.ofNat 0))
             (SameRuntimeData.stack_eq hRel))
   | jump =>
       change Simulation.Interaction.Rel _
@@ -3162,6 +3249,8 @@ theorem openStepResult_runningAt_next
   cases instr with
   | push width value =>
       exact .done rfl
+  | push0 =>
+      exact .done rfl
   | jump => cases hSequential
   | jumpi => cases hSequential
   | jumpdest =>
@@ -3217,6 +3306,22 @@ inductive SimpleSourceInstrRel : Assembly.Instr -> Instr -> Prop
   | prim (op : PrimOp) : SimpleSourceInstrRel (.prim op) (.prim op)
   | push (width : Nat) (value : Word) :
       SimpleSourceInstrRel (.push value) (.push width value)
+  | push0 : SimpleSourceInstrRel (.push (EvmYul.UInt256.ofNat 0)) .push0
+
+/-- The physical instruction chosen for a source push is always related to
+that source push, whether it is a `PUSH0` or a widened `PUSHn`. -/
+theorem SimpleSourceInstrRel.pushInstrOfWidth
+    {pinnedPushPcs : List Nat} {sourcePc width : Nat} {value : Word}
+    (hWidth : pushWidthAt? pinnedPushPcs sourcePc value = some width) :
+    SimpleSourceInstrRel (.push value) (Compact.pushInstrOfWidth width value) := by
+  unfold Compact.pushInstrOfWidth
+  by_cases hZero : width = 0
+  · subst hZero
+    have hValue := pushWidthAt?_zero_value hWidth
+    subst hValue
+    simpa using SimpleSourceInstrRel.push0
+  · simp only [hZero, if_false]
+    exact SimpleSourceInstrRel.push width value
 
 theorem SimpleSourceInstrRel.openStepResult_eq
     {sourceInstr : Assembly.Instr} {compactInstr : Instr}
@@ -3248,6 +3353,11 @@ theorem SimpleSourceInstrRel.source_runningAt_next
       simpa [Assembly.Instr.byteSize, Instr.byteSize] using
         (Instr.openStepResult_runningAt_next
           (instr := Instr.push 32 value) (state := state) trivial)
+  | push0 =>
+      simpa [Assembly.Instr.byteSize, Instr.byteSize] using
+        (Instr.openStepResult_runningAt_next
+          (instr := Instr.push 32 (EvmYul.UInt256.ofNat 0)) (state := state)
+          trivial)
 
 theorem SimpleSourceInstrRel.compactSequential
     {sourceInstr : Assembly.Instr} {compactInstr : Instr}
@@ -4683,16 +4793,17 @@ theorem compile?_sourceBlock_open_rel
           subst compactSize
           subst code
           let located : Located :=
-            { pc := compactPc, instr := .push width value }
+            { pc := compactPc, instr := pushInstrOfWidth width value }
           have hMem : located ∈ artifact.program.code :=
             hArtifact.mem_program_of_mem_block hBlock (by simp [located])
           exact
             ⟨1, by omega, openRunNResult_one_source_boundary_rel
               (sourcePc := sourcePc) (compactPc := compactPc)
               (sourceInstr := .push value)
-              (compactInstr := .push width value)
-              (by simpa using hNextBoundary)
-              (SimpleSourceInstrRel.push width value)
+              (compactInstr := pushInstrOfWidth width value)
+              (by
+                simpa [pushInstrOfWidth_byteSize] using hNextBoundary)
+              (SimpleSourceInstrRel.pushInstrOfWidth hWidth)
               ((List.forall_iff_forall_mem.mp
                 hArtifact.wellFormed.1) located hMem)
               ((List.forall_iff_forall_mem.mp
