@@ -10,10 +10,10 @@
 #     (gates)     the full ci.yml gate set, reused via `workflow_call`.
 #     (based-on)  verify the PR body declares `Based-on: record-N` and that the
 #                 PR history actually descends from that tag (git ancestry).
-#     (scoring)   a `scoring-requested` label hook that only POSTS A COMMENT
-#                 explaining that private scoring is maintainer-triggered out of
-#                 band. It runs no scoring itself — the real runner is NOT in
-#                 this repo.
+#     (scoring)   a legacy `scoring-requested` label hook that only POSTS A
+#                 COMMENT explaining that private scoring is AUTOMATIC (the
+#                 offline bot polls green arena PRs; no label needed). It runs
+#                 no scoring itself — the real runner is NOT in this repo.
 #
 # TRUST MODEL
 #   Like ci.yml, this is fast-fail UX only. The private scoring runner
@@ -34,8 +34,9 @@ on:
   pull_request:
     branches: [arena]
     types: [opened, reopened, synchronize, edited]
-  # Maintainer applies the `scoring-requested` label. See the scoring job for
-  # why this arm safely uses pull_request_target (it checks out NOTHING).
+  # Legacy label arm (scoring is automatic; the hook just explains that). See
+  # the scoring job for why this safely uses pull_request_target (it checks
+  # out NOTHING).
   pull_request_target:
     types: [labeled]
 
@@ -182,10 +183,11 @@ jobs:
   # ---------------------------------------------------------------------------
   # SCORING-REQUESTED LABEL HOOK  (comment only — no scoring here)
   #
-  #   A maintainer applies the `scoring-requested` label to signal that the PR
-  #   should be scored. This job does NOTHING but post an explanatory comment:
-  #   the actual private scoring runner is sandboxed, offline, and NOT part of
-  #   this repository; it is triggered by the maintainer out of band.
+  #   LEGACY: scoring is now AUTOMATIC — the private scoring bot polls for open
+  #   arena PRs with green required checks; no label is needed. If someone
+  #   applies the label anyway, this job posts a comment explaining that. The
+  #   actual private scoring runner is sandboxed, offline, and NOT part of
+  #   this repository.
   #
   #   SAFETY: this arm uses `pull_request_target` (so it has the write scope
   #   needed to comment on fork PRs) but it CHECKS OUT NOTHING and runs NO PR
@@ -210,17 +212,18 @@ jobs:
         with:
           script: |
             const body = [
-              '### 🏁 Private scoring is maintainer-triggered (out of band)',
+              '### 🏁 Private scoring is automatic — no label needed',
               '',
-              'The `scoring-requested` label was applied. **This label does not',
-              'run any scoring in this repository.** The private scoring runner',
-              'is sandboxed, offline, and lives outside this repo. A maintainer',
-              'triggers it manually.',
+              'The `scoring-requested` label was applied, but **no label is',
+              'required**: the private scoring bot automatically picks up every',
+              'open PR against `arena` whose required public checks are green.',
+              'The runner is sandboxed, offline, and lives outside this repo.',
               '',
               'When it runs, it independently re-verifies the frozen hashes,',
               're-runs the proof gate, compiles the private suite, and reports a',
-              'single number (total gas). Public CI here is only the fast-fail /',
-              'UX layer — see `CHALLENGE.md` for the full flow.',
+              'single number (total gas) as a comment here. Each account gets 3',
+              'private scoring runs per UTC day. Public CI here is only the',
+              'fast-fail / UX layer — see `CHALLENGE.md` for the full flow.',
               '',
               'Nothing further is required from you right now.',
             ].join('\n');
