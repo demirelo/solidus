@@ -116,6 +116,16 @@ def accessible (layout : Locals.Layout) (name : Name) : Bool :=
   | some depth => depth ≤ 17
   | none => false
 
+/--
+Future-only values do not need eager promotion while they remain comfortably
+inside the EVM access window. Keeping five slots of headroom avoids the large
+per-statement permutation churn of promoting every live future value, while
+still moving values that are approaching the `DUP16`/`SWAP16` boundary.
+At genuinely high-pressure points, retain the eager policy so layouts with
+sixteen or more live values do not trade near-term accessibility for size.
+-/
+def futurePromotionDepth : Nat := 12
+
 def orderPriority (pinned : LiveSet) (layout : Locals.Layout) (stmt : Stmt)
     (facts : AllocationLivenessFacts.Point) : List Name :=
   let allDying :=
@@ -131,7 +141,14 @@ def orderPriority (pinned : LiveSet) (layout : Locals.Layout) (stmt : Stmt)
       StackAccess.Stmt.accessPriority stmt ++ reachableDying
   let boundedFuture :=
     (facts.nextUse.filter fun name =>
-      accessible layout name && decide (name ∈ facts.liveAfter)).take 16
+      accessible layout name &&
+        decide (name ∈ facts.liveAfter) &&
+        match Locals.Layout.lookupDepth? name layout with
+        | some depth =>
+            decide (15 < facts.liveBefore.card) ||
+              decide (15 < facts.liveAfter.card) ||
+              decide (futurePromotionDepth < depth)
+        | none => false).take 16
   let preferred :=
     ((AllocationLivenessFacts.stableUnique
         (preferredImmediate ++ boundedFuture)).filter
