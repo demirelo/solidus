@@ -1,0 +1,38 @@
+{
+  "records": [
+    {
+      "tag": "record-0",
+      "commit": "15f4dbd8888ab60322ac4d5a3bc5de1990c77711",
+      "short_commit": "15f4dbd88",
+      "parent_tag": null,
+      "based_on": null,
+      "author": "Solidus reference compiler",
+      "team": "Solidus",
+      "author_url": null,
+      "pr": null,
+      "pr_url": null,
+      "commit_url": "https://github.com/paradigmxyz/solidus/commit/15f4dbd8888ab60322ac4d5a3bc5de1990c77711",
+      "timestamp": "2026-07-22T06:39:13+00:00",
+      "total_gas": 90698381,
+      "total_deploy_gas": 88861246,
+      "total_exec_gas": 1837135,
+      "delta_gas": null,
+      "delta_rel": null,
+      "beats_bar_rel": null,
+      "attestation": {
+        "executor_version": "forge Version: 1.5.1-stable | evm=cancun | deploy=real-create-else-computed | exec=measured-callgas+intrinsic (30M block-budget per call) | budget=30000000",
+        "corpus_id": "private-season-1:c61ed1f8aa756e3e",
+        "solc": "0.8.26",
+        "forge": "1.5.1",
+        "evm_version": "cancun",
+        "scored_contracts": 20,
+        "verdict": "VALID",
+        "method": "runner-owned multi-source solc driver -> Solidus.compile? (solidus-backend raw-image, byte-identical to config/ScoreMain.lean) -> runner gas.py over honest bytes"
+      },
+      "note": "Season-1 launch baseline: reference compiler (record-0 @15f4dbd8) scored over the 20-contract private suite via the multi-source runner driver. Totals-only; per-contract detail is never published."
+    }
+  ],
+  "current_record_tag": "record-0",
+  "generated_at": "2026-07-22T06:39:13+00:00",
+  "__schema__": "solidus records.json v1 (totals-only; see scripts/scorebot/records.py). Season-1 launch seed for the arena-branch ledger."
+}
