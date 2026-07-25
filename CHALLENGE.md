@@ -68,32 +68,39 @@ them, delete them, replace them, as long as the frozen theorems still prove.
 
 ## How to enter
 
-1. Fork the repo; branch from `arena` (the current record) or from any
-   `record-NNN` tag — building on older records is allowed and encouraged.
+1. Fork the repo; branch from the current record's `record-NNN` tag (or
+   any older one — building on older records is allowed and encouraged).
+   Note `arena` itself carries only the baseline + records ledger; records
+   live at their tags, not on the branch.
 2. Optimize. Iterate locally with `scripts/opt_harness.sh full` against the
    public `examples/` corpus.
 3. Open a PR targeting `arena`. State which record you branched from
    (`Based-on: record-NNN`); CI verifies it by git ancestry.
 4. Public CI runs the proof gate, the frozen-hash check, and the public
-   corpus. When it is green and your public-corpus improvement is
-   plausible, a maintainer labels the PR for private scoring.
+   corpus. Once it is green, the scoring bot picks your PR up
+   automatically — no label, no maintainer approval needed.
 5. The private runner (sandboxed, offline) verifies the frozen hashes
    independently, re-runs the proof gate, compiles the private suite, and
-   reports one number: total gas.
-6. Beat the record by the threshold → your PR is merged to `arena`, tagged
-   `record-NNN+1`, and you enter the leaderboard permanently. The
-   leaderboard records every holder chronologically, with the lineage of
-   which record each one built on.
+   reports one number: total gas. Each account gets 3 private scoring runs
+   per UTC day; pushing a new head re-queues the current one.
+6. Beat the record by the threshold → **your PR is not merged**. A
+   maintainer tags your PR's exact head commit as `record-NNN+1` in this
+   repository, and the leaderboard entry points at the branch on your
+   fork. You enter the leaderboard permanently; the leaderboard records
+   every holder chronologically, with the lineage of which record each one
+   built on. Future contestants build on your record by branching from the
+   `record-NNN+1` tag here (or your fork directly).
 
-One private scoring per PR per green public CI. The private suite is
-refreshed between seasons, never within one.
+The private suite is refreshed between seasons, never within one.
 
 Every submission is public and permanent: entries are public PRs, and each
 submission's exact head commit is archived in this repository as a
 `submissions/pr-N-<sha>` tag when the PR is scored or closed — win or lose.
 Anyone can build on any past submission
 (`git fetch origin 'refs/tags/submissions/*:refs/tags/submissions/*'`);
-only record holders are merged to `arena`.
+record holders additionally get a `record-NNN` tag at their winning head.
+Submission PRs are never merged to `arena` — the `arena` branch carries
+only the baseline and the records ledger (`benchmarks/records.json`).
 
 Practical notes:
 

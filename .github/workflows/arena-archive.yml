@@ -4,8 +4,9 @@
 #
 # WHAT THIS IS
 #   Every arena submission is a public PR, but a PR's head ref lives in the
-#   CONTRIBUTOR'S FORK. Record winners get merged to `arena` and tagged, but a
-#   non-winning submission would otherwise exist only as GitHub's retained
+#   CONTRIBUTOR'S FORK. Record winners get their head commit tagged
+#   `record-N` (submission PRs are never merged), but a non-winning
+#   submission would otherwise exist only as GitHub's retained
 #   pull refs — outside this repository's own history. The challenge promises
 #   a public, cumulative lineage where abandoned branches can be revived
 #   (CHALLENGE.md "Why this is interesting"), so every submission's exact code
@@ -13,7 +14,9 @@
 #
 #   This workflow tags each submission's head commit as
 #       submissions/pr-<number>-<sha7>
-#   whenever a PR to `arena` is closed (merged or not) or labeled for scoring.
+#   whenever a PR to `arena` is closed, or on the legacy scoring label.
+#   (Scoring itself is automatic and emits no GitHub event this workflow can
+#   see; every PR eventually closes, so every submission head is archived.)
 #   Tags are immutable snapshots; one PR may accumulate several (one per
 #   scored/closed head). Anyone can then fetch and build on any submission:
 #       git fetch origin 'refs/tags/submissions/*:refs/tags/submissions/*'
