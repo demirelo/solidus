@@ -72,7 +72,7 @@ theorem lowerBodyFrom?_dup0_push_le (v : Word) (rest' : List Instr)
     simp [Instr.lowerAt?, Instr.type?, Instr.lower?, Shape.get?]
   have hPush : Instr.lowerAt? (.push v)
         { input with slots := .literal v :: input.slots } =
-      some ([Assembly.Instr.push v],
+      some (Assembly.pushCode v,
         { slots := .literal v :: .literal v :: input.slots,
           tail := input.tail }) := by
     simp [Instr.lowerAt?, Instr.type?, Instr.lower?]
@@ -87,10 +87,15 @@ theorem lowerBodyFrom?_dup0_push_le (v : Word) (rest' : List Instr)
       rw [hTail] at hEq
       simp only [Option.some.injEq, Prod.mk.injEq] at hEq
       obtain ⟨hc, ho⟩ := hEq
-      refine ⟨[Assembly.Instr.push v] ++ tailCode, ?_, ?_⟩
+      refine ⟨Assembly.pushCode v ++ tailCode, ?_, ?_⟩
       · rw [lowerBodyFrom?_cons, hPush]
         simp only [Option.bind, hTail, ho]
-      · rw [← hc]; simp
+      · rw [← hc]
+        simp only [List.length_append, List.length_singleton]
+        have hLen : (Assembly.pushCode v).length ≥ 1 := by
+          unfold Assembly.pushCode
+          split <;> simp [List.length_append, List.length_singleton] <;> omega
+        omega
 
 /-- Head-typed `LowerLe.cons`: a shared leading instruction that types `input`
 to `middle` propagates a `LowerLe` established at `middle`.  (Directional/typed,
