@@ -2185,36 +2185,104 @@ theorem Ctx.cleanupOnePreserving?_noCallCreate {temps : Nat}
                 hOpNo, hRestoreNo]
               exact ⟨hOpNo, hRestoreAll⟩
 
-theorem Ctx.cleanupManyPreserving?_noCallCreate :
+theorem Ctx.discardManyRotating?_noCallCreate :
     ∀ {count temps : Nat} {code : Structured.Code},
-      Ctx.cleanupManyPreserving? count temps = some code →
+      Ctx.discardManyRotating? count temps = some code →
         code.usesCallCreate = false
-  | 0, temps, code, hCode => by
-      simp [Ctx.cleanupManyPreserving?] at hCode
+  | 0, _temps, code, hCode => by
+      simp [Ctx.discardManyRotating?] at hCode
       cases hCode
       rfl
   | count + 1, temps, code, hCode => by
-      simp [Ctx.cleanupManyPreserving?] at hCode
-      cases hHead : Ctx.cleanupOnePreserving? temps with
+      simp [Ctx.discardManyRotating?] at hCode
+      cases hOp : StackOp.swap? temps with
       | none =>
-          simp [hHead] at hCode
-      | some head =>
-          cases hTail : Ctx.cleanupManyPreserving? count temps with
+          simp [hOp] at hCode
+      | some op =>
+          cases hRest : Ctx.discardManyRotating? count temps with
           | none =>
-              simp [hHead, hTail] at hCode
-          | some tail =>
-              simp [hHead, hTail] at hCode
+              simp [hOp, hRest] at hCode
+          | some rest =>
+              simp [hOp, hRest] at hCode
               cases hCode
-              have hHeadNo := Ctx.cleanupOnePreserving?_noCallCreate hHead
-              have hTailNo :=
-                Ctx.cleanupManyPreserving?_noCallCreate
-                  (count := count) (temps := temps) (code := tail) hTail
-              have hHeadAll :=
-                Structured.Code.all_false_of_usesCallCreate_false hHeadNo
-              have hTailAll :=
-                Structured.Code.all_false_of_usesCallCreate_false hTailNo
-              simp [Structured.Code.usesCallCreate, hHeadNo, hTailNo]
-              exact ⟨hHeadAll, hTailAll⟩
+              have hOpNo := StackOp.swap?_not_callCreate temps hOp
+              have hRestNo :=
+                Ctx.discardManyRotating?_noCallCreate
+                  (count := count) (temps := temps) (code := rest) hRest
+              have hRestAll :=
+                Structured.Code.all_false_of_usesCallCreate_false hRestNo
+              simp [Structured.Code.usesCallCreate,
+                Structured.BasicInstr.usesCallCreate,
+                Structured.BasicOp.toPrimOp, Assembly.PrimOp.isCallCreate,
+                hOpNo]
+              exact ⟨hOpNo, hRestAll⟩
+
+theorem Ctx.rotateRestore?_noCallCreate :
+    ∀ {k temps : Nat} {code : Structured.Code},
+      Ctx.rotateRestore? k temps = some code →
+        code.usesCallCreate = false
+  | 0, _temps, code, hCode => by
+      simp [Ctx.rotateRestore?] at hCode
+      cases hCode
+      rfl
+  | k + 1, temps, code, hCode => by
+      simp [Ctx.rotateRestore?] at hCode
+      cases hOne : Ctx.swapRestoreUpTo? (temps - 1) with
+      | none =>
+          simp [hOne] at hCode
+      | some one =>
+          cases hRest : Ctx.rotateRestore? k temps with
+          | none =>
+              simp [hOne, hRest] at hCode
+          | some rest =>
+              simp [hOne, hRest] at hCode
+              cases hCode
+              have hOneNo :=
+                Ctx.swapRestoreUpTo?_noCallCreate (depth := temps - 1)
+                  (code := one) hOne
+              have hRestNo :=
+                Ctx.rotateRestore?_noCallCreate
+                  (k := k) (temps := temps) (code := rest) hRest
+              have hOneAll :=
+                Structured.Code.all_false_of_usesCallCreate_false hOneNo
+              have hRestAll :=
+                Structured.Code.all_false_of_usesCallCreate_false hRestNo
+              simp [Structured.Code.usesCallCreate, hOneNo, hRestNo]
+              exact ⟨hOneAll, hRestAll⟩
+
+/-- The deferred-rotation cleanup emits only `SWAP`/`POP`, exactly as the
+per-discard form did — the emission is just regrouped, so this is the same
+structural argument routed through `discardManyRotating?` and `rotateRestore?`. -/
+theorem Ctx.cleanupManyPreserving?_noCallCreate
+    {count temps : Nat} {code : Structured.Code}
+    (hCode : Ctx.cleanupManyPreserving? count temps = some code) :
+    code.usesCallCreate = false := by
+  cases temps with
+  | zero =>
+      simp [Ctx.cleanupManyPreserving?] at hCode
+      cases hCode
+      simp [Structured.Code.usesCallCreate, Structured.BasicInstr.usesCallCreate,
+        Structured.BasicOp.toPrimOp, Assembly.PrimOp.isCallCreate]
+  | succ temps =>
+      simp [Ctx.cleanupManyPreserving?] at hCode
+      cases hBody : Ctx.discardManyRotating? count (temps + 1) with
+      | none =>
+          simp [hBody] at hCode
+      | some body =>
+          cases hFix : Ctx.rotateRestore? (count % (temps + 1)) (temps + 1) with
+          | none =>
+              simp [hBody, hFix] at hCode
+          | some fixup =>
+              simp [hBody, hFix] at hCode
+              cases hCode
+              have hBodyNo := Ctx.discardManyRotating?_noCallCreate hBody
+              have hFixNo := Ctx.rotateRestore?_noCallCreate hFix
+              have hBodyAll :=
+                Structured.Code.all_false_of_usesCallCreate_false hBodyNo
+              have hFixAll :=
+                Structured.Code.all_false_of_usesCallCreate_false hFixNo
+              simp [Structured.Code.usesCallCreate, hBodyNo, hFixNo]
+              exact ⟨hBodyAll, hFixAll⟩
 
 theorem Ctx.cleanupToPreserving?_noCallCreate {ctx : Ctx}
     {preserve targetDepth : Nat} {code : Structured.Code}

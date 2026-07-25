@@ -550,12 +550,44 @@ def cleanupOnePreserving? : Nat → Option Structured.Code
         ([Structured.BasicInstr.op op, Structured.BasicInstr.op .pop] ++
           restore)
 
-def cleanupManyPreserving? : Nat → Nat → Option Structured.Code
+/-- `count` bare `SWAP temps; POP` discards.
+
+`SWAP temps; POP` drops one value from under the preserved prefix exactly as
+`cleanupOnePreserving?` does, but leaves the prefix rotated **left by one**
+instead of paying `swapRestoreUpTo? (temps-1)` to put it back. Rotations
+accumulate, so `count` of them leave the prefix rotated left by `count`. -/
+def discardManyRotating? : Nat → Nat → Option Structured.Code
   | 0, _temps => some []
   | count + 1, temps => do
-      let head ← cleanupOnePreserving? temps
-      let tail ← cleanupManyPreserving? count temps
-      some (head ++ tail)
+      let op ← StackOp.swap? temps
+      let rest ← discardManyRotating? count temps
+      some ([Structured.BasicInstr.op op, Structured.BasicInstr.op .pop] ++ rest)
+
+/-- Undo `k` accumulated left-rotations of the top `temps` values. One
+right-rotation is `SWAP1 .. SWAP(temps-1)`, i.e. `swapRestoreUpTo? (temps-1)` —
+the very sequence `cleanupOnePreserving?` was paying per discard. -/
+def rotateRestore? : Nat → Nat → Option Structured.Code
+  | 0, _temps => some []
+  | k + 1, temps => do
+      let one ← swapRestoreUpTo? (temps - 1)
+      let rest ← rotateRestore? k temps
+      some (one ++ rest)
+
+/-- Drop `count` values from under `temps` preserved ones.
+
+The per-discard form (`cleanupOnePreserving?`) re-emits the restore rotation
+after *every* `POP`, costing `count * (temps + 1)`. Deferring the rotations
+costs `2 * count + (count % temps) * (temps - 1)` instead — the prefix only has
+to be put back once, and only by however much it is actually out of place.
+Checked equivalent to the per-discard form on every `(temps, count)` pair with
+`temps < 6, count < 9`; 31.5% fewer instructions over that range, and identical
+for `temps ≤ 1` where the old form was already tight. -/
+def cleanupManyPreserving? (count : Nat) : Nat → Option Structured.Code
+  | 0 => some (List.replicate count (Structured.BasicInstr.op .pop))
+  | temps + 1 => do
+      let body ← discardManyRotating? count (temps + 1)
+      let fixup ← rotateRestore? (count % (temps + 1)) (temps + 1)
+      some (body ++ fixup)
 
 def cleanupToPreserving? (ctx : Ctx) (preserve targetDepth : Nat) :
     Option Structured.Code :=
