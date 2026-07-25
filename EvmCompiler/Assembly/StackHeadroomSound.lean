@@ -538,7 +538,7 @@ theorem heightPoint_push_step
               astack = true := by
           rw [← hPc]; exact hMemPc
         have hSize : Compact.sourceInstrSizeAt? artifact.pinnedPushPcs
-            artifact.branchWidth block.sourcePc block.sourceInstr =
+            artifact.branchWidths block.sourcePc block.sourceInstr =
               some (0 + 1) := by
           simp [hInstr, Compact.sourceInstrSizeAt?, hWidth]
         have hOk := check?_blockOk hCheck hBlock

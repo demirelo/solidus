@@ -1062,7 +1062,7 @@ theorem artifactFramePoint_push_step
           simpa using hStep.symm
         subst next
         have hSize : Compact.sourceInstrSizeAt? artifact.pinnedPushPcs
-            artifact.branchWidth block.sourcePc block.sourceInstr =
+            artifact.branchWidths block.sourcePc block.sourceInstr =
               some (0 + 1) := by
           simp [hInstr, Compact.sourceInstrSizeAt?, hWidth]
         apply artifactFramePoint_of_block_next hCompile hBlock hSize
