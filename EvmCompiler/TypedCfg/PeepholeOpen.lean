@@ -448,13 +448,13 @@ theorem openRunBody_peephole_congr :
               subst hvv
               have hPushRel :
                   SameRuntimeData
-                    (state1.replaceStackAndIncrPC (state1.stack.push v) 33)
-                    (state2.replaceStackAndIncrPC (state2.stack.push v) 33) :=
-                SameRuntimeData.replaceStackAndIncrPC (pcΔ := 33) hRel
+                    (state1.replaceStackAndIncrPC (state1.stack.push v) (Assembly.pushPcDelta v))
+                    (state2.replaceStackAndIncrPC (state2.stack.push v) (Assembly.pushPcDelta v)) :=
+                SameRuntimeData.replaceStackAndIncrPC (pcΔ := (Assembly.pushPcDelta v)) hRel
                   (congrArg (fun st => st.push v) (SameRuntimeData.stack_eq hRel))
               have hPushReal2 :
                   StackRealizes { input with slots := .literal v :: input.slots }
-                    (state2.replaceStackAndIncrPC (state2.stack.push v) 33) := by
+                    (state2.replaceStackAndIncrPC (state2.stack.push v) (Assembly.pushPcDelta v)) := by
                 unfold StackRealizes at hReal2 ⊢
                 simp only [Shape.length, List.length_cons,
                   EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC,
@@ -474,10 +474,10 @@ theorem openRunBody_peephole_congr :
                 exact forall_pcIndependent_tail_of_cons hp
               obtain ⟨dupState1, hDupStep, hDupRel⟩ :=
                 dup1_after_push_sameRuntimeData
-                  (state1.replaceStackAndIncrPC (state1.stack.push v) 33) v
+                  (state1.replaceStackAndIncrPC (state1.stack.push v) (Assembly.pushPcDelta v)) v
                   state1.stack
                   (by simp [EvmYul.EVM.State.replaceStackAndIncrPC,
-                    EvmYul.EVM.State.incrPC, EvmYul.Stack.push]) 33
+                    EvmYul.EVM.State.incrPC, EvmYul.Stack.push]) (Assembly.pushPcDelta v)
               have hDupType :
                   Instr.type? (.dup 0)
                       { input with slots := .literal v :: input.slots } =
@@ -497,17 +497,17 @@ theorem openRunBody_peephole_congr :
                   Block.openRunBody (Instr.push v :: rest) input state2 =
                     Block.openRunBody rest
                       { input with slots := .literal v :: input.slots }
-                      (state2.replaceStackAndIncrPC (state2.stack.push v) 33) :=
+                      (state2.replaceStackAndIncrPC (state2.stack.push v) (Assembly.pushPcDelta v)) :=
                 openRunBody_push_cons v rest input state2
               have ihRest :=
                 openRunBody_peephole_congr rest
                   { input with slots := .literal v :: input.slots } output
-                  (state1.replaceStackAndIncrPC (state1.stack.push v) 33)
-                  (state2.replaceStackAndIncrPC (state2.stack.push v) 33)
+                  (state1.replaceStackAndIncrPC (state1.stack.push v) (Assembly.pushPcDelta v))
+                  (state2.replaceStackAndIncrPC (state2.stack.push v) (Assembly.pushPcDelta v))
                   hTailType hTailPC hPushReal2 hPushRel
               rw [hEq, openRunBody_push_cons v rest'
                 { input with slots := .literal v :: input.slots }
-                (state1.replaceStackAndIncrPC (state1.stack.push v) 33)] at ihRest
+                (state1.replaceStackAndIncrPC (state1.stack.push v) (Assembly.pushPcDelta v))] at ihRest
               have hCong :=
                 InteractionCongruence.Block.openRunBody_runtimeRel
                   hRest'BodyType hRest'PC hDupRel
