@@ -529,12 +529,12 @@ private theorem openRun_rotateRestore?
               · exact hFinalReturns.trans hMidReturns
 
 /-- Repeated preserving cleanup removes a contiguous list below the prefix. -/
-theorem openRun_cleanupManyPreserving?
+theorem openRun_cleanupManyPreservingRot?
     {count preserve : Nat} {code : Structured.Code}
     {values discarded suffix : List Word}
     {target : Structured.RunState}
     (hCode :
-      Locals.Ctx.cleanupManyPreserving? count preserve = some code)
+      Locals.Ctx.cleanupManyPreservingRot? count preserve = some code)
     (hValuesLength : values.length = preserve)
     (hDiscardedLength : discarded.length = count)
     (hStack : target.evm.stack = values ++ discarded ++ suffix) :
@@ -546,7 +546,7 @@ theorem openRun_cleanupManyPreserving?
         final.returns = target.returns := by
   cases preserve with
   | zero =>
-      rw [Locals.Ctx.cleanupManyPreserving?_zero] at hCode
+      rw [Locals.Ctx.cleanupManyPreservingRot?_zero] at hCode
       have hCodeEq :
           List.replicate count (Structured.BasicInstr.op .pop) = code :=
         Option.some.inj hCode
@@ -566,7 +566,7 @@ theorem openRun_cleanupManyPreserving?
       rw [hFinalStack, hStack]
       simpa using hDrop
   | succ preserve =>
-      simp only [Locals.Ctx.cleanupManyPreserving?] at hCode
+      simp only [Locals.Ctx.cleanupManyPreservingRot?] at hCode
       cases hBody :
           Locals.Ctx.discardManyRotating? count (preserve + 1) with
       | none => simp [hBody] at hCode
@@ -596,6 +596,124 @@ theorem openRun_cleanupManyPreserving?
               · rw [hFinalStack, rotN_add, rotN_cleanup hValuesLength]
               · exact hFinalShared.trans hMidShared
               · exact hFinalReturns.trans hMidReturns
+
+/-- **Bulk teardown under one preserved value.**
+
+`SWAP count ; POP^count` applied to `[p] ++ discarded ++ suffix` (with
+`discarded.length = count`) sinks `p` past the whole discard window and then
+clears it, leaving `[p] ++ suffix`. -/
+theorem openRun_bulkDiscardUnderOne?
+    {count : Nat} {code : Structured.Code}
+    {values discarded suffix : List Word}
+    {target : Structured.RunState}
+    (hCode : Locals.Ctx.bulkDiscardUnderOne? count = some code)
+    (hValuesLength : values.length = 1)
+    (hDiscardedLength : discarded.length = count)
+    (hStack : target.evm.stack = values ++ discarded ++ suffix) :
+    ∃ final,
+      Structured.InteractionSemantics.Code.openRun code target =
+          .done (.ok final) ∧
+        final.evm.stack = values ++ suffix ∧
+        final.evm.toSharedState = target.evm.toSharedState ∧
+        final.returns = target.returns := by
+  obtain ⟨p, rfl⟩ := List.length_eq_one_iff.mp hValuesLength
+  cases count with
+  | zero =>
+      simp [Locals.Ctx.bulkDiscardUnderOne?, StackOp.swap?] at hCode
+  | succ d =>
+      unfold Locals.Ctx.bulkDiscardUnderOne? at hCode
+      cases hOp : StackOp.swap? (d + 1) with
+      | none => simp [hOp] at hCode
+      | some op =>
+          rw [hOp] at hCode
+          simp at hCode
+          subst hCode
+          have hd : d < discarded.length := by omega
+          have hGet : (discarded ++ suffix)[d]? = some discarded[d] := by
+            rw [List.getElem?_append_left hd]
+            exact List.getElem?_eq_getElem hd
+          have hStack' : target.evm.stack = p :: (discarded ++ suffix) := by
+            simpa using hStack
+          let afterSwap :=
+            target.withEVM
+              (target.evm.replaceStackAndIncrPC
+                (discarded[d] :: (discarded ++ suffix).set d p))
+          have hAfterStack :
+              afterSwap.evm.stack =
+                discarded[d] :: (discarded ++ suffix).set d p := by
+            simp [afterSwap, EvmYul.EVM.State.replaceStackAndIncrPC,
+              EvmYul.EVM.State.incrPC]
+          have hBound : d + 1 ≤ afterSwap.evm.stack.length := by
+            rw [hAfterStack]
+            simp
+            omega
+          obtain ⟨final, hPopRun, hFinalStack, hFinalShared, hFinalReturns⟩ :=
+            InteractionPreservation.Code.openRun_replicate_pop
+              (target := afterSwap) (d + 1) hBound
+          have hTail : ((discarded ++ suffix).set d p).drop d = p :: suffix := by
+            rw [List.set_append_left d p hd]
+            rw [List.drop_append_of_le_length (by simp; omega)]
+            have hLen : (discarded.set d p).length = d + 1 := by
+              simp [hDiscardedLength]
+            have hdSet : d < (discarded.set d p).length := by omega
+            rw [List.drop_eq_getElem_cons hdSet,
+              List.drop_eq_nil_of_le (by omega), List.getElem_set_self]
+            simp
+          refine ⟨final, ?_, ?_, ?_, ?_⟩
+          · change
+              Structured.InteractionSemantics.Code.openRun
+                  ([Structured.BasicInstr.op op] ++
+                    List.replicate (d + 1)
+                      (Structured.BasicInstr.op .pop)) target =
+                .done (.ok final)
+            rw [Structured.InteractionSemantics.Code.openRun_append,
+              InteractionPreservation.Code.openRun_swap hOp hGet hStack']
+            exact hPopRun
+          · rw [hFinalStack, hAfterStack, List.drop_succ_cons, hTail]
+            simp
+          · exact hFinalShared.trans (by
+              simp [afterSwap, EvmYul.EVM.State.replaceStackAndIncrPC,
+                EvmYul.EVM.State.incrPC])
+          · exact hFinalReturns.trans (by simp [afterSwap])
+
+/-- Preserving cleanup: the rotating schedule, or the bulk shortcut at
+`preserve = 1`. -/
+theorem openRun_cleanupManyPreserving?
+    {count preserve : Nat} {code : Structured.Code}
+    {values discarded suffix : List Word}
+    {target : Structured.RunState}
+    (hCode :
+      Locals.Ctx.cleanupManyPreserving? count preserve = some code)
+    (hValuesLength : values.length = preserve)
+    (hDiscardedLength : discarded.length = count)
+    (hStack : target.evm.stack = values ++ discarded ++ suffix) :
+    ∃ final,
+      Structured.InteractionSemantics.Code.openRun code target =
+          .done (.ok final) ∧
+        final.evm.stack = values ++ suffix ∧
+        final.evm.toSharedState = target.evm.toSharedState ∧
+        final.returns = target.returns := by
+  match preserve with
+  | 0 =>
+      rw [Locals.Ctx.cleanupManyPreserving?_zero_eq] at hCode
+      exact openRun_cleanupManyPreservingRot? hCode hValuesLength
+        hDiscardedLength hStack
+  | 1 =>
+      rw [Locals.Ctx.cleanupManyPreserving?_one] at hCode
+      cases hBulk : Locals.Ctx.bulkDiscardUnderOne? count with
+      | none =>
+          rw [hBulk] at hCode
+          exact openRun_cleanupManyPreservingRot? hCode hValuesLength
+            hDiscardedLength hStack
+      | some bulk =>
+          rw [hBulk] at hCode
+          cases hCode
+          exact openRun_bulkDiscardUnderOne? hBulk hValuesLength
+            hDiscardedLength hStack
+  | _ + 2 =>
+      rw [Locals.Ctx.cleanupManyPreserving?_succ_succ_eq] at hCode
+      exact openRun_cleanupManyPreservingRot? hCode hValuesLength
+        hDiscardedLength hStack
 
 /-- The zero-byte return-value retag emitted at the end of a preserving cleanup
 runs to the identity: `bindLocals` is a type-level marker whose Structured

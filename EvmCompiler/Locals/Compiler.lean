@@ -2253,18 +2253,18 @@ theorem Ctx.rotateRestore?_noCallCreate :
 /-- The deferred-rotation cleanup emits only `SWAP`/`POP`, exactly as the
 per-discard form did — the emission is just regrouped, so this is the same
 structural argument routed through `discardManyRotating?` and `rotateRestore?`. -/
-theorem Ctx.cleanupManyPreserving?_noCallCreate
+theorem Ctx.cleanupManyPreservingRot?_noCallCreate
     {count temps : Nat} {code : Structured.Code}
-    (hCode : Ctx.cleanupManyPreserving? count temps = some code) :
+    (hCode : Ctx.cleanupManyPreservingRot? count temps = some code) :
     code.usesCallCreate = false := by
   cases temps with
   | zero =>
-      simp [Ctx.cleanupManyPreserving?] at hCode
+      simp [Ctx.cleanupManyPreservingRot?] at hCode
       cases hCode
       simp [Structured.Code.usesCallCreate, Structured.BasicInstr.usesCallCreate,
         Structured.BasicOp.toPrimOp, Assembly.PrimOp.isCallCreate]
   | succ temps =>
-      simp [Ctx.cleanupManyPreserving?] at hCode
+      simp [Ctx.cleanupManyPreservingRot?] at hCode
       cases hBody : Ctx.discardManyRotating? count (temps + 1) with
       | none =>
           simp [hBody] at hCode
@@ -2283,6 +2283,58 @@ theorem Ctx.cleanupManyPreserving?_noCallCreate
                 Structured.Code.all_false_of_usesCallCreate_false hFixNo
               simp [Structured.Code.usesCallCreate, hBodyNo, hFixNo]
               exact ⟨hBodyAll, hFixAll⟩
+
+/-- The bulk teardown emits one `SWAP` and a run of `POP`s. -/
+theorem Ctx.bulkDiscardUnderOne?_noCallCreate
+    {count : Nat} {code : Structured.Code}
+    (hCode : Ctx.bulkDiscardUnderOne? count = some code) :
+    code.usesCallCreate = false := by
+  unfold Ctx.bulkDiscardUnderOne? at hCode
+  cases hOp : StackOp.swap? count with
+  | none => simp [hOp] at hCode
+  | some op =>
+      simp [hOp] at hCode
+      cases hCode
+      have hOpNo : (Structured.BasicInstr.op op).usesCallCreate = false := by
+        have : op = .swap1 ∨ op = .swap2 ∨ op = .swap3 ∨ op = .swap4 ∨
+            op = .swap5 ∨ op = .swap6 ∨ op = .swap7 ∨ op = .swap8 ∨
+            op = .swap9 ∨ op = .swap10 ∨ op = .swap11 ∨ op = .swap12 ∨
+            op = .swap13 ∨ op = .swap14 ∨ op = .swap15 ∨ op = .swap16 := by
+          match count, hOp with
+          | 1, _ | 2, _ | 3, _ | 4, _ | 5, _ | 6, _ | 7, _ | 8, _
+          | 9, _ | 10, _ | 11, _ | 12, _ | 13, _ | 14, _ | 15, _ | 16, _ =>
+              simp_all [StackOp.swap?]
+        rcases this with h | h | h | h | h | h | h | h
+          | h | h | h | h | h | h | h | h <;>
+          subst h <;>
+          simp [Structured.BasicInstr.usesCallCreate,
+            Structured.BasicOp.toPrimOp, Assembly.PrimOp.isCallCreate]
+      simp [Structured.Code.usesCallCreate, List.all_replicate, hOpNo,
+        Structured.BasicInstr.usesCallCreate,
+        Structured.BasicOp.toPrimOp, Assembly.PrimOp.isCallCreate]
+      exact hOpNo
+
+theorem Ctx.cleanupManyPreserving?_noCallCreate
+    {count temps : Nat} {code : Structured.Code}
+    (hCode : Ctx.cleanupManyPreserving? count temps = some code) :
+    code.usesCallCreate = false := by
+  match temps with
+  | 0 =>
+      rw [Ctx.cleanupManyPreserving?_zero_eq] at hCode
+      exact Ctx.cleanupManyPreservingRot?_noCallCreate hCode
+  | 1 =>
+      rw [Ctx.cleanupManyPreserving?_one] at hCode
+      cases hBulk : Ctx.bulkDiscardUnderOne? count with
+      | none =>
+          rw [hBulk] at hCode
+          exact Ctx.cleanupManyPreservingRot?_noCallCreate hCode
+      | some bulk =>
+          rw [hBulk] at hCode
+          cases hCode
+          exact Ctx.bulkDiscardUnderOne?_noCallCreate hBulk
+  | _ + 2 =>
+      rw [Ctx.cleanupManyPreserving?_succ_succ_eq] at hCode
+      exact Ctx.cleanupManyPreservingRot?_noCallCreate hCode
 
 theorem Ctx.cleanupToPreserving?_noCallCreate {ctx : Ctx}
     {preserve targetDepth : Nat} {code : Structured.Code}
