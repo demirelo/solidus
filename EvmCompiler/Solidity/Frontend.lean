@@ -3263,6 +3263,23 @@ def isMetadata? (dataSections : List DataSection) : ObjectItemRef → Bool
       | none => false
   | .object _ => false
 
+/-- A data section carrying no name.
+
+Yul's `dataoffset`/`datasize` builtins address a payload chunk *by name*, so a
+nameless section is unaddressable: `DataSection.namedSizeEntry?` and
+`namedOffsetEntryFromNat?` both return `none` for it, and it therefore
+contributes to no layout entry, no size entry and no offset entry.  Nothing in
+the emitted code can refer to its contents.
+
+solc emits exactly one such section per object -- the trailing CBOR metadata
+blob (`a264…64736f6c6343…0033`, 53 bytes).  It is inert payload. -/
+def isUnnamedData? (dataSections : List DataSection) : ObjectItemRef → Bool
+  | .data index =>
+      match dataSections[index]? with
+      | some dataSection => dataSection.name?.isNone
+      | none => false
+  | .object _ => false
+
 def payloadSize? (dataSections : List DataSection)
     (objectImages : List ObjectImage) : ObjectItemRef → Option Nat
   | .data index => do
@@ -3298,6 +3315,22 @@ def moveMetadataLast (dataSections : List DataSection)
     (items : List ObjectItemRef) : List ObjectItemRef :=
   items.filter (fun item => !item.isMetadata? dataSections) ++
     items.filter (fun item => item.isMetadata? dataSections)
+
+/-- Drop the unaddressable (nameless) data sections from a payload item list.
+
+Every consumer of the item list -- `payloadBytes?`, `payloadSize?`,
+`objectLayoutEntriesFromNat?`, `dataSizeEntries?`, `dataOffsetEntriesFromNat?`
+and `immutableReferenceEntriesFromNat?` -- walks the *same* list and derives its
+offsets by accumulating `payloadSize?` along it.  Filtering here therefore keeps
+bytes, layout, sizes, offsets and immutable windows mutually consistent by
+construction: a dropped section is absent from the payload and from every
+offset accumulation alike.
+
+Only nameless sections are dropped, so no `dataoffset`/`datasize` can lose its
+referent (see `isUnnamedData?`), and object items are never touched. -/
+def dropUnnamedData (dataSections : List DataSection)
+    (items : List ObjectItemRef) : List ObjectItemRef :=
+  items.filter (fun item => !item.isUnnamedData? dataSections)
 
 def objectLayoutEntriesFromNat? (dataSections : List DataSection)
     (objectImages : List ObjectImage) :
@@ -3383,7 +3416,8 @@ def payloadItems? (object : Object) (_objectImages : List ObjectImage) :
   let expected := object.defaultItems
   let items := object.effectiveItems
   if ObjectItemRef.List.validFor? expected items then
-    some (ObjectItemRef.List.moveMetadataLast object.data items)
+    some (ObjectItemRef.List.dropUnnamedData object.data
+      (ObjectItemRef.List.moveMetadataLast object.data items))
   else
     none
 
