@@ -4,6 +4,7 @@ import EvmCompiler.Objects.Layout
 import EvmCompiler.Compiler.StackArtifact
 import EvmCompiler.Assembly.Bytecode
 import EvmCompiler.Assembly.Compact
+import EvmCompiler.Assembly.MachineBlockDedup
 import EvmCompiler.Solidus.Frontend
 
 namespace EvmCompiler
@@ -3804,6 +3805,27 @@ structure ImmutablePushPlan where
   pinnedPushPcs : List Nat
   markerTarget? : Option Assembly.Program
 
+/--
+Logical Assembly program passed to the compact encoder.
+
+Immutable-bearing objects retain the legacy program because their actual and
+marker compiles must have identical instruction shape. Immutable-free objects
+may use the checked, fail-open fixed-point machine-block deduplicator.
+-/
+def compactAssembly (object : Object)
+    (compiled : Compiler.StackArtifact.Artifact) : Assembly.Program :=
+  if object.loadImmutableNames.isEmpty then
+    Assembly.MachineBlockDedup.fixedPointOptimize
+      compiled.certified.metadata.entry compiled.certified.target
+  else
+    compiled.certified.target
+
+theorem compactAssembly_eq_target_of_not_isEmpty
+    {object : Object} {compiled : Compiler.StackArtifact.Artifact}
+    (hNames : object.loadImmutableNames.isEmpty = false) :
+    object.compactAssembly compiled = compiled.certified.target := by
+  simp [compactAssembly, hNames]
+
 /-- Compute the physical push sites whose compact width must remain stable when
 Solidity patches immutable values. The marker program is produced by the same
 checked frontend and stack allocator; the Assembly owner accepts pins only
@@ -3899,10 +3921,11 @@ def compileVerifiedStackCodeArtifactIn? (object : Object)
   let ordered ← resolved.toSolcYulOrderedProgram?
   let lower ← ordered.toObjects?
   let compiled ← Compiler.StackArtifact.compile? lower.toFunctions
+  let compactSource := object.compactAssembly compiled
   let pushPlan ←
-    object.immutablePushPlanFor? context compiled.certified.target
+    object.immutablePushPlanFor? context compactSource
   let compact ←
-    Assembly.Compact.compile? compiled.certified.target pushPlan.pinnedPushPcs
+    Assembly.Compact.compile? compactSource pushPlan.pinnedPushPcs
   let bytes := compact.bytes.toList ++ verifiedCodeSentinel
   let immutableMarkerBytes ← compileImmutableMarkerBytes? pushPlan compact
   if object.immutablePatchChecked? context pushPlan bytes
@@ -3924,9 +3947,10 @@ theorem compileVerifiedStackCodeArtifactIn?_partsChecked
       Compiler.StackArtifact.compile? artifact.lower.toFunctions =
         some artifact.compiled ∧
       ∃ pushPlan,
-        object.immutablePushPlanFor? context artifact.compiled.certified.target =
+        object.immutablePushPlanFor? context
+            (object.compactAssembly artifact.compiled) =
           some pushPlan ∧
-        Assembly.Compact.compile? artifact.compiled.certified.target
+        Assembly.Compact.compile? (object.compactAssembly artifact.compiled)
             pushPlan.pinnedPushPcs = some artifact.compact ∧
         artifact.bytes =
           artifact.compact.bytes.toList ++ verifiedCodeSentinel ∧
@@ -3951,13 +3975,14 @@ theorem compileVerifiedStackCodeArtifactIn?_partsChecked
               | some compiled =>
                   cases hPlan :
                       object.immutablePushPlanFor? context
-                        compiled.certified.target with
+                        (object.compactAssembly compiled) with
                   | none =>
                       simp [hResolved, hOrdered, hLower, hCompiled, hPlan]
                         at hCompile
                   | some pushPlan =>
                       cases hCompact :
-                          Assembly.Compact.compile? compiled.certified.target
+                          Assembly.Compact.compile?
+                            (object.compactAssembly compiled)
                             pushPlan.pinnedPushPcs with
                       | none =>
                           simp [hResolved, hOrdered, hLower, hCompiled, hPlan,
@@ -3994,9 +4019,10 @@ theorem compileVerifiedStackCodeArtifactIn?_parts
       Compiler.StackArtifact.compile? artifact.lower.toFunctions =
         some artifact.compiled ∧
       ∃ pushPlan,
-        object.immutablePushPlanFor? context artifact.compiled.certified.target =
+        object.immutablePushPlanFor? context
+            (object.compactAssembly artifact.compiled) =
           some pushPlan ∧
-        Assembly.Compact.compile? artifact.compiled.certified.target
+        Assembly.Compact.compile? (object.compactAssembly artifact.compiled)
             pushPlan.pinnedPushPcs = some artifact.compact ∧
         artifact.bytes =
           artifact.compact.bytes.toList ++ verifiedCodeSentinel ∧

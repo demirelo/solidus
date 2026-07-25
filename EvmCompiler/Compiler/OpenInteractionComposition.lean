@@ -16,6 +16,7 @@ import EvmCompiler.TypedCfg.ShuffleCanonChainFuel
 import EvmCompiler.Compiler.StackArtifact
 import EvmCompiler.Assembly.InteractionBytecode
 import EvmCompiler.Assembly.InteractionConcreteResources
+import EvmCompiler.Assembly.MachineBlockDedupSimulation
 import EvmCompiler.Solidity.VerifiedStackObjectArtifact
 
 namespace EvmCompiler
@@ -23,6 +24,192 @@ namespace Compiler
 namespace OpenInteractionComposition
 
 open Yul.FunctionsInteractionPrimitive
+
+private theorem compileCertified?_entry_labelPc_zero
+    {program : TypedCfg.Program}
+    {artifact : TypedCfg.Program.CertifiedArtifact}
+    (hCompile : program.compileCertified? = some artifact) :
+    artifact.target.labelPc artifact.metadata.entry = some 0 := by
+  have hLower := TypedCfg.Program.compileCertified?_target hCompile
+  have hEntry := TypedCfg.Program.lower?_entry_labelPc_zero hLower
+  have hCertificate :=
+    TypedCfg.Program.compileCertified?_certificate hCompile
+  unfold TypedCfg.Program.certificate? at hCertificate
+  cases hBlocks : TypedCfg.Program.collectCertificates? program.blocks with
+  | none =>
+      simp [hBlocks] at hCertificate
+  | some blocks =>
+      simp [hBlocks] at hCertificate
+      rw [← hCertificate]
+      exact hEntry
+
+private theorem certifiedChoice_entry_labelPc_zero
+    {cfg : TypedCfg.Program}
+    {artifact : TypedCfg.Program.CertifiedArtifact}
+    (hChoice : StackArtifact.CertifiedChoice cfg artifact) :
+    artifact.target.labelPc artifact.metadata.entry = some 0 := by
+  obtain ⟨qc, hQCert, hArtEq⟩ := hChoice
+  cases hChain :
+      (TypedCfg.ShuffleCanon.chainCanonProgram
+        (TypedCfg.Peephole.seamCancelProgramEff
+          (TypedCfg.Peephole.peepholeProgram
+            (TypedCfg.Peephole.normalizeProgram cfg)))).compileCertified? with
+  | none =>
+      rw [hChain] at hArtEq
+      simp only [Option.elim] at hArtEq
+      subst artifact
+      exact compileCertified?_entry_labelPc_zero hQCert
+  | some cc =>
+      rw [hChain] at hArtEq
+      simp only [Option.elim] at hArtEq
+      cases hReorder :
+          (TypedCfg.BlockReorder.reorderProgram
+            (TypedCfg.ShuffleCanon.chainCanonProgram
+              (TypedCfg.Peephole.seamCancelProgramEff
+                (TypedCfg.Peephole.peepholeProgram
+                  (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified? with
+      | none =>
+          rw [hReorder, Option.getD_none] at hArtEq
+          subst artifact
+          exact compileCertified?_entry_labelPc_zero hChain
+      | some rc =>
+          rw [hReorder, Option.getD_some] at hArtEq
+          subst artifact
+          exact compileCertified?_entry_labelPc_zero hReorder
+
+private theorem runtimeOutcomeRel_terminal_left
+    {target source : Assembly.Source.ExecutionOutcome}
+    (hRel : Assembly.Compact.RuntimeOutcomeRel target source)
+    (hTerminal : Assembly.InteractionSemantics.Terminal source) :
+    Assembly.InteractionSemantics.Terminal target := by
+  cases hRel with
+  | error hError =>
+      simp [Assembly.InteractionSemantics.Terminal] at hTerminal
+  | ok hResult =>
+      rename_i targetResult sourceResult
+      cases targetResult <;> cases sourceResult <;>
+        simp_all [Assembly.Compact.StepResultRuntimeRel,
+          Assembly.InteractionSemantics.Terminal]
+
+private theorem runtimeOutcomeRel_finished_left
+    {target source : Assembly.Source.ExecutionOutcome}
+    (hRel : Assembly.Compact.RuntimeOutcomeRel target source)
+    (hFinished : Assembly.InteractionSemantics.Finished source) :
+    Assembly.InteractionSemantics.Finished target := by
+  cases hRel with
+  | error hError =>
+      trivial
+  | ok hResult =>
+      rename_i targetResult sourceResult
+      cases targetResult <;> cases sourceResult <;>
+        simp_all [Assembly.Compact.StepResultRuntimeRel,
+          Assembly.InteractionSemantics.Finished]
+
+private theorem runtimeOutcomeRel_refl
+    (outcome : Assembly.Source.ExecutionOutcome) :
+    Assembly.Compact.RuntimeOutcomeRel outcome outcome := by
+  cases outcome with
+  | error error =>
+      exact .error rfl
+  | ok result =>
+      cases result with
+      | running state =>
+          exact .ok (Assembly.SameRuntimeData.refl state)
+      | halted halt =>
+          exact .ok
+            ⟨rfl, Assembly.SameRuntimeData.refl halt.state, rfl⟩
+
+private theorem certifiedTrace_output_entry_labelPc_zero
+    {entry : Assembly.Label} {source output : Assembly.Program}
+    (trace :
+      Assembly.MachineBlockDedup.CertifiedTrace entry source output)
+    (hSource : source.labelPc entry = some 0) :
+    output.labelPc entry = some 0 := by
+  induction trace with
+  | refl program =>
+      exact hSource
+  | step checked _ tail ih =>
+      exact ih
+        (Assembly.MachineBlockDedup.entry_labelPc_zero_of_check checked).2
+
+private theorem fixedPointOptimize_entry_labelPc_zero
+    {entry : Assembly.Label} {source : Assembly.Program}
+    (hSource : source.labelPc entry = some 0) :
+    (Assembly.MachineBlockDedup.fixedPointOptimize entry source).labelPc
+        entry =
+      some 0 := by
+  cases hCertify :
+      Assembly.MachineBlockDedup.certifyFixedPoint? entry source with
+  | none =>
+      simpa [Assembly.MachineBlockDedup.fixedPointOptimize, hCertify]
+        using hSource
+  | some certified =>
+      have hTrace :=
+        Assembly.MachineBlockDedup.fixedPointCertified_trace certified
+      simpa [Assembly.MachineBlockDedup.fixedPointOptimize, hCertify] using
+        certifiedTrace_output_entry_labelPc_zero hTrace hSource
+
+private theorem compactAssembly_openRunNResult_rel_of_fixedPoint
+    {object : Solidity.Frontend.Object}
+    {compiled : StackArtifact.Artifact}
+    (fuel : Nat) (state : Assembly.EVMState)
+    (hEntry :
+      compiled.certified.target.labelPc
+          compiled.certified.metadata.entry =
+        some 0)
+    (hFixed :
+      Assembly.MachineBlockDedup.EntryRunResultRel
+        compiled.certified.metadata.entry compiled.certified.target
+        (Assembly.MachineBlockDedup.fixedPointOptimize
+          compiled.certified.metadata.entry
+          compiled.certified.target)) :
+    Simulation.Interaction.Rel Assembly.Compact.RuntimeOutcomeRel
+      (Assembly.InteractionSemantics.Source.openRunNResult
+        (object.compactAssembly compiled) fuel
+        { state with pc := EvmYul.UInt256.ofNat 0 })
+      (Assembly.InteractionSemantics.Source.openRunNResult
+        compiled.certified.target fuel
+        { state with pc := EvmYul.UInt256.ofNat 0 }) := by
+  by_cases hNames : object.loadImmutableNames.isEmpty = true
+  · have hOptimizedEntry :=
+      fixedPointOptimize_entry_labelPc_zero hEntry
+    have hOpen := hFixed.2 fuel state
+    simpa [Solidity.Frontend.Object.compactAssembly, hNames,
+      Assembly.MachineBlockDedup.entryState, hEntry, hOptimizedEntry,
+      Assembly.MachineBlockDedup.ExceptStepResultRuntimeRel,
+      Assembly.MachineBlockDedup.StepResultRuntimeRel,
+      Assembly.MachineBlockDedup.HaltRuntimeRel,
+      Assembly.Compact.RuntimeOutcomeRel,
+      Assembly.Compact.StepResultRuntimeRel] using hOpen
+  · have hNamesFalse :
+        object.loadImmutableNames.isEmpty = false :=
+      Bool.eq_false_of_not_eq_true hNames
+    rw [Solidity.Frontend.Object.compactAssembly_eq_target_of_not_isEmpty
+      hNamesFalse]
+    exact
+      Simulation.Interaction.Rel.refl runtimeOutcomeRel_refl
+        (Assembly.InteractionSemantics.Source.openRunNResult
+          compiled.certified.target fuel
+          { state with pc := EvmYul.UInt256.ofNat 0 })
+
+private theorem compactAssembly_openRunNResult_rel
+    {object : Solidity.Frontend.Object}
+    {compiled : StackArtifact.Artifact}
+    (fuel : Nat) (state : Assembly.EVMState)
+    (hEntry :
+      compiled.certified.target.labelPc
+          compiled.certified.metadata.entry =
+        some 0) :
+    Simulation.Interaction.Rel Assembly.Compact.RuntimeOutcomeRel
+      (Assembly.InteractionSemantics.Source.openRunNResult
+        (object.compactAssembly compiled) fuel
+        { state with pc := EvmYul.UInt256.ofNat 0 })
+      (Assembly.InteractionSemantics.Source.openRunNResult
+        compiled.certified.target fuel
+        { state with pc := EvmYul.UInt256.ofNat 0 }) := by
+  exact
+    compactAssembly_openRunNResult_rel_of_fixedPoint fuel state hEntry
+      Assembly.MachineBlockDedup.fixedPointOptimize_entryRunResultRel_unconditional
 
 /-- Outcome relation obtained by horizontally composing the adjacent
 Yul-to-Functions and allocation-driven Functions-to-Expressions relations. -/
@@ -1799,6 +1986,7 @@ theorem stackAssemblyPrefixToCompactBytecode
     {generated : Structured.TypedCfgPreservation.Program.GeneratedContext
       structured entryShapes cfg}
     {assembly : Assembly.Program}
+    {compactAssembly : Assembly.Program}
     {pinnedPushPcs : List Nat}
     {compact : Assembly.Compact.Artifact}
     {sourceRun : Simulation.Interaction
@@ -1813,7 +2001,14 @@ theorem stackAssemblyPrefixToCompactBytecode
       sourceRun
       (Assembly.InteractionSemantics.Source.openRunNResult
         assembly assemblyFuel assemblyState))
-    (hCompile : Assembly.Compact.compile? assembly pinnedPushPcs = some compact)
+    (hOptimize : Simulation.Interaction.Rel
+      Assembly.Compact.RuntimeOutcomeRel
+      (Assembly.InteractionSemantics.Source.openRunNResult
+        compactAssembly assemblyFuel assemblyState)
+      (Assembly.InteractionSemantics.Source.openRunNResult
+        assembly assemblyFuel assemblyState))
+    (hCompile :
+      Assembly.Compact.compile? compactAssembly pinnedPushPcs = some compact)
     (hAssemblyPc : assemblyState.pc = EvmYul.UInt256.ofNat 0)
     (hCompactPc : compactState.pc = EvmYul.UInt256.ofNat 0)
     (hInitial : Assembly.SameRuntimeData compactState assemblyState) :
@@ -1827,10 +2022,13 @@ theorem stackAssemblyPrefixToCompactBytecode
           (compact.bytes.toList ++
             (Assembly.Compact.encodeInstr (.prim .invalid) ++ payload)))
         (2 * assemblyFuel) compactState) := by
+  have hOptimizedRel :=
+    Simulation.Interaction.ForwardRel.trans_rel hRel
+      (Simulation.Interaction.Rel.symm hOptimize)
   apply Simulation.Interaction.ForwardRel.of_executes_or_follows
   intro transcript sourceDone hSourceExec
   rcases Simulation.Interaction.ForwardRel.executes_or_follows
-      hRel hSourceExec with hTruncated | hDone
+      hOptimizedRel hSourceExec with hTruncated | hDone
   · rcases hTruncated with
       ⟨sourceError, hSourceDone, hSourceTruncated, hAssemblyFollow⟩
     obtain ⟨suffix, assemblyDone, hAssemblyExec⟩ :=
@@ -1846,29 +2044,37 @@ theorem stackAssemblyPrefixToCompactBytecode
       ⟨sourceError, hSourceDone, hSourceTruncated,
         Simulation.Interaction.Follows.prefix_of_append
           transcript suffix hCompactFollow⟩
-  · rcases hDone with ⟨assemblyDone, hAssemblyExec, hAssemblyRel⟩
+  · rcases hDone with
+      ⟨optimizedDone, hOptimizedExec, assemblyDone, hAssemblyRel,
+        hOptimizedAssembly⟩
     have hAssemblyFinished :=
       YulStackAssemblyPrefixDoneRel.targetFinished hAssemblyRel
+    have hOptimizedFinished :=
+      runtimeOutcomeRel_finished_left hOptimizedAssembly hAssemblyFinished
     have hCompactBranch :=
       Assembly.Compact.InteractionSemantics.compile?_source_openRunNResult_branch
         hCompile payload assemblyFuel hCompactPc hAssemblyPc hInitial
-          hAssemblyExec
-    cases assemblyDone with
-    | error assemblyError =>
+          hOptimizedExec
+    cases optimizedDone with
+    | error optimizedError =>
         rcases hCompactBranch with
           ⟨compactDone, hCompactExec, hCompactRel⟩
         exact .inr
           ⟨compactDone, hCompactExec,
-            ⟨.error assemblyError, hAssemblyRel, hCompactRel⟩⟩
-    | ok assemblyResult =>
-        cases assemblyResult with
-        | running assemblyFinal => cases hAssemblyFinished
-        | halted assemblyHalt =>
+            ⟨assemblyDone, hAssemblyRel,
+              Assembly.Compact.InteractionSemantics.runtimeOutcomeRel_trans
+                hCompactRel hOptimizedAssembly⟩⟩
+    | ok optimizedResult =>
+        cases optimizedResult with
+        | running optimizedFinal => cases hOptimizedFinished
+        | halted optimizedHalt =>
             rcases hCompactBranch with
               ⟨compactDone, hCompactExec, hCompactRel⟩
             exact .inr
               ⟨compactDone, hCompactExec,
-                ⟨.ok (.halted assemblyHalt), hAssemblyRel, hCompactRel⟩⟩
+                ⟨assemblyDone, hAssemblyRel,
+                  Assembly.Compact.InteractionSemantics.runtimeOutcomeRel_trans
+                    hCompactRel hOptimizedAssembly⟩⟩
 
 /-- Terminal Yul-to-Structured preservation through the stack allocator. -/
 theorem yulToStackStructuredTerminal
@@ -4397,8 +4603,20 @@ theorem compiledVerifiedStackCodeToRawBytecodeForward
       hNormalizedSupported hStackLower hExpressions hYulInitial hYulDomain
       hStackInitial hGenerate hWellTyped hStructuredWF hFrameSafe hCertified
       hIndependent rfl hAssemblyInitial
+  have hEntry := certifiedChoice_entry_labelPc_zero hCertified
+  have hOptimize :=
+    compactAssembly_openRunNResult_rel
+      (object := object)
+      (compiled := codeArtifact.compiled)
+      ((Structured.InteractionStaticCost.blockBudget
+          codeArtifact.compiled.expressions.toStructured structuredFuel
+          codeArtifact.compiled.expressions.toStructured.body + 1) *
+        TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
+          codeArtifact.compiled.cfg)
+      targetState hEntry
   have hCompactForward := stackAssemblyPrefixToCompactBytecode payload
-    hAssemblyForward hCompact rfl rfl (Assembly.SameRuntimeData.refl targetState)
+    hAssemblyForward hOptimize hCompact rfl rfl
+      (Assembly.SameRuntimeData.refl targetState)
   have hAccepted : Assembly.Accepted
       codeArtifact.compiled.certified.target :=
     Assembly.Preservation.compile?_some_accepted hAssembly
@@ -4532,6 +4750,7 @@ theorem stackAssemblyToCompactBytecode
     {generated : Structured.TypedCfgPreservation.Program.GeneratedContext
       structured entryShapes cfg}
     {assembly : Assembly.Program}
+    {compactAssembly : Assembly.Program}
     {pinnedPushPcs : List Nat}
     {compact : Assembly.Compact.Artifact}
     {sourceFuel assemblyFuel : Nat}
@@ -4545,7 +4764,14 @@ theorem stackAssemblyToCompactBytecode
         (some sourceProgram.contract) source)
       (Assembly.InteractionSemantics.Source.openRunNResult
         assembly assemblyFuel targetState))
-    (hCompile : Assembly.Compact.compile? assembly pinnedPushPcs = some compact)
+    (hOptimize : Simulation.Interaction.Rel
+      Assembly.Compact.RuntimeOutcomeRel
+      (Assembly.InteractionSemantics.Source.openRunNResult
+        compactAssembly assemblyFuel targetState)
+      (Assembly.InteractionSemantics.Source.openRunNResult
+        assembly assemblyFuel targetState))
+    (hCompile :
+      Assembly.Compact.compile? compactAssembly pinnedPushPcs = some compact)
     (hTargetPc : targetState.pc = EvmYul.UInt256.ofNat 0)
     (hTerminal : Simulation.Interaction.AllDone
       Yul.FunctionsInteractionProgram.SourceTerminal
@@ -4568,13 +4794,33 @@ theorem stackAssemblyToCompactBytecode
     apply Simulation.Interaction.Rel.allDone_right hStrong
     intro sourceDone assemblyDone hDone
     exact YulStackBytecodeDoneRel.targetTerminal hDone.2 hDone.1
+  have hOptimizedStrong :=
+    Simulation.Interaction.Rel.strengthen_left
+      (Simulation.Interaction.Rel.symm hOptimize) hAssemblyTerminal
+  have hOptimizedTerminal : Simulation.Interaction.AllDone
+      Assembly.InteractionSemantics.Terminal
+      (Assembly.InteractionSemantics.Source.openRunNResult
+        compactAssembly assemblyFuel targetState) := by
+    apply Simulation.Interaction.Rel.allDone_right hOptimizedStrong
+    intro assemblyDone optimizedDone hDone
+    exact runtimeOutcomeRel_terminal_left hDone.1 hDone.2
   have hCompact :=
     Assembly.Compact.InteractionSemantics.compile?_source_openRunNResult_terminal_rel
       hCompile suffix assemblyFuel 0 hTargetPc hTargetPc
-        (Assembly.SameRuntimeData.refl targetState) hAssemblyTerminal
-  have hComposed := Simulation.Interaction.Rel.trans hRel
+        (Assembly.SameRuntimeData.refl targetState) hOptimizedTerminal
+  have hYulOptimized := Simulation.Interaction.Rel.trans hRel
+    (Simulation.Interaction.Rel.symm hOptimize)
+  have hComposed := Simulation.Interaction.Rel.trans hYulOptimized
     (Simulation.Interaction.Rel.symm hCompact)
-  simpa [YulStackCompactDoneRel] using hComposed
+  apply Simulation.Interaction.Rel.mono hComposed
+  intro sourceDone compactDone hDone
+  rcases hDone with
+    ⟨optimizedDone, ⟨assemblyDone, hAssemblyRel, hOptimizedAssembly⟩,
+      hCompactOptimized⟩
+  exact
+    ⟨assemblyDone, hAssemblyRel,
+      Assembly.Compact.InteractionSemantics.runtimeOutcomeRel_trans
+        hCompactOptimized hOptimizedAssembly⟩
 
 /-- Compose a finished logical Assembly run with compact bytes protected by the
 compiler-owned invalid sentinel. -/
@@ -4586,6 +4832,7 @@ theorem stackAssemblyToCompactBytecodeFinished
     {generated : Structured.TypedCfgPreservation.Program.GeneratedContext
       structured entryShapes cfg}
     {assembly : Assembly.Program}
+    {compactAssembly : Assembly.Program}
     {pinnedPushPcs : List Nat}
     {compact : Assembly.Compact.Artifact}
     {sourceFuel assemblyFuel : Nat}
@@ -4599,7 +4846,14 @@ theorem stackAssemblyToCompactBytecodeFinished
         (some sourceProgram.contract) source)
       (Assembly.InteractionSemantics.Source.openRunNResult
         assembly assemblyFuel targetState))
-    (hCompile : Assembly.Compact.compile? assembly pinnedPushPcs = some compact)
+    (hOptimize : Simulation.Interaction.Rel
+      Assembly.Compact.RuntimeOutcomeRel
+      (Assembly.InteractionSemantics.Source.openRunNResult
+        compactAssembly assemblyFuel targetState)
+      (Assembly.InteractionSemantics.Source.openRunNResult
+        assembly assemblyFuel targetState))
+    (hCompile :
+      Assembly.Compact.compile? compactAssembly pinnedPushPcs = some compact)
     (hTargetPc : targetState.pc = EvmYul.UInt256.ofNat 0)
     (hAssemblyFinished : Simulation.Interaction.AllDone
       Assembly.InteractionSemantics.Finished
@@ -4615,13 +4869,33 @@ theorem stackAssemblyToCompactBytecodeFinished
           (compact.bytes.toList ++
             (Assembly.Compact.encodeInstr (.prim .invalid) ++ payload)))
         (2 * assemblyFuel) targetState) := by
+  have hOptimizedStrong :=
+    Simulation.Interaction.Rel.strengthen_left
+      (Simulation.Interaction.Rel.symm hOptimize) hAssemblyFinished
+  have hOptimizedFinished : Simulation.Interaction.AllDone
+      Assembly.InteractionSemantics.Finished
+      (Assembly.InteractionSemantics.Source.openRunNResult
+        compactAssembly assemblyFuel targetState) := by
+    apply Simulation.Interaction.Rel.allDone_right hOptimizedStrong
+    intro assemblyDone optimizedDone hDone
+    exact runtimeOutcomeRel_finished_left hDone.1 hDone.2
   have hCompact :=
     Assembly.Compact.InteractionSemantics.compile?_source_openRunNResult_finished_rel
       hCompile payload assemblyFuel 0 hTargetPc hTargetPc
-        (Assembly.SameRuntimeData.refl targetState) hAssemblyFinished
-  have hComposed := Simulation.Interaction.Rel.trans hRel
+        (Assembly.SameRuntimeData.refl targetState) hOptimizedFinished
+  have hYulOptimized := Simulation.Interaction.Rel.trans hRel
+    (Simulation.Interaction.Rel.symm hOptimize)
+  have hComposed := Simulation.Interaction.Rel.trans hYulOptimized
     (Simulation.Interaction.Rel.symm hCompact)
-  simpa [YulStackCompactDoneRel] using hComposed
+  apply Simulation.Interaction.Rel.mono hComposed
+  intro sourceDone compactDone hDone
+  rcases hDone with
+    ⟨optimizedDone, ⟨assemblyDone, hAssemblyRel, hOptimizedAssembly⟩,
+      hCompactOptimized⟩
+  exact
+    ⟨assemblyDone, hAssemblyRel,
+      Assembly.Compact.InteractionSemantics.runtimeOutcomeRel_trans
+        hCompactOptimized hOptimizedAssembly⟩
 
 /-- Final adjacent Assembly-to-raw-bytecode composition for the stack route.
 The decoder relation is owned by Assembly; this theorem only rewrites the
@@ -4756,9 +5030,20 @@ theorem compiledVerifiedStackCodeToRawBytecode
   have hAccepted : Assembly.Accepted
       codeArtifact.compiled.certified.target :=
     Assembly.Preservation.compile?_some_accepted hAssembly
+  have hEntry := certifiedChoice_entry_labelPc_zero hCertified
+  have hOptimize :=
+    compactAssembly_openRunNResult_rel
+      (object := object)
+      (compiled := codeArtifact.compiled)
+      (Structured.InteractionStaticCost.blockBudget
+          codeArtifact.compiled.expressions.toStructured structuredFuel
+          codeArtifact.compiled.expressions.toStructured.body *
+        TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
+          codeArtifact.compiled.cfg)
+      expressionsState.evm hEntry
   have hCompactRel := stackAssemblyToCompactBytecode
     (Solidity.Frontend.Object.verifiedCodeSentinel ++ suffix) hAssemblySource
-    hCompact rfl hTerminal
+    hOptimize hCompact rfl hTerminal
   refine ⟨structuredFuel, hAccepted, generated, ?_⟩
   rw [hBytes]
   simpa [List.append_assoc] using hCompactRel
@@ -4849,8 +5134,19 @@ theorem compiledVerifiedStackCodeToRawBytecodeFinished
   have hAccepted : Assembly.Accepted
       codeArtifact.compiled.certified.target :=
     Assembly.Preservation.compile?_some_accepted hAssembly
+  have hEntry := certifiedChoice_entry_labelPc_zero hCertified
+  have hOptimize :=
+    compactAssembly_openRunNResult_rel
+      (object := object)
+      (compiled := codeArtifact.compiled)
+      (Structured.InteractionStaticCost.blockBudget
+          codeArtifact.compiled.expressions.toStructured structuredFuel
+          codeArtifact.compiled.expressions.toStructured.body *
+        TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
+          codeArtifact.compiled.cfg)
+      expressionsState.evm hEntry
   have hCompactRel := stackAssemblyToCompactBytecodeFinished payload
-    hAssemblySource hCompact rfl hAssemblyFinished
+    hAssemblySource hOptimize hCompact rfl hAssemblyFinished
   refine ⟨structuredFuel, hAccepted, generated, ?_⟩
   rw [hBytes]
   simpa [List.append_assoc] using hCompactRel
