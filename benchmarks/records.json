@@ -30,9 +30,45 @@
         "method": "runner-owned multi-source solc driver -> Solidus.compile? (solidus-backend raw-image, byte-identical to config/ScoreMain.lean) -> runner gas.py over honest bytes"
       },
       "note": "Season-1 launch baseline: reference compiler (record-0 @7022b5fc) scored over the 20-contract private suite via the multi-source runner driver. Totals-only; per-contract detail is never published."
+    },
+    {
+      "tag": "record-1",
+      "commit": "99bdd14041b6e043aae535eb98694e83ccce7ce9",
+      "short_commit": "99bdd1404",
+      "source_repo": "https://github.com/yevhenx33/solidus",
+      "source_branch": "codex/conditional-block-layout",
+      "parent_tag": "record-0",
+      "based_on": "record-0",
+      "author": "@yevhenx33",
+      "team": "solo",
+      "author_url": null,
+      "pr": 3,
+      "pr_url": "https://github.com/paradigmxyz/solidus/pull/3",
+      "commit_url": "https://github.com/yevhenx33/solidus/commit/99bdd14041b6e043aae535eb98694e83ccce7ce9",
+      "timestamp": "2026-07-25T20:00:53+00:00",
+      "total_gas": 88787921,
+      "total_deploy_gas": 86966018,
+      "total_exec_gas": 1821903,
+      "delta_gas": -1910460,
+      "delta_rel": -0.021064,
+      "beats_bar_rel": 0.021064,
+      "attestation": {
+        "proof_gate": "green",
+        "lake_build": "EvmCompiler.Verification",
+        "axioms_ok": true,
+        "axiom_footprint": [
+          "propext",
+          "Classical.choice",
+          "Quot.sound"
+        ],
+        "frozen_hashes_ok": true,
+        "deterministic_double_compile": true,
+        "ci_run_url": null
+      },
+      "note": "Block layout across conditional edges."
     }
   ],
-  "current_record_tag": "record-0",
-  "generated_at": "2026-07-22T06:39:13+00:00",
+  "current_record_tag": "record-1",
+  "generated_at": "2026-07-25T20:00:53+00:00",
   "__schema__": "solidus records.json v1 (totals-only; see scripts/scorebot/records.py). Season-1 launch seed for the arena-branch ledger."
 }
