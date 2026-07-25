@@ -2977,52 +2977,108 @@ theorem lowerAt?_openRunUntilTransfer_rel
                 (by
                   simp only [TypedCfg.Terminator.definedLabels]
                   exact List.mem_map.mpr ⟨site, hMem, rfl⟩)
+            let scheduled :=
+              TypedCfg.Terminator.scheduleReturnSites sites
+            have hScheduledNonempty : scheduled ≠ [] := by
+              simpa [scheduled] using hGood.1
+            have hResolvedCasesScheduled :
+                Preservation.Terminator.ResolvedCaseLabels
+                  (pre ++ code ++ post) scheduled := by
+              intro site hMem
+              exact hResolvedCases site (by
+                simpa [scheduled] using hMem)
+            have hResolvedTargetsScheduled :
+                Preservation.Terminator.ResolvedTargets
+                  (pre ++ code ++ post)
+                  (.returnDispatch returnCount scheduled) := by
+              intro target hTarget
+              simp only [TypedCfg.Terminator.targets,
+                List.mem_map] at hTarget
+              rcases hTarget with ⟨site, hSite, rfl⟩
+              apply hResolved.1 site.target
+              simp only [TypedCfg.Terminator.targets, List.mem_map]
+              exact ⟨site, by simpa [scheduled] using hSite, rfl⟩
             by_cases hShared : 2 < depth * (sites.length - 1)
             · have hCodeEq :
                   code =
-                    TypedCfg.Terminator.returnDispatchSharedCode depth sites := by
+                    TypedCfg.Terminator.returnDispatchSharedCode
+                      depth scheduled := by
                 rw [hLoweredCodeEq]
-                simp [TypedCfg.Terminator.returnDispatchLoweredCode, hShared]
+                simp [TypedCfg.Terminator.returnDispatchLoweredCode,
+                  hShared, scheduled]
               cases hGet : state.stack[depth]? with
                 | none =>
                     simpa [
-                      TypedCfg.InteractionSemantics.Terminator.assemblyFlowPolicy] using
+                      TypedCfg.InteractionSemantics.Terminator.assemblyFlowPolicy,
+                      scheduled] using
                       (returnDispatch_shared_missing_token_openRunUntilTransfer_rel
-                        hDepth hGood.2 hGood.1 hCodeEq hBound hGet
+                        hDepth hGood.2 hScheduledNonempty hCodeEq hBound hGet
                         hFits hPc)
                 | some token =>
                     simpa [
-                      TypedCfg.InteractionSemantics.Terminator.assemblyFlowPolicy] using
+                      TypedCfg.InteractionSemantics.Terminator.assemblyFlowPolicy,
+                      scheduled] using
                       (returnDispatch_shared_present_openRunUntilTransfer_rel
                         hDepth hGood.2 hCodeEq hBound hGet hFits hPc
-                        hResolved.1 hResolvedCases hLabels)
+                        hResolvedTargetsScheduled hResolvedCasesScheduled
+                        hLabels)
             · have hCodeEq :
                   code =
-                    TypedCfg.Terminator.returnDispatchCode depth sites := by
+                    TypedCfg.Terminator.returnDispatchCode
+                      depth scheduled := by
                 rw [hLoweredCodeEq]
-                simp [TypedCfg.Terminator.returnDispatchLoweredCode, hShared]
+                simp [TypedCfg.Terminator.returnDispatchLoweredCode,
+                  hShared, scheduled]
               cases hGet : state.stack[depth]? with
               | none =>
                   simpa [
-                    TypedCfg.InteractionSemantics.Terminator.assemblyFlowPolicy] using
+                    TypedCfg.InteractionSemantics.Terminator.assemblyFlowPolicy,
+                    scheduled] using
                     (returnDispatch_missing_token_openRunUntilTransfer_rel
-                      hDepth hGood.2 hGood.1 hCodeEq hBound hGet
+                      hDepth hGood.2 hScheduledNonempty hCodeEq hBound hGet
                       hFits hPc)
               | some token =>
                   cases hFind :
                       TypedCfg.Block.ReturnSite.findTarget? token sites with
                   | none =>
+                      have hFindScheduled :
+                          TypedCfg.Block.ReturnSite.findTarget?
+                              token scheduled = none := by
+                        calc
+                          TypedCfg.Block.ReturnSite.findTarget?
+                              token scheduled =
+                              TypedCfg.Block.ReturnSite.findTarget?
+                                token sites := by
+                            simpa [scheduled] using
+                              Preservation.ReturnSite.findTarget?_scheduleReturnSites
+                                token sites
+                          _ = none := hFind
                       simpa [
-                        TypedCfg.InteractionSemantics.Terminator.assemblyFlowPolicy] using
+                        TypedCfg.InteractionSemantics.Terminator.assemblyFlowPolicy,
+                        scheduled] using
                         (returnDispatch_unknown_token_openRunUntilTransfer_rel
-                          hDepth hGood.2 hCodeEq hBound hGet hFind
-                          hFits hPc hResolvedCases)
+                          hDepth hGood.2 hCodeEq hBound hGet hFindScheduled
+                          hFits hPc hResolvedCasesScheduled)
                   | some target =>
+                      have hFindScheduled :
+                          TypedCfg.Block.ReturnSite.findTarget?
+                              token scheduled = some target := by
+                        calc
+                          TypedCfg.Block.ReturnSite.findTarget?
+                              token scheduled =
+                              TypedCfg.Block.ReturnSite.findTarget?
+                                token sites := by
+                            simpa [scheduled] using
+                              Preservation.ReturnSite.findTarget?_scheduleReturnSites
+                                token sites
+                          _ = some target := hFind
                       simpa [
-                        TypedCfg.InteractionSemantics.Terminator.assemblyFlowPolicy] using
+                        TypedCfg.InteractionSemantics.Terminator.assemblyFlowPolicy,
+                        scheduled] using
                         (returnDispatch_selected_openRunUntilTransfer_rel
-                          hDepth hGood.2 hCodeEq hBound hGet hFind
-                          hFits hPc hResolved.1 hResolvedCases hLabels)
+                          hDepth hGood.2 hCodeEq hBound hGet hFindScheduled
+                          hFits hPc hResolvedTargetsScheduled
+                          hResolvedCasesScheduled hLabels)
           · simp [TypedCfg.Terminator.lowerAt?, hDepth,
               TypedCfg.Terminator.returnDispatchCode?, hBound] at hLower
 

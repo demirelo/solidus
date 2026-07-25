@@ -102,12 +102,72 @@ def returnDispatchSharedCode (depth : Nat) (sites : List ReturnSite) :
   Assembly.StackShuffle.guardedLiftBuriedToTop depth ++
     returnDispatchCode 0 sites
 
+/--
+Promote the second call site in return dispatchers with at least three entries.
+Profiling shows that generated loop bodies commonly occupy this position, while
+two-site dispatchers have no equally strong signal. Generated programs have
+unique tokens; arbitrary hand-built TypedCfg programs with duplicate tokens
+retain source-order, first-match semantics.
+-/
+def scheduleReturnSites (sites : List ReturnSite) : List ReturnSite :=
+  if (sites.map ReturnSite.token).Nodup then
+    match sites with
+    | first :: second :: third :: rest =>
+        second :: first :: third :: rest
+    | _ => sites
+  else
+    sites
+
+theorem scheduleReturnSites_perm (sites : List ReturnSite) :
+    (scheduleReturnSites sites).Perm sites := by
+  unfold scheduleReturnSites
+  split
+  · cases sites with
+    | nil =>
+        exact List.Perm.refl []
+    | cons first tail =>
+        cases tail with
+        | nil =>
+            exact List.Perm.refl [first]
+        | cons second tail =>
+            cases tail with
+            | nil =>
+                exact List.Perm.refl [first, second]
+            | cons third rest =>
+                exact List.Perm.swap first second (third :: rest)
+  · exact List.Perm.refl sites
+
+@[simp] theorem scheduleReturnSites_length (sites : List ReturnSite) :
+    (scheduleReturnSites sites).length = sites.length :=
+  List.Perm.length_eq (scheduleReturnSites_perm sites)
+
+@[simp] theorem scheduleReturnSites_eq_nil (sites : List ReturnSite) :
+    scheduleReturnSites sites = [] ↔ sites = [] := by
+  constructor
+  · intro h
+    apply List.eq_nil_of_length_eq_zero
+    calc
+      sites.length =
+          (scheduleReturnSites sites).length :=
+        (scheduleReturnSites_length sites).symm
+      _ = [].length := congrArg List.length h
+      _ = 0 := rfl
+  · intro h
+    subst sites
+    rfl
+
+@[simp] theorem mem_scheduleReturnSites_iff
+    {site : ReturnSite} {sites : List ReturnSite} :
+    site ∈ scheduleReturnSites sites ↔ site ∈ sites :=
+  List.Perm.mem_iff (scheduleReturnSites_perm sites)
+
 def returnDispatchLoweredCode (depth : Nat) (sites : List ReturnSite) :
     Assembly.Program :=
+  let scheduled := scheduleReturnSites sites
   if 2 < depth * (sites.length - 1) then
-    returnDispatchSharedCode depth sites
+    returnDispatchSharedCode depth scheduled
   else
-    returnDispatchCode depth sites
+    returnDispatchCode depth scheduled
 
 def returnDispatchCode? (depth : Nat) (sites : List ReturnSite) :
     Option Assembly.Program :=
@@ -118,12 +178,14 @@ theorem label_mem_returnDispatchLoweredCode
     (hSite : site ∈ sites) :
     Assembly.Instr.label site.caseLabel ∈
       returnDispatchLoweredCode depth sites := by
+  have hScheduled : site ∈ scheduleReturnSites sites :=
+    mem_scheduleReturnSites_iff.mpr hSite
   have hCase (caseDepth : Nat) :
       Assembly.Instr.label site.caseLabel ∈
-        returnDispatchCode caseDepth sites := by
+        returnDispatchCode caseDepth (scheduleReturnSites sites) := by
     apply List.mem_append_right
     exact List.mem_flatMap.mpr
-      ⟨site, hSite, by simp [returnDispatchCase]⟩
+      ⟨site, hScheduled, by simp [returnDispatchCase]⟩
   by_cases hShared : 2 < depth * (sites.length - 1)
   · simp only [returnDispatchLoweredCode, if_pos hShared,
       returnDispatchSharedCode, List.mem_append]
@@ -135,12 +197,14 @@ theorem jump_mem_returnDispatchLoweredCode
     (hSite : site ∈ sites) :
     Assembly.Instr.jump site.target ∈
       returnDispatchLoweredCode depth sites := by
+  have hScheduled : site ∈ scheduleReturnSites sites :=
+    mem_scheduleReturnSites_iff.mpr hSite
   have hCase (caseDepth : Nat) :
       Assembly.Instr.jump site.target ∈
-        returnDispatchCode caseDepth sites := by
+        returnDispatchCode caseDepth (scheduleReturnSites sites) := by
     apply List.mem_append_right
     exact List.mem_flatMap.mpr
-      ⟨site, hSite, by simp [returnDispatchCase]⟩
+      ⟨site, hScheduled, by simp [returnDispatchCase]⟩
   by_cases hShared : 2 < depth * (sites.length - 1)
   · simp only [returnDispatchLoweredCode, if_pos hShared,
       returnDispatchSharedCode, List.mem_append]

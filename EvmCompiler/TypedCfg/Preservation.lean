@@ -232,6 +232,92 @@ theorem ReturnSite.findTarget?_eq_none_all_ne
         | inr hRest =>
             exact ih hFind site hRest
 
+theorem ReturnSite.findTarget?_eq_some_of_mem_of_tokens_nodup
+    {sites : List ReturnSite} {token : Word} {site : ReturnSite}
+    (hUnique : (sites.map ReturnSite.token).Nodup)
+    (hMem : site ∈ sites)
+    (hToken : site.token = token) :
+    Block.ReturnSite.findTarget? token sites = some site.target := by
+  induction sites with
+  | nil =>
+      simp at hMem
+  | cons head rest ih =>
+      simp only [List.map_cons, List.nodup_cons] at hUnique
+      simp only [List.mem_cons] at hMem
+      rcases hMem with hHead | hRest
+      · subst head
+        simp [Block.ReturnSite.findTarget?, hToken]
+      · have hTokenMem : token ∈ rest.map ReturnSite.token := by
+          exact List.mem_map.mpr ⟨site, hRest, hToken⟩
+        have hHeadNe : head.token ≠ token := by
+          intro hEq
+          exact hUnique.1 (hEq ▸ hTokenMem)
+        simp [Block.ReturnSite.findTarget?, hHeadNe,
+          ih hUnique.2 hRest]
+
+theorem ReturnSite.findTarget?_eq_none_of_all_ne
+    {sites : List ReturnSite} {token : Word}
+    (hAll : ∀ site, site ∈ sites → site.token ≠ token) :
+    Block.ReturnSite.findTarget? token sites = none := by
+  induction sites with
+  | nil =>
+      rfl
+  | cons head rest ih =>
+      have hHead : head.token ≠ token := hAll head (by simp)
+      have hRest :
+          ∀ site, site ∈ rest → site.token ≠ token := by
+        intro site hMem
+        exact hAll site (by simp [hMem])
+      simp [Block.ReturnSite.findTarget?, hHead, ih hRest]
+
+theorem ReturnSite.findTarget?_scheduleReturnSites
+    (token : Word) (sites : List ReturnSite) :
+    Block.ReturnSite.findTarget? token
+        (TypedCfg.Terminator.scheduleReturnSites sites) =
+      Block.ReturnSite.findTarget? token sites := by
+  by_cases hUnique : (sites.map ReturnSite.token).Nodup
+  · have hUniqueScheduled :
+        ((TypedCfg.Terminator.scheduleReturnSites sites).map
+          ReturnSite.token).Nodup :=
+      ((TypedCfg.Terminator.scheduleReturnSites_perm sites).map
+        ReturnSite.token).nodup_iff.mpr hUnique
+    cases hFind : Block.ReturnSite.findTarget? token sites with
+    | none =>
+        apply ReturnSite.findTarget?_eq_none_of_all_ne
+        intro site hMem
+        exact ReturnSite.findTarget?_eq_none_all_ne hFind site
+          (by simpa using hMem)
+    | some target =>
+        rcases
+            Block.ReturnSite.mem_token_of_findTarget?_eq_some hFind with
+          ⟨site, hMem, hToken, hTarget⟩
+        simpa [hTarget] using
+          ReturnSite.findTarget?_eq_some_of_mem_of_tokens_nodup
+            hUniqueScheduled (by simpa using hMem) hToken
+  · simp [TypedCfg.Terminator.scheduleReturnSites, hUnique]
+
+@[simp] theorem Block.runTerm_returnDispatch_scheduleReturnSites
+    (shape : Shape) (returnCount : Nat) (sites : List ReturnSite)
+    (state : EVMState) :
+    Block.runTerm shape
+        (.returnDispatch returnCount
+          (TypedCfg.Terminator.scheduleReturnSites sites)) state =
+      Block.runTerm shape (.returnDispatch returnCount sites) state := by
+  simp only [Block.runTerm]
+  cases hDepth : shape.returnTokenDepth? with
+  | none =>
+      rfl
+  | some depth =>
+      by_cases hCount : depth = returnCount
+      · simp only [hCount, ne_eq, not_true_eq_false, ↓reduceIte]
+        cases hGet : state.stack[returnCount]? with
+        | none =>
+            rfl
+        | some token =>
+            simp only [hGet]
+            rw [ReturnSite.findTarget?_scheduleReturnSites]
+      · simp [hCount]
+
 theorem List.getElem?_eq_some_split
     {α : Type} {xs : List α} {index : Nat} {value : α}
     (hGet : xs[index]? = some value) :
@@ -2898,42 +2984,94 @@ theorem lowerAt?_eventually
                 (by
                   simp only [TypedCfg.Terminator.definedLabels]
                   exact List.mem_map.mpr ⟨site, hMem, rfl⟩)
+            let scheduled :=
+              TypedCfg.Terminator.scheduleReturnSites sites
+            have hScheduledNonempty : scheduled ≠ [] := by
+              simpa [scheduled] using hGood.1
+            have hResolvedCasesScheduled :
+                Preservation.Terminator.ResolvedCaseLabels
+                  (pre ++ code ++ post) scheduled := by
+              intro site hMem
+              exact hResolvedCases site (by
+                simpa [scheduled] using hMem)
+            have hResolvedTargetsScheduled :
+                Preservation.Terminator.ResolvedTargets
+                  (pre ++ code ++ post)
+                  (.returnDispatch returnCount scheduled) := by
+              intro target hTarget
+              simp only [TypedCfg.Terminator.targets,
+                List.mem_map] at hTarget
+              rcases hTarget with ⟨site, hSite, rfl⟩
+              apply hResolved.1 site.target
+              simp only [TypedCfg.Terminator.targets, List.mem_map]
+              exact ⟨site, by simpa [scheduled] using hSite, rfl⟩
             by_cases hShared : 2 < depth * (sites.length - 1)
             · have hCodeEq :
                   code =
-                    TypedCfg.Terminator.returnDispatchSharedCode depth sites := by
+                    TypedCfg.Terminator.returnDispatchSharedCode
+                      depth scheduled := by
                 rw [hLoweredCodeEq]
-                simp [TypedCfg.Terminator.returnDispatchLoweredCode, hShared]
+                simp [TypedCfg.Terminator.returnDispatchLoweredCode,
+                  hShared, scheduled]
               cases hGet : state.stack[depth]? with
                 | none =>
-                    exact returnDispatch_shared_missing_token_eventually
-                      hDepth hGood.2 hGood.1 hCodeEq hBound hGet
-                      hFits hPc
+                    simpa [scheduled] using
+                      (returnDispatch_shared_missing_token_eventually
+                        hDepth hGood.2 hScheduledNonempty hCodeEq hBound hGet
+                        hFits hPc)
                 | some token =>
-                    exact returnDispatch_shared_present_eventually
-                      hDepth hGood.2 hCodeEq hBound hGet hFits hPc
-                      hResolved.1 hResolvedCases hLabels
+                    simpa [scheduled] using
+                      (returnDispatch_shared_present_eventually
+                        hDepth hGood.2 hCodeEq hBound hGet hFits hPc
+                        hResolvedTargetsScheduled hResolvedCasesScheduled
+                        hLabels)
             · have hCodeEq :
                   code =
-                    TypedCfg.Terminator.returnDispatchCode depth sites := by
+                    TypedCfg.Terminator.returnDispatchCode
+                      depth scheduled := by
                 rw [hLoweredCodeEq]
-                simp [TypedCfg.Terminator.returnDispatchLoweredCode, hShared]
+                simp [TypedCfg.Terminator.returnDispatchLoweredCode,
+                  hShared, scheduled]
               cases hGet : state.stack[depth]? with
               | none =>
-                  exact returnDispatch_missing_token_eventually
-                    hDepth hGood.2 hGood.1 hCodeEq hBound hGet
-                    hFits hPc
+                  simpa [scheduled] using
+                    (returnDispatch_missing_token_eventually
+                      hDepth hGood.2 hScheduledNonempty hCodeEq hBound hGet
+                      hFits hPc)
               | some token =>
                   cases hFind :
                       Block.ReturnSite.findTarget? token sites with
                   | none =>
-                      exact returnDispatch_unknown_token_eventually
-                        hDepth hGood.2 hCodeEq hBound hGet hFind
-                        hFits hPc hResolvedCases
+                      have hFindScheduled :
+                          Block.ReturnSite.findTarget? token scheduled =
+                            none := by
+                        calc
+                          Block.ReturnSite.findTarget? token scheduled =
+                              Block.ReturnSite.findTarget? token sites := by
+                            simpa [scheduled] using
+                              ReturnSite.findTarget?_scheduleReturnSites
+                                token sites
+                          _ = none := hFind
+                      simpa [scheduled] using
+                        (returnDispatch_unknown_token_eventually
+                          hDepth hGood.2 hCodeEq hBound hGet hFindScheduled
+                          hFits hPc hResolvedCasesScheduled)
                   | some target =>
-                      exact returnDispatch_selected_eventually
-                        hDepth hGood.2 hCodeEq hBound hGet hFind
-                        hFits hPc hResolved.1 hResolvedCases hLabels
+                      have hFindScheduled :
+                          Block.ReturnSite.findTarget? token scheduled =
+                            some target := by
+                        calc
+                          Block.ReturnSite.findTarget? token scheduled =
+                              Block.ReturnSite.findTarget? token sites := by
+                            simpa [scheduled] using
+                              ReturnSite.findTarget?_scheduleReturnSites
+                                token sites
+                          _ = some target := hFind
+                      simpa [scheduled] using
+                        (returnDispatch_selected_eventually
+                          hDepth hGood.2 hCodeEq hBound hGet hFindScheduled
+                          hFits hPc hResolvedTargetsScheduled
+                          hResolvedCasesScheduled hLabels)
           · simp [TypedCfg.Terminator.lowerAt?, hDepth,
               TypedCfg.Terminator.returnDispatchCode?, hBound] at hLower
 
