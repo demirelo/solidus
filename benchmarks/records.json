@@ -138,9 +138,45 @@
         "ci_run_url": null
       },
       "note": "Metadata payload relocation, wide-mask re-encoding, stack teardown."
+    },
+    {
+      "tag": "record-4",
+      "commit": "bfd068d490d863b604426d6428ee60ff215948ce",
+      "short_commit": "bfd068d49",
+      "source_repo": "https://github.com/dkuthoore/solidus",
+      "source_branch": "devin/solidus-opt",
+      "parent_tag": "record-3",
+      "based_on": "record-0",
+      "author": "@dkuthoore",
+      "team": "solo",
+      "author_url": null,
+      "pr": 4,
+      "pr_url": "https://github.com/paradigmxyz/solidus/pull/4",
+      "commit_url": "https://github.com/dkuthoore/solidus/commit/bfd068d490d863b604426d6428ee60ff215948ce",
+      "timestamp": "2026-07-25T20:00:54+00:00",
+      "total_gas": 70159587,
+      "total_deploy_gas": 68354424,
+      "total_exec_gas": 1805163,
+      "delta_gas": -195624,
+      "delta_rel": -0.002781,
+      "beats_bar_rel": 0.002781,
+      "attestation": {
+        "proof_gate": "green",
+        "lake_build": "EvmCompiler.Verification",
+        "axioms_ok": true,
+        "axiom_footprint": [
+          "propext",
+          "Classical.choice",
+          "Quot.sound"
+        ],
+        "frozen_hashes_ok": true,
+        "deterministic_double_compile": true,
+        "ci_run_url": null
+      },
+      "note": "PUSH0 emission + fallthrough-seam block layout."
     }
   ],
-  "current_record_tag": "record-3",
+  "current_record_tag": "record-4",
   "generated_at": "2026-07-25T20:00:54+00:00",
   "__schema__": "solidus records.json v1 (totals-only; see scripts/scorebot/records.py). Season-1 launch seed for the arena-branch ledger."
 }
