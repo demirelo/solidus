@@ -124,7 +124,7 @@ still moving values that are approaching the `DUP16`/`SWAP16` boundary.
 At genuinely high-pressure points, retain the eager policy so layouts with
 sixteen or more live values do not trade near-term accessibility for size.
 -/
-def futurePromotionDepth : Nat := 12
+def futurePromotionDepth : Nat := 15
 
 def orderPriority (pinned : LiveSet) (layout : Locals.Layout) (stmt : Stmt)
     (facts : AllocationLivenessFacts.Point) : List Name :=
