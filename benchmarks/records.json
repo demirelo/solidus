@@ -66,9 +66,45 @@
         "ci_run_url": null
       },
       "note": "Block layout across conditional edges."
+    },
+    {
+      "tag": "record-2",
+      "commit": "1aa671e0546fdd5a4d732bf6f58aa4235737b806",
+      "short_commit": "1aa671e05",
+      "source_repo": "https://github.com/josusanmartin/solidus",
+      "source_branch": "structural-stack-scheduler",
+      "parent_tag": "record-0",
+      "based_on": "record-0",
+      "author": "@josusanmartin",
+      "team": "solo",
+      "author_url": null,
+      "pr": 5,
+      "pr_url": "https://github.com/paradigmxyz/solidus/pull/5",
+      "commit_url": "https://github.com/josusanmartin/solidus/commit/1aa671e0546fdd5a4d732bf6f58aa4235737b806",
+      "timestamp": "2026-07-25T20:00:53+00:00",
+      "total_gas": 72131710,
+      "total_deploy_gas": 70326250,
+      "total_exec_gas": 1805460,
+      "delta_gas": -16656211,
+      "delta_rel": -0.187595,
+      "beats_bar_rel": 0.187595,
+      "attestation": {
+        "proof_gate": "green",
+        "lake_build": "EvmCompiler.Verification",
+        "axioms_ok": true,
+        "axiom_footprint": [
+          "propext",
+          "Classical.choice",
+          "Quot.sound"
+        ],
+        "frozen_hashes_ok": true,
+        "deterministic_double_compile": true,
+        "ci_run_url": null
+      },
+      "note": "Shared return-dispatch preparation + delayed future-only stack promotions. Includes PUSH0/block-layout work cherry-picked from PR #4 (dkuthoore), authorship preserved."
     }
   ],
-  "current_record_tag": "record-1",
+  "current_record_tag": "record-2",
   "generated_at": "2026-07-25T20:00:53+00:00",
   "__schema__": "solidus records.json v1 (totals-only; see scripts/scorebot/records.py). Season-1 launch seed for the arena-branch ledger."
 }
