@@ -465,6 +465,194 @@ theorem openRunAt_eq_done_of_runState
       | ok state' =>
           rfl
 
+/-- An assembly instruction that neither interacts with the outside world nor
+transfers control: its open step is `.done` of its closed step, a successful
+step advances the pc by exactly its own byte size, and it never halts.
+
+`push` and the ordinary arithmetic prims satisfy this; `call`/`create`, the
+jumps and the halting prims do not.  This is exactly the property that lets a
+multi-instruction lowering fragment be collapsed to its closed run. -/
+structure ClosedLinear (instr : Assembly.Instr) : Prop where
+  openDone :
+    ∀ (program : Assembly.Program) (pc : Nat) (s : EVMState),
+      Assembly.InteractionSemantics.Source.openStepAt program pc instr s =
+        .done (Assembly.Source.stepAt program pc instr s)
+  pcAdvance :
+    ∀ (program : Assembly.Program) (pc : Nat) (s s' : EVMState),
+      Assembly.Source.stepAt program pc instr s = .ok s' →
+        s'.pc = s.pc + EvmYul.UInt256.ofNat instr.byteSize
+  noHalt : instr.haltKind? = none
+
+theorem closedLinear_push (v : Word) :
+    ClosedLinear (.push v) where
+  openDone := fun _ _ _ => rfl
+  pcAdvance := by
+    intro program pc s s' hStep
+    have : s' = s.replaceStackAndIncrPC (s.stack.push v) 33 := by
+      simpa [Assembly.Source.stepAt, Assembly.Target.stepInstr] using hStep.symm
+    subst this
+    rfl
+  noHalt := rfl
+
+theorem closedLinear_prim
+    {op : Assembly.PrimOp} {input output : Nat}
+    (hExternal : Simulation.ExternalKind.ofEVMOperation? op.toEVM = none)
+    (hGas : op ≠ .gas) (hMsize : op ≠ .msize)
+    (hArity : op.stackArity? = some (input, output))
+    (hHalt : (Assembly.Instr.prim op).haltKind? = none) :
+    ClosedLinear (.prim op) where
+  openDone := fun _ _ _ =>
+    Assembly.InteractionPreservation.source_openStepAt_prim_closed
+      hExternal hGas hMsize
+  pcAdvance := by
+    intro program pc s s' hStep
+    have hPrim : op.step s = .ok s' := by
+      simpa [Assembly.Source.stepAt, Assembly.Target.stepInstr] using hStep
+    simpa [Assembly.Instr.byteSize] using
+      Preservation.primOp_step_pc_of_stackArity hArity hPrim
+  noHalt := hHalt
+
+theorem closedLinear_pushCode (value : Word) :
+    ∀ i ∈ Assembly.pushCode value, ClosedLinear i := by
+  intro i hi
+  unfold Assembly.pushCode at hi
+  cases hMask : Assembly.maskWidth? value with
+  | none =>
+      rw [hMask] at hi
+      simp only [List.mem_singleton] at hi
+      subst hi
+      exact closedLinear_push _
+  | some w =>
+      rw [hMask] at hi
+      simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
+      rcases hi with h | h | h | h <;> subst h
+      · exact closedLinear_push _
+      · exact closedLinear_prim (input := 1) (output := 1)
+          (by decide) (by decide) (by decide) rfl rfl
+      · exact closedLinear_push _
+      · exact closedLinear_prim (input := 2) (output := 1)
+          (by decide) (by decide) (by decide) rfl rfl
+
+/-- A fragment of `ClosedLinear` instructions runs closed: the open run over it
+is `.done` of the ordinary run. -/
+theorem openRunNResult_eq_done_of_closedLinear {post : Assembly.Program} :
+    ∀ (code : Assembly.Program) {pre : Assembly.Program} {state : EVMState},
+      (∀ i ∈ code, ClosedLinear i) →
+      Assembly.Program.PCFitsFrom pre code →
+      state.pc = pre.pcAfter →
+      Assembly.InteractionSemantics.Source.openRunNResult
+          (pre ++ code ++ post) code.length state =
+        .done
+          (Assembly.Source.runNResult
+            (pre ++ code ++ post) code.length state)
+  | [], pre, state, _hClosed, _hFits, _hPc => by
+      rfl
+  | instr :: rest, pre, state, hClosed, hFits, hPc => by
+      have hHere : ClosedLinear instr := hClosed instr (by simp)
+      have hRest : ∀ i ∈ rest, ClosedLinear i :=
+        fun i hi => hClosed i (by simp [hi])
+      obtain ⟨hFitsHere, hFitsRest⟩ := hFits
+      have hProg :
+          pre ++ (instr :: rest) ++ post = pre ++ instr :: (rest ++ post) := by
+        simp
+      rw [hProg]
+      have hOpenStep :
+          Assembly.InteractionSemantics.Source.openStepResult
+              (pre ++ instr :: (rest ++ post)) state =
+            .done
+              (Assembly.Source.stepResult
+                (pre ++ instr :: (rest ++ post)) state) := by
+        rw [Assembly.InteractionPreservation.source_openStepResult_at_boundary
+              hFitsHere hPc,
+            Assembly.InteractionPreservation.source_stepResult_at_boundary
+              hFitsHere hPc]
+        exact
+          Assembly.InteractionPreservation.source_openStepAtResult_eq_done_of_stepAt
+            (hHere.openDone _ _ _)
+      show
+        Assembly.InteractionSemantics.Source.openRunNResult
+            (pre ++ instr :: (rest ++ post)) (rest.length + 1) state = _
+      simp only [List.length_cons]
+      rw [Assembly.InteractionSemantics.Source.openRunNResult_succ, hOpenStep]
+      cases hStep :
+          Assembly.Source.stepAt
+            (pre ++ instr :: (rest ++ post)) pre.byteLength instr state with
+      | error err =>
+          have hRes :
+              Assembly.Source.stepResult
+                  (pre ++ instr :: (rest ++ post)) state = .error err := by
+            rw [Assembly.InteractionPreservation.source_stepResult_at_boundary
+                  hFitsHere hPc]
+            simp [Assembly.Source.stepAtResult, hStep]
+          rw [hRes, Preservation.runNResult_succ_of_error hRes]
+          rfl
+      | ok state' =>
+          have hRes :
+              Assembly.Source.stepResult
+                  (pre ++ instr :: (rest ++ post)) state =
+                .ok (Assembly.StepResult.running state') := by
+            rw [Assembly.InteractionPreservation.source_stepResult_at_boundary
+                  hFitsHere hPc]
+            simp [Assembly.Source.stepAtResult, hStep, hHere.noHalt]
+          have hPc' : state'.pc = (pre ++ [instr]).pcAfter := by
+            rw [Assembly.Program.pcAfter_snoc, ← hPc]
+            exact hHere.pcAdvance _ _ _ _ hStep
+          have hProg' :
+              pre ++ instr :: (rest ++ post) =
+                (pre ++ [instr]) ++ rest ++ post := by
+            simp
+          have hIH :=
+            openRunNResult_eq_done_of_closedLinear (post := post) rest
+              (pre := pre ++ [instr]) (state := state') hRest hFitsRest hPc'
+          rw [hRes, Preservation.runNResult_succ_of_step hRes]
+          show
+            Assembly.InteractionSemantics.Source.openRunNResult
+                (pre ++ instr :: (rest ++ post)) rest.length state' = _
+          rw [hProg']
+          exact hIH
+
+theorem lowerAt_multi_closed
+    {instr : TypedCfg.Instr} {shape output : Shape}
+    {code pre post : Assembly.Program} {state : EVMState}
+    (hLower : instr.lowerAt? shape = some (code, output))
+    (hFits : Assembly.Program.PCFitsFrom pre code)
+    (hPc : state.pc = pre.pcAfter)
+    (hSourceOpen :
+      TypedCfg.InteractionSemantics.Instr.openRunState
+          instr shape state =
+        .done (TypedCfg.Instr.runState instr shape state))
+    (hClosed : ∀ i ∈ code, ClosedLinear i) :
+    Assembly.InteractionSemantics.Source.openRunNResult
+        (pre ++ code ++ post) code.length state =
+      Simulation.Interaction.map
+        (fun result => Assembly.StepResult.running result.1)
+        (TypedCfg.InteractionSemantics.Instr.openRunAt
+          instr shape state) := by
+  have hTarget :=
+    openRunNResult_eq_done_of_closedLinear (post := post) code hClosed hFits hPc
+  have hPlain :=
+    Preservation.Instr.lowerAt_source_runNResult
+      (post := post) hLower hFits hPc
+  have hSource :=
+    openRunAt_eq_done_of_runState hSourceOpen
+  calc
+    Assembly.InteractionSemantics.Source.openRunNResult
+        (pre ++ code ++ post) code.length state =
+        .done
+          (Assembly.Source.runNResult
+            (pre ++ code ++ post) code.length state) := hTarget
+    _ =
+        .done
+          ((TypedCfg.Instr.runAt instr shape state).map
+            (fun result => Assembly.StepResult.running result.1)) := by
+      rw [hPlain]
+    _ =
+        Simulation.Interaction.map
+          (fun result => Assembly.StepResult.running result.1)
+          (TypedCfg.InteractionSemantics.Instr.openRunAt
+            instr shape state) := by
+      rw [hSource, interaction_map_done]
+
 theorem lowerAt_single_closed
     {instr : TypedCfg.Instr} {shape output : Shape}
     {asmInstr : Assembly.Instr}
@@ -668,11 +856,10 @@ theorem lowerAt_openRunNResult_eq
             at hLower
           rcases hLower with ⟨rfl, rfl⟩
           refine
-            lowerAt_single_closed
+            lowerAt_multi_closed
               (instr := .push value)
               (output := typedOutput)
-              (asmInstr := .push value)
-              ?_ hFits hPc rfl rfl
+              ?_ hFits hPc rfl (closedLinear_pushCode value)
           simp [TypedCfg.Instr.lowerAt?,
             TypedCfg.Instr.lower?, hType]
       | returnToken value =>

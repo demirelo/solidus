@@ -111,7 +111,7 @@ theorem openRunBody_push_cons
     Block.openRunBody (.push v :: rest) input state =
       Block.openRunBody rest
         { input with slots := .literal v :: input.slots }
-        (state.replaceStackAndIncrPC (state.stack.push v) 33) := by
+        (state.replaceStackAndIncrPC (state.stack.push v) (Assembly.pushPcDelta v)) := by
   rw [openRunBody_nonprim_cons (by intro op; simp)]
   simp [TypedCfg.Instr.runAt, Instr.type?, Instr.runState, Option.elim]
 
@@ -243,12 +243,12 @@ theorem openRunBody_peephole_congr :
             subst hMiddle
             have hPushRel :
                 SameRuntimeData
-                  (state1.replaceStackAndIncrPC (state1.stack.push v) 33)
-                  (state2.replaceStackAndIncrPC (state2.stack.push v) 33) :=
-              SameRuntimeData.replaceStackAndIncrPC (pcΔ := 33) hRel
+                  (state1.replaceStackAndIncrPC (state1.stack.push v) (Assembly.pushPcDelta v))
+                  (state2.replaceStackAndIncrPC (state2.stack.push v) (Assembly.pushPcDelta v)) :=
+              SameRuntimeData.replaceStackAndIncrPC (pcΔ := (Assembly.pushPcDelta v)) hRel
                 (congrArg (fun st => st.push v) (SameRuntimeData.stack_eq hRel))
             obtain ⟨popState1, hPopStep, hPopRel⟩ :=
-              pop_after_push_sameRuntimeData state1 v 33
+              pop_after_push_sameRuntimeData state1 v (Assembly.pushPcDelta v)
             have hPopType :
                 Instr.type? .pop
                     { input with slots := .literal v :: input.slots } =
@@ -266,11 +266,11 @@ theorem openRunBody_peephole_congr :
                 Block.openRunBody (Instr.push v :: rest) input state2 =
                   Block.openRunBody rest
                     { input with slots := .literal v :: input.slots }
-                    (state2.replaceStackAndIncrPC (state2.stack.push v) 33) :=
+                    (state2.replaceStackAndIncrPC (state2.stack.push v) (Assembly.pushPcDelta v)) :=
               openRunBody_push_cons v rest input state2
             have hPushReal2 :
                 StackRealizes { input with slots := .literal v :: input.slots }
-                  (state2.replaceStackAndIncrPC (state2.stack.push v) 33) := by
+                  (state2.replaceStackAndIncrPC (state2.stack.push v) (Assembly.pushPcDelta v)) := by
               unfold StackRealizes at hReal2 ⊢
               simp only [Shape.length, List.length_cons,
                 EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC,
@@ -279,14 +279,14 @@ theorem openRunBody_peephole_congr :
             have ihRest :=
               openRunBody_peephole_congr rest
                 { input with slots := .literal v :: input.slots } output
-                (state1.replaceStackAndIncrPC (state1.stack.push v) 33)
-                (state2.replaceStackAndIncrPC (state2.stack.push v) 33)
+                (state1.replaceStackAndIncrPC (state1.stack.push v) (Assembly.pushPcDelta v))
+                (state2.replaceStackAndIncrPC (state2.stack.push v) (Assembly.pushPcDelta v))
                 hTailType hTailPC hPushReal2 hPushRel
             rw [hPeep] at ihRest
             have hPopReduce :
                 Block.openRunBody (.pop :: rest')
                     { input with slots := .literal v :: input.slots }
-                    (state1.replaceStackAndIncrPC (state1.stack.push v) 33) =
+                    (state1.replaceStackAndIncrPC (state1.stack.push v) (Assembly.pushPcDelta v)) =
                   Block.openRunBody rest' input popState1 := by
               rw [openRunBody_nonprim_cons (by intro op; simp)]
               simp [TypedCfg.Instr.runAt, hPopType, Instr.runState,

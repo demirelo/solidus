@@ -7,7 +7,7 @@ namespace TypedCfg
 namespace Instr
 
 def lower? : Instr → Option Assembly.Program
-  | .push value => some [.push value]
+  | .push value => some (Assembly.pushCode value)
   | .returnToken value => some [.push value]
   | .prim op => some [.prim op]
   | .pop => some [.prim .pop]

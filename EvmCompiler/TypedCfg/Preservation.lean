@@ -511,6 +511,416 @@ theorem runPops_source_runNResult
               hFitsRest hPc'
           simpa [List.append_assoc] using hTail
 
+
+/-! ### arithmetic -/
+
+theorem pow_sub_one_div (s m : Nat) :
+    (2 ^ (s + m) - 1) / 2 ^ s = 2 ^ m - 1 := by
+  have hs : 0 < 2 ^ s := Nat.two_pow_pos s
+  have hm : 0 < 2 ^ m := Nat.two_pow_pos m
+  have hsplit : 2 ^ (s + m) - 1 = (2 ^ s - 1) + (2 ^ m - 1) * 2 ^ s := by
+    have h : (2 ^ m - 1) * 2 ^ s = 2 ^ (s + m) - 2 ^ s := by
+      rw [Nat.sub_mul, Nat.one_mul, Nat.pow_add]; ring_nf
+    rw [h]
+    have hle : 2 ^ s ≤ 2 ^ (s + m) := Nat.pow_le_pow_right (by omega) (by omega)
+    omega
+  rw [hsplit, Nat.add_mul_div_right _ _ hs, Nat.div_eq_of_lt (by omega)]
+  omega
+
+theorem uint256_eq_of_toNat {a b : Word} (h : a.toNat = b.toNat) : a = b := by
+  cases a with
+  | mk a => cases b with | mk b => exact congrArg _ (Fin.ext h)
+
+theorem toNat_ofNat_of_lt {n : Nat} (h : n < EvmYul.UInt256.size) :
+    (EvmYul.UInt256.ofNat n).toNat = n := by
+  simp [EvmYul.UInt256.ofNat, EvmYul.UInt256.toNat, Fin.ofNat, Id.run,
+    Nat.mod_eq_of_lt h]
+
+theorem toNat_lt (a : Word) : a.toNat < EvmYul.UInt256.size := a.val.isLt
+
+theorem toNat_shr {a b : Word} (hb : b.toNat < 256) :
+    (EvmYul.UInt256.shiftRight a b).toNat = a.toNat / 2 ^ b.toNat := by
+  unfold EvmYul.UInt256.shiftRight
+  have hguard : ¬ (b.val ≥ (256 : Fin EvmYul.UInt256.size)) := by
+    rw [ge_iff_le, Fin.le_def]
+    show ¬ (((256 : Fin EvmYul.UInt256.size)).val ≤ b.val.val)
+    have h256 : ((256 : Fin EvmYul.UInt256.size)).val = 256 := by decide
+    rw [h256]
+    exact Nat.not_le.mpr hb
+  rw [if_neg hguard]
+  show (a.val.val >>> b.val.val) % EvmYul.UInt256.size = a.toNat / 2 ^ b.toNat
+  rw [Nat.shiftRight_eq_div_pow]
+  exact Nat.mod_eq_of_lt (Nat.lt_of_le_of_lt (Nat.div_le_self _ _) (toNat_lt a))
+
+theorem toNat_lnot_zero :
+    (EvmYul.UInt256.lnot (EvmYul.UInt256.ofNat 0)).toNat = 2 ^ 256 - 1 := by
+  rfl
+
+/-- The mask identity: `(NOT 0) >> (256 - 8w) = 2 ^ (8w) - 1`. -/
+theorem shr_lnot_zero_eq_mask {w : Nat} (hw5 : 5 ≤ w) (hw31 : w ≤ 31)
+    {value : Word} (hval : value.toNat = 2 ^ (8 * w) - 1) :
+    EvmYul.UInt256.shiftRight (EvmYul.UInt256.lnot (EvmYul.UInt256.ofNat 0))
+        (EvmYul.UInt256.ofNat (256 - 8 * w)) = value := by
+  apply uint256_eq_of_toNat
+  have hslt : 256 - 8 * w < EvmYul.UInt256.size := by
+    have : (256 : Nat) < EvmYul.UInt256.size := by
+      unfold EvmYul.UInt256.size; omega
+    omega
+  have hsNat : (EvmYul.UInt256.ofNat (256 - 8 * w)).toNat = 256 - 8 * w :=
+    toNat_ofNat_of_lt hslt
+  rw [toNat_shr (by rw [hsNat]; omega), hsNat, toNat_lnot_zero, hval]
+  have hpow : (2 : Nat) ^ 256 - 1 = 2 ^ ((256 - 8 * w) + 8 * w) - 1 := by
+    congr 2
+    omega
+  rw [hpow]
+  exact pow_sub_one_div (256 - 8 * w) (8 * w)
+
+/-! ### single steps -/
+
+theorem step_push_at_boundary
+    {pre post : Assembly.Program} {v : Word} {state : EVMState}
+    (hFits : pre.PCFits) (hPc : state.pc = pre.pcAfter) :
+    Assembly.Source.step (pre ++ Assembly.Instr.push v :: post) state =
+      .ok (state.replaceStackAndIncrPC (state.stack.push v) (pcΔ := 33)) := by
+  rw [source_step_at_boundary hFits hPc]
+  rfl
+
+theorem step_not_at_boundary
+    {pre post : Assembly.Program} {state : EVMState}
+    {top : Word} {rest : List Word}
+    (hFits : pre.PCFits) (hPc : state.pc = pre.pcAfter)
+    (hStack : state.stack = top :: rest) :
+    Assembly.Source.step (pre ++ Assembly.Instr.prim .not :: post) state =
+      .ok (state.replaceStackAndIncrPC
+            (EvmYul.UInt256.lnot top :: rest) (pcΔ := 1)) := by
+  rw [source_step_at_boundary hFits hPc]
+  show Assembly.Target.stepInstr (.prim .not) state = _
+  simp [Assembly.Target.stepInstr, Assembly.PrimOp.step,
+    Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+    EvmYul.EVM.execUnOp, EvmYul.Stack.pop, EvmYul.Stack.push, hStack, Id.run]
+
+theorem step_shr_at_boundary
+    {pre post : Assembly.Program} {state : EVMState}
+    {shift val : Word} {rest : List Word}
+    (hFits : pre.PCFits) (hPc : state.pc = pre.pcAfter)
+    (hStack : state.stack = shift :: val :: rest) :
+    Assembly.Source.step (pre ++ Assembly.Instr.prim .shr :: post) state =
+      .ok (state.replaceStackAndIncrPC
+            (EvmYul.UInt256.shiftRight val shift :: rest) (pcΔ := 1)) := by
+  rw [source_step_at_boundary hFits hPc]
+  show Assembly.Target.stepInstr (.prim .shr) state = _
+  simp [Assembly.Target.stepInstr, Assembly.PrimOp.step,
+    Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+    EvmYul.EVM.execBinOp, EvmYul.Stack.pop2, EvmYul.Stack.push, hStack, flip,
+    Id.run]
+
+/-! ### chaining -/
+
+theorem runN_succ_of_step
+    {program : Assembly.Program} {n : Nat} {state final : EVMState}
+    (hStep : Assembly.Source.step program state = .ok final) :
+    Assembly.Source.runN program (n + 1) state =
+      Assembly.Source.runN program n final := by
+  have hUnfold :
+      Assembly.Control.runNWith (Assembly.Source.step program) (n + 1) state =
+        (do
+          let state' ← Assembly.Source.step program state
+          Assembly.Control.runNWith (Assembly.Source.step program) n state') := rfl
+  show Assembly.Control.runNWith (Assembly.Source.step program) (n + 1) state = _
+  rw [hUnfold, hStep]
+  rfl
+
+theorem stepResult_of_step
+    {pre post : Assembly.Program} {instr : Assembly.Instr}
+    {state final : EVMState}
+    (hFits : pre.PCFits) (hPc : state.pc = pre.pcAfter)
+    (hNoHalt : instr.haltKind? = none)
+    (hStep : Assembly.Source.step (pre ++ instr :: post) state = .ok final) :
+    Assembly.Source.stepResult (pre ++ instr :: post) state =
+      .ok (.running final) := by
+  rw [source_stepResult_at_boundary hFits hPc]
+  rw [source_step_at_boundary hFits hPc] at hStep
+  unfold Assembly.Source.stepAtResult
+  rw [hStep]
+  simp [hNoHalt]
+
+theorem runNResult_succ_of_error
+    {program : Assembly.Program} {n : Nat} {state : EVMState}
+    {err : EVMException}
+    (hStep : Assembly.Source.stepResult program state = .error err) :
+    Assembly.Source.runNResult program (n + 1) state = .error err := by
+  have hUnfold :
+      Assembly.Control.runNResultWith
+          (Assembly.Source.stepResult program) (n + 1) state =
+        (do
+          let result ← Assembly.Source.stepResult program state
+          match result with
+          | .running state' =>
+              Assembly.Control.runNResultWith
+                (Assembly.Source.stepResult program) n state'
+          | .halted halt => pure (.halted halt)) := rfl
+  show Assembly.Control.runNResultWith
+      (Assembly.Source.stepResult program) (n + 1) state = _
+  rw [hUnfold, hStep]
+  rfl
+
+theorem runNResult_succ_of_step
+    {program : Assembly.Program} {n : Nat} {state final : EVMState}
+    (hStep : Assembly.Source.stepResult program state = .ok (.running final)) :
+    Assembly.Source.runNResult program (n + 1) state =
+      Assembly.Source.runNResult program n final := by
+  have hUnfold :
+      Assembly.Control.runNResultWith
+          (Assembly.Source.stepResult program) (n + 1) state =
+        (do
+          let result ← Assembly.Source.stepResult program state
+          match result with
+          | .running state' =>
+              Assembly.Control.runNResultWith
+                (Assembly.Source.stepResult program) n state'
+          | .halted halt => pure (.halted halt)) := rfl
+  show Assembly.Control.runNResultWith
+      (Assembly.Source.stepResult program) (n + 1) state = _
+  rw [hUnfold, hStep]
+  rfl
+
+/-! ### the push lowering runs correctly -/
+
+theorem pcAfter_append_eq (pre L : Assembly.Program) :
+    Assembly.Program.pcAfter (pre ++ L) =
+      EvmYul.UInt256.ofNat (pre.byteLength + L.byteLength) := by
+  simp [Assembly.Program.pcAfter, Assembly.Program.byteLength_append]
+
+@[simp] theorem replaceStack_stack
+    (I : EVMState) (st : EvmYul.Stack Word) (k : Nat) :
+    (I.replaceStackAndIncrPC st k).stack = st := rfl
+
+@[simp] theorem replaceStack_pc
+    (I : EVMState) (st : EvmYul.Stack Word) (k : Nat) :
+    (I.replaceStackAndIncrPC st k).pc = I.pc + EvmYul.UInt256.ofNat k := rfl
+
+theorem replaceStack_comp
+    (I : EVMState) (s1 s2 : EvmYul.Stack Word) (k1 k2 : Nat) :
+    (I.replaceStackAndIncrPC s1 k1).replaceStackAndIncrPC s2 k2 =
+      I.replaceStackAndIncrPC s2 (k1 + k2) := by
+  simp [EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC,
+    uint256_add_assoc, Assembly.UInt256_ofNat_add]
+
+theorem pc_chain (pc : Word) :
+    ((pc + EvmYul.UInt256.ofNat 33 + EvmYul.UInt256.ofNat 1)
+        + EvmYul.UInt256.ofNat 33) + EvmYul.UInt256.ofNat 1 =
+      pc + EvmYul.UInt256.ofNat 68 := by
+  rw [uint256_add_assoc, Assembly.UInt256_ofNat_add,
+    uint256_add_assoc, Assembly.UInt256_ofNat_add,
+    uint256_add_assoc, Assembly.UInt256_ofNat_add]
+
+theorem pushCode_run
+    (value : Word) {pre post : Assembly.Program} {state : EVMState}
+    (hFits : Assembly.Program.PCFitsFrom pre (Assembly.pushCode value))
+    (hPc : state.pc = pre.pcAfter) :
+    Assembly.Source.runN (pre ++ Assembly.pushCode value ++ post)
+        (Assembly.pushCode value).length state =
+      .ok (state.replaceStackAndIncrPC (state.stack.push value)
+            (pcΔ := Assembly.Program.byteLength
+                      (Assembly.pushCode value))) ∧
+    Assembly.Source.runNResult (pre ++ Assembly.pushCode value ++ post)
+        (Assembly.pushCode value).length state =
+      .ok (.running (state.replaceStackAndIncrPC (state.stack.push value)
+            (pcΔ := Assembly.Program.byteLength
+                      (Assembly.pushCode value)))) := by
+  cases hMask : Assembly.maskWidth? value with
+  | none =>
+      simp only [Assembly.pushCode, hMask] at hFits ⊢
+      have hstep := step_push_at_boundary (pre := pre) (post := post)
+        (v := value) hFits.1 hPc
+      have hres := stepResult_of_step hFits.1 hPc rfl hstep
+      rw [List.append_assoc]
+      constructor
+      · show Assembly.Source.runN
+          (pre ++ Assembly.Instr.push value :: post) 1 state = _
+        rw [show (1 : Nat) = 0 + 1 from rfl, runN_succ_of_step hstep]
+        rfl
+      · show Assembly.Source.runNResult
+          (pre ++ Assembly.Instr.push value :: post) 1 state = _
+        rw [show (1 : Nat) = 0 + 1 from rfl, runNResult_succ_of_step hres]
+        rfl
+  | some w =>
+      simp only [Assembly.pushCode, hMask] at hFits ⊢
+      obtain ⟨hw5, hw31, hval⟩ := Assembly.maskWidth?_spec hMask
+      obtain ⟨h0, h1, h2, h3, -⟩ := hFits
+      have hmask := shr_lnot_zero_eq_mask hw5 hw31 hval
+      -- program re-associations, one per boundary
+      have hP1 :
+          pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                  Assembly.Instr.prim Assembly.PrimOp.not,
+                  Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                  Assembly.Instr.prim Assembly.PrimOp.shr] ++ post =
+            pre ++ Assembly.Instr.push (EvmYul.UInt256.ofNat 0) ::
+              (Assembly.Instr.prim Assembly.PrimOp.not ::
+                Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)) ::
+                  Assembly.Instr.prim Assembly.PrimOp.shr :: post) := by simp
+      have hP2 :
+          pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                  Assembly.Instr.prim Assembly.PrimOp.not,
+                  Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                  Assembly.Instr.prim Assembly.PrimOp.shr] ++ post =
+            (pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0)]) ++
+              Assembly.Instr.prim Assembly.PrimOp.not ::
+                (Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)) ::
+                  Assembly.Instr.prim Assembly.PrimOp.shr :: post) := by simp
+      have hP3 :
+          pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                  Assembly.Instr.prim Assembly.PrimOp.not,
+                  Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                  Assembly.Instr.prim Assembly.PrimOp.shr] ++ post =
+            ((pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0)]) ++
+              [Assembly.Instr.prim Assembly.PrimOp.not]) ++
+              Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)) ::
+                (Assembly.Instr.prim Assembly.PrimOp.shr :: post) := by simp
+      have hP4 :
+          pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                  Assembly.Instr.prim Assembly.PrimOp.not,
+                  Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                  Assembly.Instr.prim Assembly.PrimOp.shr] ++ post =
+            (((pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0)]) ++
+              [Assembly.Instr.prim Assembly.PrimOp.not]) ++
+              [Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w))]) ++
+              Assembly.Instr.prim Assembly.PrimOp.shr :: post := by simp
+      -- boundary program counters
+      have hPc1 :
+          (state.replaceStackAndIncrPC
+            (state.stack.push (EvmYul.UInt256.ofNat 0)) 33).pc =
+              (pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0)]).pcAfter := by
+        rw [Assembly.Program.pcAfter_snoc]
+        show state.pc + EvmYul.UInt256.ofNat 33 = _
+        rw [hPc]
+        rfl
+      set st1 : EVMState :=
+        state.replaceStackAndIncrPC
+          (state.stack.push (EvmYul.UInt256.ofNat 0)) 33 with hst1
+      set st2 : EVMState :=
+        st1.replaceStackAndIncrPC
+          (EvmYul.UInt256.lnot (EvmYul.UInt256.ofNat 0) :: state.stack) 1
+        with hst2
+      set st3 : EVMState :=
+        st2.replaceStackAndIncrPC
+          (st2.stack.push (EvmYul.UInt256.ofNat (256 - 8 * w))) 33 with hst3
+      set st4 : EVMState :=
+        st3.replaceStackAndIncrPC
+          (EvmYul.UInt256.shiftRight
+            (EvmYul.UInt256.lnot (EvmYul.UInt256.ofNat 0))
+            (EvmYul.UInt256.ofNat (256 - 8 * w)) :: state.stack) 1 with hst4
+      have hPc2 :
+          st2.pc =
+            ((pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0)]) ++
+              [Assembly.Instr.prim Assembly.PrimOp.not]).pcAfter := by
+        rw [Assembly.Program.pcAfter_snoc]
+        show st1.pc + EvmYul.UInt256.ofNat 1 = _
+        rw [hPc1]
+        rfl
+      have hPc3 :
+          st3.pc =
+            (((pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0)]) ++
+              [Assembly.Instr.prim Assembly.PrimOp.not]) ++
+              [Assembly.Instr.push
+                (EvmYul.UInt256.ofNat (256 - 8 * w))]).pcAfter := by
+        rw [Assembly.Program.pcAfter_snoc]
+        show st2.pc + EvmYul.UInt256.ofNat 33 = _
+        rw [hPc2]
+        rfl
+      have e1 : Assembly.Source.step
+          (pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                   Assembly.Instr.prim Assembly.PrimOp.not,
+                   Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                   Assembly.Instr.prim Assembly.PrimOp.shr] ++ post)
+          state = .ok st1 := by
+        rw [hP1]; exact step_push_at_boundary h0 hPc
+      have e2 : Assembly.Source.step
+          (pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                   Assembly.Instr.prim Assembly.PrimOp.not,
+                   Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                   Assembly.Instr.prim Assembly.PrimOp.shr] ++ post)
+          st1 = .ok st2 := by
+        rw [hP2]; exact step_not_at_boundary h1 hPc1 rfl
+      have e3 : Assembly.Source.step
+          (pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                   Assembly.Instr.prim Assembly.PrimOp.not,
+                   Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                   Assembly.Instr.prim Assembly.PrimOp.shr] ++ post)
+          st2 = .ok st3 := by
+        rw [hP3]; exact step_push_at_boundary h2 hPc2
+      have e4 : Assembly.Source.step
+          (pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                   Assembly.Instr.prim Assembly.PrimOp.not,
+                   Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                   Assembly.Instr.prim Assembly.PrimOp.shr] ++ post)
+          st3 = .ok st4 := by
+        rw [hP4]; exact step_shr_at_boundary h3 hPc3 rfl
+      have r1 : Assembly.Source.stepResult
+          (pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                   Assembly.Instr.prim Assembly.PrimOp.not,
+                   Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                   Assembly.Instr.prim Assembly.PrimOp.shr] ++ post)
+          state = .ok (.running st1) := by
+        rw [hP1]; exact stepResult_of_step h0 hPc rfl (hP1 ▸ e1)
+      have r2 : Assembly.Source.stepResult
+          (pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                   Assembly.Instr.prim Assembly.PrimOp.not,
+                   Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                   Assembly.Instr.prim Assembly.PrimOp.shr] ++ post)
+          st1 = .ok (.running st2) := by
+        rw [hP2]; exact stepResult_of_step h1 hPc1 rfl (hP2 ▸ e2)
+      have r3 : Assembly.Source.stepResult
+          (pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                   Assembly.Instr.prim Assembly.PrimOp.not,
+                   Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                   Assembly.Instr.prim Assembly.PrimOp.shr] ++ post)
+          st2 = .ok (.running st3) := by
+        rw [hP3]; exact stepResult_of_step h2 hPc2 rfl (hP3 ▸ e3)
+      have r4 : Assembly.Source.stepResult
+          (pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                   Assembly.Instr.prim Assembly.PrimOp.not,
+                   Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                   Assembly.Instr.prim Assembly.PrimOp.shr] ++ post)
+          st3 = .ok (.running st4) := by
+        rw [hP4]; exact stepResult_of_step h3 hPc3 rfl (hP4 ▸ e4)
+      have hLen : Assembly.Program.byteLength
+          [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+           Assembly.Instr.prim Assembly.PrimOp.not,
+           Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+           Assembly.Instr.prim Assembly.PrimOp.shr] = 68 := by
+        simp [Assembly.Program.byteLength_cons, Assembly.Instr.byteSize,
+          Assembly.Instr.push32Size]
+      have hFinal : st4 =
+          state.replaceStackAndIncrPC (state.stack.push value) 68 := by
+        rw [hst4, hst3, hst2, hst1]
+        simp only [replaceStack_stack]
+        rw [replaceStack_comp, replaceStack_comp, replaceStack_comp, hmask]
+        rfl
+      constructor
+      · show Assembly.Source.runN
+          (pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                   Assembly.Instr.prim Assembly.PrimOp.not,
+                   Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                   Assembly.Instr.prim Assembly.PrimOp.shr] ++ post) 4 state = _
+        rw [show (4 : Nat) = 3 + 1 from rfl, runN_succ_of_step e1]
+        rw [show (3 : Nat) = 2 + 1 from rfl, runN_succ_of_step e2]
+        rw [show (2 : Nat) = 1 + 1 from rfl, runN_succ_of_step e3]
+        rw [show (1 : Nat) = 0 + 1 from rfl, runN_succ_of_step e4]
+        show Except.ok st4 = _
+        rw [hLen, hFinal]
+      · show Assembly.Source.runNResult
+          (pre ++ [Assembly.Instr.push (EvmYul.UInt256.ofNat 0),
+                   Assembly.Instr.prim Assembly.PrimOp.not,
+                   Assembly.Instr.push (EvmYul.UInt256.ofNat (256 - 8 * w)),
+                   Assembly.Instr.prim Assembly.PrimOp.shr] ++ post) 4 state = _
+        rw [show (4 : Nat) = 3 + 1 from rfl, runNResult_succ_of_step r1]
+        rw [show (3 : Nat) = 2 + 1 from rfl, runNResult_succ_of_step r2]
+        rw [show (2 : Nat) = 1 + 1 from rfl, runNResult_succ_of_step r3]
+        rw [show (1 : Nat) = 0 + 1 from rfl, runNResult_succ_of_step r4]
+        show Except.ok (Assembly.StepResult.running st4) = _
+        rw [hLen, hFinal]
+
 namespace Instr
 
 theorem byteLength_replicate_pop (count : Nat) :
@@ -689,17 +1099,11 @@ theorem lowerAt_source_runN
       rw [runAt_map_fst hType]
       cases instr with
       | push value =>
-          simp [TypedCfg.Instr.lowerAt?, TypedCfg.Instr.lower?, hType] at hLower
+          simp only [TypedCfg.Instr.lowerAt?, TypedCfg.Instr.lower?, hType,
+            Option.some.injEq, Prod.mk.injEq] at hLower
           rcases hLower with ⟨rfl, rfl⟩
-          simp only [List.length_cons, List.length_nil, Nat.zero_add,
-            List.append_assoc]
-          change
-            Assembly.Source.runN
-                (pre ++ Assembly.Instr.push value :: post) 1 state =
-              _
-          rw [source_runN_one_at_boundary hFits.1 hPc]
-          simp [TypedCfg.Instr.runState, Assembly.Source.stepAt,
-            Assembly.Target.stepInstr]
+          simpa [TypedCfg.Instr.runState] using
+            (pushCode_run value hFits hPc).1
       | returnToken value =>
           simp [TypedCfg.Instr.lowerAt?, TypedCfg.Instr.lower?, hType] at hLower
           rcases hLower with ⟨rfl, rfl⟩
@@ -812,16 +1216,12 @@ theorem lowerAt_source_runNResult
   | some typedOutput =>
       cases instr with
       | push value =>
-          simp [TypedCfg.Instr.lowerAt?, TypedCfg.Instr.lower?, hType] at hLower
+          simp only [TypedCfg.Instr.lowerAt?, TypedCfg.Instr.lower?, hType,
+            Option.some.injEq, Prod.mk.injEq] at hLower
           rcases hLower with ⟨rfl, rfl⟩
-          simp only [List.length_cons, List.length_nil, Nat.zero_add,
-            List.append_assoc]
-          rw [source_runNResult_one_eq_map_running_append
-            (instr := Assembly.Instr.push value) hFits.1 hPc rfl]
-          simp only [List.length_cons, List.length_nil, Nat.zero_add,
-            List.append_assoc] at hRun
-          rw [hRun]
-          exact map_map_fst_running _
+          rw [runAt_map_running_fst hType]
+          simpa [TypedCfg.Instr.runState] using
+            (pushCode_run value hFits hPc).2
       | returnToken value =>
           simp [TypedCfg.Instr.lowerAt?, TypedCfg.Instr.lower?, hType] at hLower
           rcases hLower with ⟨rfl, rfl⟩

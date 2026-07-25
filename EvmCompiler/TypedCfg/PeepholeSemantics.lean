@@ -87,7 +87,7 @@ theorem runState_map_erase
   | push v =>
       simp only [Instr.runState, Except.map]
       exact congrArg Except.ok
-        (SameRuntimeData.replaceStackAndIncrPC (pcΔ := 33) hRel
+        (SameRuntimeData.replaceStackAndIncrPC (pcΔ := (Assembly.pushPcDelta v)) hRel
           (congrArg (fun st => st.push v) (SameRuntimeData.stack_eq hRel)))
   | returnToken v =>
       simp only [Instr.runState, Except.map]

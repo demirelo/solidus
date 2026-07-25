@@ -154,7 +154,7 @@ theorem openStep_test
       (value :: value :: realizedTail)
   let afterPush :=
     afterDup.replaceStackAndIncrPC
-      (caseValue :: value :: value :: realizedTail) (pcΔ := 33)
+      (caseValue :: value :: value :: realizedTail) (pcΔ := Assembly.pushPcDelta caseValue)
   let afterEq :=
     afterPush.replaceStackAndIncrPC
       (EvmYul.UInt256.eq caseValue value :: value :: realizedTail)

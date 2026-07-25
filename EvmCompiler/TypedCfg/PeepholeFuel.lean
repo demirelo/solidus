@@ -109,7 +109,7 @@ theorem lowerBodyFrom?_peephole_le :
               simpa [Instr.type?] using hHeadType.symm
             subst hMiddle
             have hPush : Instr.lowerAt? (.push v) input =
-                some ([Assembly.Instr.push v],
+                some (Assembly.pushCode v,
                   { input with slots := .literal v :: input.slots }) := by
               simp [Instr.lowerAt?, Instr.type?, Instr.lower?]
             have hPop : Instr.lowerAt? .pop
@@ -126,7 +126,7 @@ theorem lowerBodyFrom?_peephole_le :
               lowerBodyFrom?_peephole_le rest
                 { input with slots := .literal v :: input.slots } output hTailType
                 ([Assembly.Instr.prim .pop] ++ c') o' hPeepLower
-            refine ⟨[Assembly.Instr.push v] ++ t, ?_, ?_⟩
+            refine ⟨Assembly.pushCode v ++ t, ?_, ?_⟩
             · rw [lowerBodyFrom?_cons, hPush]
               simp only [Option.bind, hOrigRest]
             · simp only [List.length_append, List.length_cons,

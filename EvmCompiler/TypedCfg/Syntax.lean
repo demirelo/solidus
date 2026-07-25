@@ -1,4 +1,5 @@
 import EvmCompiler.Assembly.Syntax
+import EvmCompiler.Assembly.PushEncoding
 
 namespace EvmCompiler
 namespace TypedCfg
