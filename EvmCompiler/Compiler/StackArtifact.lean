@@ -13,6 +13,7 @@ import EvmCompiler.TypedCfg.PeepholeSeamCancel
 import EvmCompiler.TypedCfg.PeepholeSeamCancelEff
 import EvmCompiler.TypedCfg.ShuffleCanonChain
 import EvmCompiler.TypedCfg.BlockReorderCanon
+import EvmCompiler.TypedCfg.ConstTrueBranch
 import EvmCompiler.Assembly.Bytecode
 
 namespace EvmCompiler
@@ -40,7 +41,8 @@ structure Artifact where
 block-reorder splice (design (ii), fail-open on savings): the seam-cancelled
 corrected program `Q` always lowers (its certificate `qc` is retained); the
 chain-canonicalised `chainCanonProgram Q` is taken whenever it *also* lowers
-(certificate `cc`); and the block-reordered `reorderProgram (chainCanonProgram Q)`
+(certificate `cc`); and `optimizedProgram (chainCanonProgram Q)` (constant-true
+branch elimination followed by block reorder)
 is taken on top of `cc` whenever *it* lowers, falling back to `cc` (then to `qc`)
 otherwise.  Each layer can only be entered when the layer beneath it lowered, so
 the chosen certificate can never regress below the shipped seam path. -/
@@ -56,8 +58,8 @@ def CertifiedChoice (cfg : TypedCfg.Program)
             (TypedCfg.Peephole.peepholeProgram
               (TypedCfg.Peephole.normalizeProgram cfg)))).compileCertified?).elim qc
           (fun cc =>
-            ((TypedCfg.BlockReorder.reorderProgram
-              (TypedCfg.ShuffleCanon.chainCanonProgram
+            ((TypedCfg.ConstTrueBranch.optimizedProgram
+                (TypedCfg.ShuffleCanon.chainCanonProgram
                 (TypedCfg.Peephole.seamCancelProgramEff
                   (TypedCfg.Peephole.peepholeProgram
                     (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified?).getD cc)
@@ -98,8 +100,8 @@ def compile? (source : Functions.Program) : Option Artifact := do
         (TypedCfg.Peephole.peepholeProgram
           (TypedCfg.Peephole.normalizeProgram cfg)))).compileCertified?).elim qcertified
       (fun cc =>
-        ((TypedCfg.BlockReorder.reorderProgram
-          (TypedCfg.ShuffleCanon.chainCanonProgram
+        ((TypedCfg.ConstTrueBranch.optimizedProgram
+            (TypedCfg.ShuffleCanon.chainCanonProgram
             (TypedCfg.Peephole.seamCancelProgramEff
               (TypedCfg.Peephole.peepholeProgram
                 (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified?).getD cc)
@@ -202,7 +204,7 @@ theorem compile?_parts
                               (TypedCfg.Peephole.normalizeProgram
                                 generated.cfg)))).compileCertified?).elim qc
                           (fun cc =>
-                            ((TypedCfg.BlockReorder.reorderProgram
+                            ((TypedCfg.ConstTrueBranch.optimizedProgram
                               (TypedCfg.ShuffleCanon.chainCanonProgram
                                 (TypedCfg.Peephole.seamCancelProgramEff
                                   (TypedCfg.Peephole.peepholeProgram
