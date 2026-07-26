@@ -63,7 +63,7 @@ private theorem certifiedChoice_entry_labelPc_zero
       rw [hChain] at hArtEq
       simp only [Option.elim] at hArtEq
       cases hReorder :
-          (TypedCfg.BlockReorder.reorderProgram
+          (TypedCfg.ConstTrueBranch.optimizedProgram
             (TypedCfg.ShuffleCanon.chainCanonProgram
               (TypedCfg.Peephole.seamCancelProgramEff
                 (TypedCfg.Peephole.peepholeProgram
@@ -1555,7 +1555,7 @@ theorem yulToNormalizedStackAssemblyPrefixForward_reorder
     (hChainLower : (TypedCfg.ShuffleCanon.chainCanonProgram
         (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
           (TypedCfg.Peephole.normalizeProgram cfg)))).lower?.isSome)
-    (hCompile : (TypedCfg.BlockReorder.reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram
+    (hCompile : (TypedCfg.ConstTrueBranch.optimizedProgram (TypedCfg.ShuffleCanon.chainCanonProgram
         (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
           (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified? = some artifact)
     (hGLower : (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
@@ -1603,15 +1603,42 @@ theorem yulToNormalizedStackAssemblyPrefixForward_reorder
       (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
         (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))).ProgramCounterIndependent :=
     TypedCfg.ShuffleCanon.chainCanonProgram_programCounterIndependent hIndepPeep
-  have hCLU :
+  have hTypedChain :
       (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))).LabelsUnique :=
-    (TypedCfg.ShuffleCanon.chainCanonProgram_WellTyped hTypedQ).1
+        (TypedCfg.Peephole.peepholeProgram
+          (TypedCfg.Peephole.normalizeProgram cfg)))).WellTyped :=
+    TypedCfg.ShuffleCanon.chainCanonProgram_WellTyped hTypedQ
+  have hTypedConst :
+      (TypedCfg.ConstTrueBranch.constTrueProgram
+        (TypedCfg.ShuffleCanon.chainCanonProgram
+          (TypedCfg.Peephole.seamCancelProgramEff
+            (TypedCfg.Peephole.peepholeProgram
+              (TypedCfg.Peephole.normalizeProgram cfg))))).WellTyped :=
+    TypedCfg.ConstTrueBranch.wellTyped_constTrueProgram hTypedChain
+  have hCLU :
+      (TypedCfg.ConstTrueBranch.constTrueProgram
+        (TypedCfg.ShuffleCanon.chainCanonProgram
+          (TypedCfg.Peephole.seamCancelProgramEff
+            (TypedCfg.Peephole.peepholeProgram
+              (TypedCfg.Peephole.normalizeProgram cfg))))).LabelsUnique :=
+    hTypedConst.1
+  have hIndepConst :
+      (TypedCfg.ConstTrueBranch.constTrueProgram
+        (TypedCfg.ShuffleCanon.chainCanonProgram
+          (TypedCfg.Peephole.seamCancelProgramEff
+            (TypedCfg.Peephole.peepholeProgram
+              (TypedCfg.Peephole.normalizeProgram cfg))))).ProgramCounterIndependent :=
+    TypedCfg.ConstTrueBranch.programCounterIndependent_constTrueProgram
+      hIndepChainPeep
   have hIndepReord :
-      (TypedCfg.BlockReorder.reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram
-        (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
-          (TypedCfg.Peephole.normalizeProgram cfg))))).ProgramCounterIndependent :=
-    TypedCfg.BlockReorder.programCounterIndependent_reorderProgram _ hIndepChainPeep
+      (TypedCfg.ConstTrueBranch.optimizedProgram
+        (TypedCfg.ShuffleCanon.chainCanonProgram
+          (TypedCfg.Peephole.seamCancelProgramEff
+            (TypedCfg.Peephole.peepholeProgram
+              (TypedCfg.Peephole.normalizeProgram cfg))))).ProgramCounterIndependent := by
+    unfold TypedCfg.ConstTrueBranch.optimizedProgram
+    exact TypedCfg.BlockReorder.programCounterIndependent_reorderProgram _
+      hIndepConst
   have hFchain :
       (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
         (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))).lower?.isSome :=
@@ -1628,14 +1655,29 @@ theorem yulToNormalizedStackAssemblyPrefixForward_reorder
     le_trans
       (TypedCfg.ShuffleCanon.fuelBudget_chainCanonProgram_le hTypedQ.1 hFchain hGLower)
       (TypedCfg.Peephole.fuelBudget_seamCombinedEff_le cfg hWellTyped)
+  have hFinalLe :
+      TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
+          (TypedCfg.ConstTrueBranch.optimizedProgram
+            (TypedCfg.ShuffleCanon.chainCanonProgram
+              (TypedCfg.Peephole.seamCancelProgramEff
+                (TypedCfg.Peephole.peepholeProgram
+                  (TypedCfg.Peephole.normalizeProgram cfg))))) ≤
+        TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget cfg :=
+    le_trans
+      (TypedCfg.ConstTrueBranch.fuelBudget_optimizedProgram_le _
+        hTypedChain)
+      hChainLe
   have hFuelLe :
       budget *
           TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
-            (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-              (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) ≤
+            (TypedCfg.ConstTrueBranch.optimizedProgram
+              (TypedCfg.ShuffleCanon.chainCanonProgram
+                (TypedCfg.Peephole.seamCancelProgramEff
+                  (TypedCfg.Peephole.peepholeProgram
+                    (TypedCfg.Peephole.normalizeProgram cfg))))) ≤
         budget *
           TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget cfg :=
-    Nat.mul_le_mul_left _ hChainLe
+    Nat.mul_le_mul_left _ hFinalLe
   have hEntryReturns : expressionsState.returns = [] := hStackInitial.returns
   have hEntryInit :
       expressionsState = Structured.RunState.initial expressionsState.evm := by
@@ -1674,23 +1716,36 @@ theorem yulToNormalizedStackAssemblyPrefixForward_reorder
       hCfgFollowAtEntry.exists_executes_extension
     obtain ⟨peepDone, hPeepExec, _hRuntimeRel⟩ :=
       Simulation.Interaction.Rel.executes hCongr hCfgExec
+    have hConstCongr :=
+      TypedCfg.ConstTrueBranch.openRunNPrefix_constTrueProgram_congr
+        hTypedChain hIndepChainPeep budget cfg.entry
+        expressionsState.evm expressionsState.evm
+        (Assembly.SameRuntimeData.refl expressionsState.evm)
+    obtain ⟨constDone, hConstExec, _hConstRuntimeRel⟩ :=
+      Simulation.Interaction.Rel.executes hConstCongr hPeepExec
     have hFollowPeep : Simulation.Interaction.Follows
         (TypedCfg.InteractionSemantics.Program.openRunNPrefix
-          (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-            (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg))))
+          (TypedCfg.ConstTrueBranch.constTrueProgram
+            (TypedCfg.ShuffleCanon.chainCanonProgram
+              (TypedCfg.Peephole.seamCancelProgramEff
+                (TypedCfg.Peephole.peepholeProgram
+                  (TypedCfg.Peephole.normalizeProgram cfg)))))
           budget cfg.entry expressionsState.evm)
         transcript :=
       Simulation.Interaction.Follows.prefix_of_append transcript suffix
-        hPeepExec.follows
+        hConstExec.follows
     have hAssemblyFollow :=
       TypedCfg.InteractionPrefixPreservation.Program.compileCertified?_entry_openRunNPrefix_assembly_follows
         hCompile hIndepReord hAssemblyPc hAssemblyInitial
         (by
-          rw [TypedCfg.BlockReorder.openRunNPrefix_reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU]
+          unfold TypedCfg.ConstTrueBranch.optimizedProgram
+          rw [TypedCfg.BlockReorder.openRunNPrefix_reorderProgram
+            (TypedCfg.ConstTrueBranch.constTrueProgram
+              (TypedCfg.ShuffleCanon.chainCanonProgram
+                (TypedCfg.Peephole.seamCancelProgramEff
+                  (TypedCfg.Peephole.peepholeProgram
+                    (TypedCfg.Peephole.normalizeProgram cfg))))) hCLU]
           exact hFollowPeep)
-    rw [TypedCfg.BlockReorder.fuelBudget_reorderProgram_eq (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU] at hAssemblyFollow
     have hAssemblyFollowPad :=
       Assembly.InteractionSemantics.Source.openRunNResult_follows_of_le_follows
         hFuelLe hAssemblyFollow
@@ -1711,21 +1766,35 @@ theorem yulToNormalizedStackAssemblyPrefixForward_reorder
         hStructuredWF hWellTyped hIndependent
         budget cfg.entry expressionsState.evm expressionsState.evm
         hEntrySeed
-    obtain ⟨peepDone, hPeepExec, hRuntimeRel⟩ :=
+    obtain ⟨peepDone, hPeepExec, hChainRuntimeRel⟩ :=
       Simulation.Interaction.Rel.executes hCongr hCfgExecAtEntry
+    have hConstCongr :=
+      TypedCfg.ConstTrueBranch.openRunNPrefix_constTrueProgram_congr
+        hTypedChain hIndepChainPeep budget cfg.entry
+        expressionsState.evm expressionsState.evm
+        (Assembly.SameRuntimeData.refl expressionsState.evm)
+    obtain ⟨constDone, hConstExec, hConstRuntimeRel⟩ :=
+      Simulation.Interaction.Rel.executes hConstCongr hPeepExec
+    have hRuntimeRel :=
+      TypedCfg.Peephole.runtimeOutcomeRel_trans
+        hChainRuntimeRel hConstRuntimeRel
     have hSafePeep :
-        TypedCfg.InteractionSemantics.Program.PrefixAssemblySafe peepDone :=
-      TypedCfg.Peephole.prefixAssemblySafe_of_runtimeRel hRuntimeRel hCfgSafe
+        TypedCfg.InteractionSemantics.Program.PrefixAssemblySafe constDone :=
+      TypedCfg.Peephole.prefixAssemblySafe_of_runtimeRel
+        hRuntimeRel hCfgSafe
     have hBranch :=
       TypedCfg.InteractionPrefixPreservation.Program.compileCertified?_entry_openRunNPrefix_assembly_branch
         hCompile hIndepReord hAssemblyPc hAssemblyInitial
         (by
-          rw [TypedCfg.BlockReorder.openRunNPrefix_reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU]
-          exact hPeepExec)
+          unfold TypedCfg.ConstTrueBranch.optimizedProgram
+          rw [TypedCfg.BlockReorder.openRunNPrefix_reorderProgram
+            (TypedCfg.ConstTrueBranch.constTrueProgram
+              (TypedCfg.ShuffleCanon.chainCanonProgram
+                (TypedCfg.Peephole.seamCancelProgramEff
+                  (TypedCfg.Peephole.peepholeProgram
+                    (TypedCfg.Peephole.normalizeProgram cfg))))) hCLU]
+          exact hConstExec)
         hSafePeep
-    rw [TypedCfg.BlockReorder.fuelBudget_reorderProgram_eq (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU] at hBranch
     rcases hBranch with hCfgTruncated | hAssemblyDone
     · rcases hCfgTruncated with
         ⟨peepError, hPeepDone, hPeepTruncated, hAssemblyFollow⟩
@@ -1778,14 +1847,20 @@ theorem yulToNormalizedStackAssemblyPrefixForward_reorder
         have hEq :
             budget *
                 TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
-                  (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-                    (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) +
+                  (TypedCfg.ConstTrueBranch.optimizedProgram
+                    (TypedCfg.ShuffleCanon.chainCanonProgram
+                      (TypedCfg.Peephole.seamCancelProgramEff
+                        (TypedCfg.Peephole.peepholeProgram
+                          (TypedCfg.Peephole.normalizeProgram cfg))))) +
               (budget *
                   TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget cfg -
                 budget *
                   TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
-                    (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-                      (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg))))) =
+                    (TypedCfg.ConstTrueBranch.optimizedProgram
+                      (TypedCfg.ShuffleCanon.chainCanonProgram
+                        (TypedCfg.Peephole.seamCancelProgramEff
+                          (TypedCfg.Peephole.peepholeProgram
+                            (TypedCfg.Peephole.normalizeProgram cfg)))))) =
               budget *
                 TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget cfg :=
           Nat.add_sub_of_le hFuelLe
@@ -1901,7 +1976,7 @@ theorem yulToNormalizedStackAssemblyPrefixForward
               (TypedCfg.Peephole.normalizeProgram cfg)))).lower?.isSome :=
         Option.isSome_iff_exists.mpr ⟨cc.target,
           TypedCfg.Program.compileCertified?_target hChain⟩
-      cases hReorder : (TypedCfg.BlockReorder.reorderProgram
+      cases hReorder : (TypedCfg.ConstTrueBranch.optimizedProgram
           (TypedCfg.ShuffleCanon.chainCanonProgram
             (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
               (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified? with
@@ -2606,7 +2681,7 @@ theorem structuredToEncodedBytecode_reorder
     (hChainLower : (TypedCfg.ShuffleCanon.chainCanonProgram
         (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
           (TypedCfg.Peephole.normalizeProgram cfg)))).lower?.isSome)
-    (hCompile : (TypedCfg.BlockReorder.reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram
+    (hCompile : (TypedCfg.ConstTrueBranch.optimizedProgram (TypedCfg.ShuffleCanon.chainCanonProgram
         (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
           (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified? = some artifact)
     (hGLower : (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
@@ -2665,15 +2740,20 @@ theorem structuredToEncodedBytecode_reorder
       (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
         (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))).ProgramCounterIndependent :=
     TypedCfg.ShuffleCanon.chainCanonProgram_programCounterIndependent hIndepPeep
-  have hCLU :
-      (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))).LabelsUnique :=
-    (TypedCfg.ShuffleCanon.chainCanonProgram_WellTyped hTypedQ).1
+  have hTypedChain :
+      (TypedCfg.ShuffleCanon.chainCanonProgram
+        (TypedCfg.Peephole.seamCancelProgramEff
+          (TypedCfg.Peephole.peepholeProgram
+            (TypedCfg.Peephole.normalizeProgram cfg)))).WellTyped :=
+    TypedCfg.ShuffleCanon.chainCanonProgram_WellTyped hTypedQ
   have hIndepReord :
-      (TypedCfg.BlockReorder.reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram
-        (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
-          (TypedCfg.Peephole.normalizeProgram cfg))))).ProgramCounterIndependent :=
-    TypedCfg.BlockReorder.programCounterIndependent_reorderProgram _ hIndepChainPeep
+      (TypedCfg.ConstTrueBranch.optimizedProgram
+        (TypedCfg.ShuffleCanon.chainCanonProgram
+          (TypedCfg.Peephole.seamCancelProgramEff
+            (TypedCfg.Peephole.peepholeProgram
+              (TypedCfg.Peephole.normalizeProgram cfg))))).ProgramCounterIndependent :=
+    TypedCfg.ConstTrueBranch.programCounterIndependent_optimizedProgram
+      hIndepChainPeep
   have hFchain :
       (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
         (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))).lower?.isSome :=
@@ -2686,6 +2766,18 @@ theorem structuredToEncodedBytecode_reorder
     le_trans
       (TypedCfg.ShuffleCanon.fuelBudget_chainCanonProgram_le hTypedQ.1 hFchain hGLower)
       (TypedCfg.Peephole.fuelBudget_seamCombinedEff_le cfg hWellTyped)
+  have hFinalLe :
+      TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
+          (TypedCfg.ConstTrueBranch.optimizedProgram
+            (TypedCfg.ShuffleCanon.chainCanonProgram
+              (TypedCfg.Peephole.seamCancelProgramEff
+                (TypedCfg.Peephole.peepholeProgram
+                  (TypedCfg.Peephole.normalizeProgram cfg))))) ≤
+        TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget cfg :=
+    le_trans
+      (TypedCfg.ConstTrueBranch.fuelBudget_optimizedProgram_le _
+        hTypedChain)
+      hChainLe
   obtain ⟨generated, hStructuredFor⟩ :=
     Structured.InteractionTerminalPreservation.OpenOutcome.GeneratedProgram.generateWithProcEntryShapes?_main_terminal
       hGenerate hWellTyped
@@ -2718,33 +2810,76 @@ theorem structuredToEncodedBytecode_reorder
     apply Simulation.Interaction.Rel.allDone_right hStrong
     rintro l r ⟨_hrel, hsafe⟩
     exact TypedCfg.Peephole.assemblySafeHalted_of_chainCombinedOutcomeRelEff _hrel hsafe
-  have hCfgAssemblyPeep :=
+  have hOptimizedBridge :=
+    TypedCfg.ConstTrueBranch.openRunN_optimizedProgram_congr
+      hTypedChain hIndepChainPeep cfgFuel cfg.entry
+      cfgState cfgState (Assembly.SameRuntimeData.refl cfgState)
+  have hCfgSafeAtEntryOptimized : Simulation.Interaction.AllDone
+      TypedCfg.InteractionSemantics.Program.AssemblySafeHalted
+      (TypedCfg.InteractionSemantics.Program.openRunN
+        (TypedCfg.ConstTrueBranch.optimizedProgram
+          (TypedCfg.ShuffleCanon.chainCanonProgram
+            (TypedCfg.Peephole.seamCancelProgramEff
+              (TypedCfg.Peephole.peepholeProgram
+                (TypedCfg.Peephole.normalizeProgram cfg)))))
+        cfgFuel cfg.entry cfgState) := by
+    have hStrong := Simulation.Interaction.Rel.strengthen_left
+      hOptimizedBridge hCfgSafeAtEntryPeep
+    apply Simulation.Interaction.Rel.allDone_right hStrong
+    rintro l r ⟨hrel, hsafe⟩
+    exact TypedCfg.Peephole.assemblySafeHalted_of_runtimeRel hrel hsafe
+  have hCfgAssemblyOptimized :=
     TypedCfg.InteractionPreservation.Program.compileCertified?_entry_openRunN_assembly_rel
       cfgFuel hCompile hIndepReord hAssemblyPc hAssemblyInitial
-        (by
-          rw [TypedCfg.BlockReorder.openRunN_reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU]
-          exact hCfgSafeAtEntryPeep)
-  rw [TypedCfg.BlockReorder.openRunN_reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU,
-    TypedCfg.BlockReorder.fuelBudget_reorderProgram_eq (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU] at hCfgAssemblyPeep
+      hCfgSafeAtEntryOptimized
+  have hCfgAssemblyPeep :
+      Simulation.Interaction.Rel
+        (TypedCfg.InteractionPreservation.OpenBlock.RunSimulates
+          artifact.target)
+        (TypedCfg.InteractionSemantics.Program.openRunN
+          (TypedCfg.ShuffleCanon.chainCanonProgram
+            (TypedCfg.Peephole.seamCancelProgramEff
+              (TypedCfg.Peephole.peepholeProgram
+                (TypedCfg.Peephole.normalizeProgram cfg))))
+          cfgFuel cfg.entry cfgState)
+        (Assembly.InteractionSemantics.Source.openRunNResult
+          artifact.target
+          (cfgFuel *
+            TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
+              (TypedCfg.ConstTrueBranch.optimizedProgram
+                (TypedCfg.ShuffleCanon.chainCanonProgram
+                  (TypedCfg.Peephole.seamCancelProgramEff
+                    (TypedCfg.Peephole.peepholeProgram
+                      (TypedCfg.Peephole.normalizeProgram cfg))))))
+          assemblyState) := by
+    apply Simulation.Interaction.Rel.mono
+      (Simulation.Interaction.Rel.trans hOptimizedBridge
+        hCfgAssemblyOptimized)
+    rintro left right ⟨middle, hRuntime, hAssembly⟩
+    exact TypedCfg.InteractionPreservation.OpenBlock.runtime_left
+      hRuntime hAssembly
   have hFuelLe :
       cfgFuel *
           TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
-            (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-              (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) ≤
+            (TypedCfg.ConstTrueBranch.optimizedProgram
+              (TypedCfg.ShuffleCanon.chainCanonProgram
+                (TypedCfg.Peephole.seamCancelProgramEff
+                  (TypedCfg.Peephole.peepholeProgram
+                    (TypedCfg.Peephole.normalizeProgram cfg))))) ≤
         cfgFuel *
           TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget cfg :=
-    Nat.mul_le_mul_left _ hChainLe
+    Nat.mul_le_mul_left _ hFinalLe
   have hFinishedPeep : Simulation.Interaction.AllDone
       Assembly.InteractionSemantics.Finished
       (Assembly.InteractionSemantics.Source.openRunNResult
         artifact.target
         (cfgFuel *
           TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
-            (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-              (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))))
+            (TypedCfg.ConstTrueBranch.optimizedProgram
+              (TypedCfg.ShuffleCanon.chainCanonProgram
+                (TypedCfg.Peephole.seamCancelProgramEff
+                  (TypedCfg.Peephole.peepholeProgram
+                    (TypedCfg.Peephole.normalizeProgram cfg))))))
         assemblyState) := by
     have hStrong := Simulation.Interaction.Rel.strengthen_left hCfgAssemblyPeep
       hCfgSafeAtEntryPeep
@@ -2868,7 +3003,7 @@ theorem structuredToEncodedBytecode
               (TypedCfg.Peephole.normalizeProgram cfg)))).lower?.isSome :=
         Option.isSome_iff_exists.mpr ⟨cc.target,
           TypedCfg.Program.compileCertified?_target hChain⟩
-      cases hReorder : (TypedCfg.BlockReorder.reorderProgram
+      cases hReorder : (TypedCfg.ConstTrueBranch.optimizedProgram
           (TypedCfg.ShuffleCanon.chainCanonProgram
             (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
               (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified? with
@@ -3191,7 +3326,7 @@ theorem structuredToAssemblySource_reorder
     (hChainLower : (TypedCfg.ShuffleCanon.chainCanonProgram
         (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
           (TypedCfg.Peephole.normalizeProgram cfg)))).lower?.isSome)
-    (hCompile : (TypedCfg.BlockReorder.reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram
+    (hCompile : (TypedCfg.ConstTrueBranch.optimizedProgram (TypedCfg.ShuffleCanon.chainCanonProgram
         (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
           (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified? = some artifact)
     (hGLower : (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
@@ -3242,15 +3377,20 @@ theorem structuredToAssemblySource_reorder
       (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
         (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))).ProgramCounterIndependent :=
     TypedCfg.ShuffleCanon.chainCanonProgram_programCounterIndependent hIndepPeep
-  have hCLU :
-      (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))).LabelsUnique :=
-    (TypedCfg.ShuffleCanon.chainCanonProgram_WellTyped hTypedQ).1
+  have hTypedChain :
+      (TypedCfg.ShuffleCanon.chainCanonProgram
+        (TypedCfg.Peephole.seamCancelProgramEff
+          (TypedCfg.Peephole.peepholeProgram
+            (TypedCfg.Peephole.normalizeProgram cfg)))).WellTyped :=
+    TypedCfg.ShuffleCanon.chainCanonProgram_WellTyped hTypedQ
   have hIndepReord :
-      (TypedCfg.BlockReorder.reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram
-        (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
-          (TypedCfg.Peephole.normalizeProgram cfg))))).ProgramCounterIndependent :=
-    TypedCfg.BlockReorder.programCounterIndependent_reorderProgram _ hIndepChainPeep
+      (TypedCfg.ConstTrueBranch.optimizedProgram
+        (TypedCfg.ShuffleCanon.chainCanonProgram
+          (TypedCfg.Peephole.seamCancelProgramEff
+            (TypedCfg.Peephole.peepholeProgram
+              (TypedCfg.Peephole.normalizeProgram cfg))))).ProgramCounterIndependent :=
+    TypedCfg.ConstTrueBranch.programCounterIndependent_optimizedProgram
+      hIndepChainPeep
   have hFchain :
       (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
         (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))).lower?.isSome :=
@@ -3263,6 +3403,18 @@ theorem structuredToAssemblySource_reorder
     le_trans
       (TypedCfg.ShuffleCanon.fuelBudget_chainCanonProgram_le hTypedQ.1 hFchain hGLower)
       (TypedCfg.Peephole.fuelBudget_seamCombinedEff_le cfg hWellTyped)
+  have hFinalLe :
+      TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
+          (TypedCfg.ConstTrueBranch.optimizedProgram
+            (TypedCfg.ShuffleCanon.chainCanonProgram
+              (TypedCfg.Peephole.seamCancelProgramEff
+                (TypedCfg.Peephole.peepholeProgram
+                  (TypedCfg.Peephole.normalizeProgram cfg))))) ≤
+        TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget cfg :=
+    le_trans
+      (TypedCfg.ConstTrueBranch.fuelBudget_optimizedProgram_le _
+        hTypedChain)
+      hChainLe
   obtain ⟨generated, hStructuredFor⟩ :=
     Structured.InteractionTerminalPreservation.OpenOutcome.GeneratedProgram.generateWithProcEntryShapes?_main_terminal
       hGenerate hWellTyped
@@ -3295,33 +3447,76 @@ theorem structuredToAssemblySource_reorder
     apply Simulation.Interaction.Rel.allDone_right hStrong
     rintro l r ⟨_hrel, hsafe⟩
     exact TypedCfg.Peephole.assemblySafeHalted_of_chainCombinedOutcomeRelEff _hrel hsafe
-  have hCfgAssemblyPeep :=
+  have hOptimizedBridge :=
+    TypedCfg.ConstTrueBranch.openRunN_optimizedProgram_congr
+      hTypedChain hIndepChainPeep cfgFuel cfg.entry
+      cfgState cfgState (Assembly.SameRuntimeData.refl cfgState)
+  have hCfgSafeAtEntryOptimized : Simulation.Interaction.AllDone
+      TypedCfg.InteractionSemantics.Program.AssemblySafeHalted
+      (TypedCfg.InteractionSemantics.Program.openRunN
+        (TypedCfg.ConstTrueBranch.optimizedProgram
+          (TypedCfg.ShuffleCanon.chainCanonProgram
+            (TypedCfg.Peephole.seamCancelProgramEff
+              (TypedCfg.Peephole.peepholeProgram
+                (TypedCfg.Peephole.normalizeProgram cfg)))))
+        cfgFuel cfg.entry cfgState) := by
+    have hStrong := Simulation.Interaction.Rel.strengthen_left
+      hOptimizedBridge hCfgSafeAtEntryPeep
+    apply Simulation.Interaction.Rel.allDone_right hStrong
+    rintro l r ⟨hrel, hsafe⟩
+    exact TypedCfg.Peephole.assemblySafeHalted_of_runtimeRel hrel hsafe
+  have hCfgAssemblyOptimized :=
     TypedCfg.InteractionPreservation.Program.compileCertified?_entry_openRunN_assembly_rel
       cfgFuel hCompile hIndepReord hAssemblyPc hAssemblyInitial
-        (by
-          rw [TypedCfg.BlockReorder.openRunN_reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU]
-          exact hCfgSafeAtEntryPeep)
-  rw [TypedCfg.BlockReorder.openRunN_reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU,
-    TypedCfg.BlockReorder.fuelBudget_reorderProgram_eq (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU] at hCfgAssemblyPeep
+      hCfgSafeAtEntryOptimized
+  have hCfgAssemblyPeep :
+      Simulation.Interaction.Rel
+        (TypedCfg.InteractionPreservation.OpenBlock.RunSimulates
+          artifact.target)
+        (TypedCfg.InteractionSemantics.Program.openRunN
+          (TypedCfg.ShuffleCanon.chainCanonProgram
+            (TypedCfg.Peephole.seamCancelProgramEff
+              (TypedCfg.Peephole.peepholeProgram
+                (TypedCfg.Peephole.normalizeProgram cfg))))
+          cfgFuel cfg.entry cfgState)
+        (Assembly.InteractionSemantics.Source.openRunNResult
+          artifact.target
+          (cfgFuel *
+            TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
+              (TypedCfg.ConstTrueBranch.optimizedProgram
+                (TypedCfg.ShuffleCanon.chainCanonProgram
+                  (TypedCfg.Peephole.seamCancelProgramEff
+                    (TypedCfg.Peephole.peepholeProgram
+                      (TypedCfg.Peephole.normalizeProgram cfg))))))
+          assemblyState) := by
+    apply Simulation.Interaction.Rel.mono
+      (Simulation.Interaction.Rel.trans hOptimizedBridge
+        hCfgAssemblyOptimized)
+    rintro left right ⟨middle, hRuntime, hAssembly⟩
+    exact TypedCfg.InteractionPreservation.OpenBlock.runtime_left
+      hRuntime hAssembly
   have hFuelLe :
       cfgFuel *
           TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
-            (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-              (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) ≤
+            (TypedCfg.ConstTrueBranch.optimizedProgram
+              (TypedCfg.ShuffleCanon.chainCanonProgram
+                (TypedCfg.Peephole.seamCancelProgramEff
+                  (TypedCfg.Peephole.peepholeProgram
+                    (TypedCfg.Peephole.normalizeProgram cfg))))) ≤
         cfgFuel *
           TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget cfg :=
-    Nat.mul_le_mul_left _ hChainLe
+    Nat.mul_le_mul_left _ hFinalLe
   have hFinishedPeep : Simulation.Interaction.AllDone
       Assembly.InteractionSemantics.Finished
       (Assembly.InteractionSemantics.Source.openRunNResult
         artifact.target
         (cfgFuel *
           TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
-            (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-              (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))))
+            (TypedCfg.ConstTrueBranch.optimizedProgram
+              (TypedCfg.ShuffleCanon.chainCanonProgram
+                (TypedCfg.Peephole.seamCancelProgramEff
+                  (TypedCfg.Peephole.peepholeProgram
+                    (TypedCfg.Peephole.normalizeProgram cfg))))))
         assemblyState) := by
     have hStrong := Simulation.Interaction.Rel.strengthen_left hCfgAssemblyPeep
       hCfgSafeAtEntryPeep
@@ -3418,7 +3613,7 @@ theorem structuredToAssemblySource
               (TypedCfg.Peephole.normalizeProgram cfg)))).lower?.isSome :=
         Option.isSome_iff_exists.mpr ⟨cc.target,
           TypedCfg.Program.compileCertified?_target hChain⟩
-      cases hReorder : (TypedCfg.BlockReorder.reorderProgram
+      cases hReorder : (TypedCfg.ConstTrueBranch.optimizedProgram
           (TypedCfg.ShuffleCanon.chainCanonProgram
             (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
               (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified? with
@@ -3734,7 +3929,7 @@ theorem structuredToAssemblySourceFinished_reorder
     (hChainLower : (TypedCfg.ShuffleCanon.chainCanonProgram
         (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
           (TypedCfg.Peephole.normalizeProgram cfg)))).lower?.isSome)
-    (hCompile : (TypedCfg.BlockReorder.reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram
+    (hCompile : (TypedCfg.ConstTrueBranch.optimizedProgram (TypedCfg.ShuffleCanon.chainCanonProgram
         (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
           (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified? = some artifact)
     (hGLower : (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
@@ -3785,15 +3980,20 @@ theorem structuredToAssemblySourceFinished_reorder
       (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
         (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))).ProgramCounterIndependent :=
     TypedCfg.ShuffleCanon.chainCanonProgram_programCounterIndependent hIndepPeep
-  have hCLU :
-      (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))).LabelsUnique :=
-    (TypedCfg.ShuffleCanon.chainCanonProgram_WellTyped hTypedQ).1
+  have hTypedChain :
+      (TypedCfg.ShuffleCanon.chainCanonProgram
+        (TypedCfg.Peephole.seamCancelProgramEff
+          (TypedCfg.Peephole.peepholeProgram
+            (TypedCfg.Peephole.normalizeProgram cfg)))).WellTyped :=
+    TypedCfg.ShuffleCanon.chainCanonProgram_WellTyped hTypedQ
   have hIndepReord :
-      (TypedCfg.BlockReorder.reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram
-        (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
-          (TypedCfg.Peephole.normalizeProgram cfg))))).ProgramCounterIndependent :=
-    TypedCfg.BlockReorder.programCounterIndependent_reorderProgram _ hIndepChainPeep
+      (TypedCfg.ConstTrueBranch.optimizedProgram
+        (TypedCfg.ShuffleCanon.chainCanonProgram
+          (TypedCfg.Peephole.seamCancelProgramEff
+            (TypedCfg.Peephole.peepholeProgram
+              (TypedCfg.Peephole.normalizeProgram cfg))))).ProgramCounterIndependent :=
+    TypedCfg.ConstTrueBranch.programCounterIndependent_optimizedProgram
+      hIndepChainPeep
   have hFchain :
       (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
         (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))).lower?.isSome :=
@@ -3806,6 +4006,18 @@ theorem structuredToAssemblySourceFinished_reorder
     le_trans
       (TypedCfg.ShuffleCanon.fuelBudget_chainCanonProgram_le hTypedQ.1 hFchain hGLower)
       (TypedCfg.Peephole.fuelBudget_seamCombinedEff_le cfg hWellTyped)
+  have hFinalLe :
+      TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
+          (TypedCfg.ConstTrueBranch.optimizedProgram
+            (TypedCfg.ShuffleCanon.chainCanonProgram
+              (TypedCfg.Peephole.seamCancelProgramEff
+                (TypedCfg.Peephole.peepholeProgram
+                  (TypedCfg.Peephole.normalizeProgram cfg))))) ≤
+        TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget cfg :=
+    le_trans
+      (TypedCfg.ConstTrueBranch.fuelBudget_optimizedProgram_le _
+        hTypedChain)
+      hChainLe
   obtain ⟨generated, hStructuredFor⟩ :=
     Structured.InteractionTerminalPreservation.OpenOutcome.GeneratedProgram.generateWithProcEntryShapes?_main_finished
       hGenerate hWellTyped
@@ -3838,33 +4050,76 @@ theorem structuredToAssemblySourceFinished_reorder
     apply Simulation.Interaction.Rel.allDone_right hStrong
     rintro l r ⟨_hrel, hsafe⟩
     exact TypedCfg.Peephole.assemblySafeFinished_of_chainCombinedOutcomeRelEff _hrel hsafe
-  have hCfgAssemblyPeep :=
+  have hOptimizedBridge :=
+    TypedCfg.ConstTrueBranch.openRunN_optimizedProgram_congr
+      hTypedChain hIndepChainPeep cfgFuel cfg.entry
+      cfgState cfgState (Assembly.SameRuntimeData.refl cfgState)
+  have hCfgSafeAtEntryOptimized : Simulation.Interaction.AllDone
+      TypedCfg.InteractionSemantics.Program.AssemblySafeFinished
+      (TypedCfg.InteractionSemantics.Program.openRunN
+        (TypedCfg.ConstTrueBranch.optimizedProgram
+          (TypedCfg.ShuffleCanon.chainCanonProgram
+            (TypedCfg.Peephole.seamCancelProgramEff
+              (TypedCfg.Peephole.peepholeProgram
+                (TypedCfg.Peephole.normalizeProgram cfg)))))
+        cfgFuel cfg.entry cfgState) := by
+    have hStrong := Simulation.Interaction.Rel.strengthen_left
+      hOptimizedBridge hCfgSafeAtEntryPeep
+    apply Simulation.Interaction.Rel.allDone_right hStrong
+    rintro l r ⟨hrel, hsafe⟩
+    exact TypedCfg.Peephole.assemblySafeFinished_of_runtimeRel hrel hsafe
+  have hCfgAssemblyOptimized :=
     TypedCfg.InteractionPreservation.Program.compileCertified?_entry_openRunN_assembly_finished_rel
       cfgFuel hCompile hIndepReord hAssemblyPc hAssemblyInitial
-        (by
-          rw [TypedCfg.BlockReorder.openRunN_reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU]
-          exact hCfgSafeAtEntryPeep)
-  rw [TypedCfg.BlockReorder.openRunN_reorderProgram (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU,
-    TypedCfg.BlockReorder.fuelBudget_reorderProgram_eq (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-        (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) hCLU] at hCfgAssemblyPeep
+      hCfgSafeAtEntryOptimized
+  have hCfgAssemblyPeep :
+      Simulation.Interaction.Rel
+        (TypedCfg.InteractionPreservation.OpenBlock.RunSimulates
+          artifact.target)
+        (TypedCfg.InteractionSemantics.Program.openRunN
+          (TypedCfg.ShuffleCanon.chainCanonProgram
+            (TypedCfg.Peephole.seamCancelProgramEff
+              (TypedCfg.Peephole.peepholeProgram
+                (TypedCfg.Peephole.normalizeProgram cfg))))
+          cfgFuel cfg.entry cfgState)
+        (Assembly.InteractionSemantics.Source.openRunNResult
+          artifact.target
+          (cfgFuel *
+            TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
+              (TypedCfg.ConstTrueBranch.optimizedProgram
+                (TypedCfg.ShuffleCanon.chainCanonProgram
+                  (TypedCfg.Peephole.seamCancelProgramEff
+                    (TypedCfg.Peephole.peepholeProgram
+                      (TypedCfg.Peephole.normalizeProgram cfg))))))
+          assemblyState) := by
+    apply Simulation.Interaction.Rel.mono
+      (Simulation.Interaction.Rel.trans hOptimizedBridge
+        hCfgAssemblyOptimized)
+    rintro left right ⟨middle, hRuntime, hAssembly⟩
+    exact TypedCfg.InteractionPreservation.OpenBlock.runtime_left
+      hRuntime hAssembly
   have hFuelLe :
       cfgFuel *
           TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
-            (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-              (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))) ≤
+            (TypedCfg.ConstTrueBranch.optimizedProgram
+              (TypedCfg.ShuffleCanon.chainCanonProgram
+                (TypedCfg.Peephole.seamCancelProgramEff
+                  (TypedCfg.Peephole.peepholeProgram
+                    (TypedCfg.Peephole.normalizeProgram cfg))))) ≤
         cfgFuel *
           TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget cfg :=
-    Nat.mul_le_mul_left _ hChainLe
+    Nat.mul_le_mul_left _ hFinalLe
   have hFinishedPeep : Simulation.Interaction.AllDone
       Assembly.InteractionSemantics.Finished
       (Assembly.InteractionSemantics.Source.openRunNResult
         artifact.target
         (cfgFuel *
           TypedCfg.InteractionSemantics.CompiledProgram.fuelBudget
-            (TypedCfg.ShuffleCanon.chainCanonProgram (TypedCfg.Peephole.seamCancelProgramEff
-              (TypedCfg.Peephole.peepholeProgram (TypedCfg.Peephole.normalizeProgram cfg)))))
+            (TypedCfg.ConstTrueBranch.optimizedProgram
+              (TypedCfg.ShuffleCanon.chainCanonProgram
+                (TypedCfg.Peephole.seamCancelProgramEff
+                  (TypedCfg.Peephole.peepholeProgram
+                    (TypedCfg.Peephole.normalizeProgram cfg))))))
         assemblyState) := by
     have hStrong := Simulation.Interaction.Rel.strengthen_left hCfgAssemblyPeep
       hCfgSafeAtEntryPeep
@@ -3958,7 +4213,7 @@ theorem structuredToAssemblySourceFinished
               (TypedCfg.Peephole.normalizeProgram cfg)))).lower?.isSome :=
         Option.isSome_iff_exists.mpr ⟨cc.target,
           TypedCfg.Program.compileCertified?_target hChain⟩
-      cases hReorder : (TypedCfg.BlockReorder.reorderProgram
+      cases hReorder : (TypedCfg.ConstTrueBranch.optimizedProgram
           (TypedCfg.ShuffleCanon.chainCanonProgram
             (TypedCfg.Peephole.seamCancelProgramEff (TypedCfg.Peephole.peepholeProgram
               (TypedCfg.Peephole.normalizeProgram cfg))))).compileCertified? with
