@@ -203,6 +203,28 @@ inductive Event where
       (operands outputs : List Atom)
   deriving DecidableEq, Repr
 
+/--
+The deliberately narrow set of commutative binary primitives admitted by the
+virtual-stack trace certificate. Keeping this list explicit makes the
+certificate fail closed for every other primitive.
+-/
+def traceCommutative? : Assembly.PrimOp → Bool
+  | .add | .and | .or => true
+  | _ => false
+
+/--
+Canonicalise only the operand identities recorded for the explicitly admitted
+commutative primitives. Runtime stack order remains untouched. Exact event-list
+equality can therefore certify a commuted ADD/AND/OR while continuing to require
+ordered operands for every other primitive.
+-/
+def traceOperands (op : Assembly.PrimOp)
+    (operands : List Atom) : List Atom :=
+  if traceCommutative? op then
+    operands.mergeSort (· ≤ ·)
+  else
+    operands
+
 structure TraceState where
   stack : List Atom
   nextAtom : Nat
@@ -244,7 +266,7 @@ def traceStep (instr : Instr) (state : TraceState) :
         { stack := outputAtoms ++ state.stack.drop inputs
           nextAtom := state.nextAtom + outputs
           events := state.events ++
-            [.prim op operands outputAtoms] }
+            [.prim op (traceOperands op operands) outputAtoms] }
   | .bindLocals _ _ | .bindScratch _ _ _ | .relabel _ =>
       some state
   | .unwind _ => none
@@ -444,9 +466,44 @@ def certify? (source target : List Block) : Option Certificate := do
   if final.source = final.target then pure () else none
   some { blocks, final }
 
-def candidate? (chain : List Block) : Option (List Block) := do
-  let candidate ← candidateCore? chain
-  let _ ← certify? chain candidate
+/--
+Erase only the exact residual forms produced by virtual-stack generation.
+No attempt is made to commute arbitrary operations or to see through
+annotations.
+-/
+def cleanupObservedCommBody : List Instr → List Instr
+  | .swap 0 :: .prim op :: rest =>
+      if traceCommutative? op then
+        .prim op :: cleanupObservedCommBody rest
+      else
+        .swap 0 :: cleanupObservedCommBody (.prim op :: rest)
+  | instr :: rest => instr :: cleanupObservedCommBody rest
+  | [] => []
+
+/--
+Fail closed on typing: a changed body is retained only when it computes the
+block's exact original output shape from the exact original input shape.
+-/
+def cleanupObservedCommBlock? (block : Block) : Option Block := do
+  let body := cleanupObservedCommBody block.body
+  if body = block.body then
+    some block
+  else if Block.bodyType? body block.input = some block.output then
+    some { block with body }
+  else
+    none
+
+def cleanupObservedCommBlocks? :
+    List Block → Option (List Block)
+  | [] => some []
+  | block :: rest => do
+      let block ← cleanupObservedCommBlock? block
+      let rest ← cleanupObservedCommBlocks? rest
+      some (block :: rest)
+
+def candidate? (source : List Block) : Option (List Block) := do
+  let candidate ← candidateCore? source
+  let _ ← certify? source candidate
   some candidate
 
 def blocksCost (blocks : List Block) : Nat :=
@@ -570,7 +627,7 @@ def cleanupCandidate? (source : List Block) : Option (List Block) := do
   let _ ← certify? source candidate
   some candidate
 
-def pairCandidate? (source : List Block) : Option (List Block) :=
+def pairCandidateCore? (source : List Block) : Option (List Block) :=
   let scheduled :=
     match source.head? with
     | some left =>
@@ -589,6 +646,10 @@ def pairCandidate? (source : List Block) : Option (List Block) :=
   | some cleaned, none => some cleaned
   | none, some scheduled => some scheduled
   | none, none => none
+
+def pairCandidate? (source : List Block) : Option (List Block) := do
+  let candidate ← pairCandidateCore? source
+  cleanupObservedCommBlocks? candidate
 
 def pairEligible (left right : Block) : Bool :=
   hasRuntimeEvent left

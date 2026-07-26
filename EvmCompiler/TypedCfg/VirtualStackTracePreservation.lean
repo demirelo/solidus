@@ -2,6 +2,7 @@ import EvmCompiler.TypedCfg.VirtualStackCanon
 import EvmCompiler.TypedCfg.InteractionSemantics
 import EvmCompiler.TypedCfg.ShuffleCanonChainRuntime
 import EvmCompiler.Assembly.InteractionPreservation
+import Mathlib.Data.Nat.Bitwise
 
 /-!
 # Semantic kernel for virtual-stack trace certificates
@@ -23,6 +24,67 @@ open Assembly (EVMState SameRuntimeData eraseRuntimeControl)
 
 abbrev Valuation := Atom → Word
 abbrev ValueTable := List Word
+
+theorem traceOperands_eq_rel
+    {op : Assembly.PrimOp} {left right : List Atom}
+    (hEq : traceOperands op left = traceOperands op right) :
+    if traceCommutative? op then left.Perm right else left = right := by
+  unfold traceOperands at hEq
+  split at hEq
+  · rename_i hComm
+    simp only [hComm, if_true]
+    exact
+      (List.mergeSort_perm left _).symm.trans
+        (hEq ▸ List.mergeSort_perm right _)
+  · rename_i hComm
+    simpa [hComm] using hEq
+
+theorem perm_pair_iff {α : Type} {a₁ b₁ a₂ b₂ : α} :
+    [a₁, b₁].Perm [a₂, b₂] ↔
+      (a₁ = a₂ ∧ b₁ = b₂) ∨
+        (a₁ = b₂ ∧ b₁ = a₂) := by
+  constructor
+  · intro hPerm
+    simp only [← Multiset.coe_eq_coe, ← Multiset.cons_coe,
+      Multiset.coe_nil, Multiset.cons_zero, Multiset.cons_eq_cons,
+      Multiset.singleton_inj, ne_eq,
+      Multiset.singleton_eq_cons_iff, exists_eq_right_right,
+      and_true] at hPerm
+    rcases hPerm with hSame | ⟨_hNe, hLeft, hRight⟩
+    · exact Or.inl hSame
+    · exact Or.inr ⟨hRight.symm, hLeft⟩
+  · rintro (⟨rfl, rfl⟩ | ⟨rfl, rfl⟩)
+    · exact .refl _
+    · exact .swap _ _ _
+
+theorem uint256_add_comm (left right : Word) :
+    EvmYul.UInt256.add left right =
+      EvmYul.UInt256.add right left := by
+  unfold EvmYul.UInt256.add
+  congr 1
+  exact add_comm _ _
+
+theorem uint256_land_comm (left right : Word) :
+    EvmYul.UInt256.land left right =
+      EvmYul.UInt256.land right left := by
+  unfold EvmYul.UInt256.land
+  congr 1
+  apply Fin.ext
+  change Nat.land left.1.val right.1.val % EvmYul.UInt256.size =
+    Nat.land right.1.val left.1.val % EvmYul.UInt256.size
+  exact congrArg (fun value => value % EvmYul.UInt256.size)
+    (Nat.land_comm _ _)
+
+theorem uint256_lor_comm (left right : Word) :
+    EvmYul.UInt256.lor left right =
+      EvmYul.UInt256.lor right left := by
+  unfold EvmYul.UInt256.lor
+  congr 1
+  apply Fin.ext
+  change Nat.lor left.1.val right.1.val % EvmYul.UInt256.size =
+    Nat.lor right.1.val left.1.val % EvmYul.UInt256.size
+  exact congrArg (fun value => value % EvmYul.UInt256.size)
+    (Nat.lor_comm _ _)
 
 def lookupAtom (values : ValueTable) (atom : Atom) : Word :=
   values[atom]!
@@ -435,7 +497,7 @@ theorem traceStep_events_suffix
             · simp [hArity, hInputs] at hRun
               subst after
               exact
-                ⟨[.prim op (before.stack.take inputs)
+                ⟨[.prim op (traceOperands op (before.stack.take inputs))
                     (atomRangeFrom before.nextAtom outputs)], rfl⟩
             · simp [hArity, hInputs] at hRun
       · have hFalse : primAllowed op = false :=
@@ -602,9 +664,9 @@ inductive TraceEventStep :
           nextAtom := before.nextAtom + outputCount
           events :=
             before.events ++
-              [.prim op (before.stack.take inputCount)
+              [.prim op (traceOperands op (before.stack.take inputCount))
                 (atomRangeFrom before.nextAtom outputCount)] }
-        (.prim op (before.stack.take inputCount)
+        (.prim op (traceOperands op (before.stack.take inputCount))
           (atomRangeFrom before.nextAtom outputCount))
 
 theorem traceEventStep_of_loud
@@ -1425,6 +1487,315 @@ theorem runState_prim_tableRel
                 targetCanonicalFinal.toSharedState
             exact SameRuntimeData.shared_eq hCanonicalRel
 
+/--
+The isolated two-word execution kernel for the only primitives whose trace
+operands are canonicalised. Permuting the two inputs changes no observable
+runtime data after ADD, AND, or OR.
+-/
+theorem traceCommutative_step_map_eraseRuntimeControl
+    {op : Assembly.PrimOp} {source target : EVMState}
+    (hComm : traceCommutative? op = true)
+    (hSourceLength : source.stack.length = 2)
+    (hTargetLength : target.stack.length = 2)
+    (hStackPerm : source.stack.Perm target.stack)
+    (hShared : source.toSharedState = target.toSharedState) :
+    (op.step source).map eraseRuntimeControl =
+      (op.step target).map eraseRuntimeControl := by
+  cases hSourceStack : source.stack with
+  | nil =>
+      simp [hSourceStack] at hSourceLength
+  | cons sourceFirst sourceTail =>
+      cases hSourceTail : sourceTail with
+      | nil =>
+          simp [hSourceStack, hSourceTail] at hSourceLength
+      | cons sourceSecond sourceRest =>
+          have hSourceRest : sourceRest = [] := by
+            simpa [hSourceStack, hSourceTail] using hSourceLength
+          subst sourceRest
+          cases hTargetStack : target.stack with
+          | nil =>
+              simp [hTargetStack] at hTargetLength
+          | cons targetFirst targetTail =>
+              cases hTargetTail : targetTail with
+              | nil =>
+                  simp [hTargetStack, hTargetTail] at hTargetLength
+              | cons targetSecond targetRest =>
+                  have hTargetRest : targetRest = [] := by
+                    simpa [hTargetStack, hTargetTail] using hTargetLength
+                  subst targetRest
+                  have hPair :
+                      (sourceFirst = targetFirst ∧
+                          sourceSecond = targetSecond) ∨
+                        (sourceFirst = targetSecond ∧
+                          sourceSecond = targetFirst) := by
+                    apply perm_pair_iff.mp
+                    simpa [hSourceStack, hSourceTail,
+                      hTargetStack, hTargetTail] using hStackPerm
+                  rcases hPair with hSame | hSwap
+                  · rcases hSame with ⟨rfl, rfl⟩
+                    cases op <;>
+                      simp [traceCommutative?] at hComm
+                    all_goals
+                      simp only [Assembly.PrimOp.step,
+                        Assembly.PrimOp.continuingStep?,
+                        Assembly.PrimStep.run,
+                        EvmYul.EVM.execBinOp,
+                        hSourceStack, hSourceTail,
+                        hTargetStack, hTargetTail,
+                        EvmYul.Stack.pop2]
+                      apply congrArg Except.ok
+                      apply sameRuntimeData_of_shared_stack
+                      · simpa [EvmYul.EVM.State.replaceStackAndIncrPC]
+                          using hShared
+                      · rfl
+                  · rcases hSwap with ⟨rfl, rfl⟩
+                    cases op <;>
+                      simp [traceCommutative?] at hComm
+                    all_goals
+                      simp only [Assembly.PrimOp.step,
+                        Assembly.PrimOp.continuingStep?,
+                        Assembly.PrimStep.run,
+                        EvmYul.EVM.execBinOp,
+                        hSourceStack, hSourceTail,
+                        hTargetStack, hTargetTail,
+                        EvmYul.Stack.pop2]
+                      apply congrArg Except.ok
+                      apply sameRuntimeData_of_shared_stack
+                      · simpa [EvmYul.EVM.State.replaceStackAndIncrPC]
+                          using hShared
+                      · simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+                          EvmYul.EVM.State.incrPC, EvmYul.Stack.push,
+                          uint256_add_comm, uint256_land_comm,
+                          uint256_lor_comm]
+
+/--
+Runtime soundness for one trace primitive event when its recorded operand list
+is canonicalised. Non-commutative operations reduce to
+`runState_prim_tableRel`; ADD/AND/OR may use the opposite physical order, whose
+isolated executions are related by
+`traceCommutative_step_map_eraseRuntimeControl`.
+-/
+theorem runState_prim_tableRel_traceOperands
+    {op : Assembly.PrimOp} {inputCount outputCount nextAtom : Nat}
+    {sourceOperands targetOperands outputAtoms sourceTail targetTail :
+      List Atom}
+    {values : ValueTable} {hidden : EvmYul.Stack Word}
+    {source target : EVMState} {sourceShape targetShape : Shape}
+    (hAllowed : primAllowed op = true)
+    (hArity : op.stackArity? = some (inputCount, outputCount))
+    (hSourceOperandsLength : sourceOperands.length = inputCount)
+    (hTargetOperandsLength : targetOperands.length = inputCount)
+    (hTraceOperands :
+      traceOperands op sourceOperands =
+        traceOperands op targetOperands)
+    (hNext : nextAtom = values.length)
+    (hOutputAtoms :
+      outputAtoms = atomRangeFrom nextAtom outputCount)
+    (hSourceBelow :
+      AtomsBelow values.length (sourceOperands ++ sourceTail))
+    (hTargetBelow :
+      AtomsBelow values.length (targetOperands ++ targetTail))
+    (hRel :
+      TableStateRel values hidden
+        (sourceOperands ++ sourceTail)
+        (targetOperands ++ targetTail)
+        source target) :
+    Simulation.Interaction.ExceptRel
+      (fun sourceError targetError : EVMException =>
+        sourceError = targetError)
+      (PrimPostRel values hidden
+        (outputAtoms ++ sourceTail) (outputAtoms ++ targetTail)
+        outputCount)
+      (Instr.runState (.prim op) sourceShape source)
+      (Instr.runState (.prim op) targetShape target) := by
+  by_cases hComm : traceCommutative? op = true
+  · have hDeclared :
+        op.stackArity? = some (2, 1) := by
+      cases op <;>
+        simp [traceCommutative?, Assembly.PrimOp.stackArity?,
+          Assembly.PrimOp.toEVM, EvmYul.EVM.δ,
+          EvmYul.EVM.α] at hComm ⊢
+    have hCounts :
+        (inputCount, outputCount) = (2, 1) :=
+      Option.some.inj (hArity.symm.trans hDeclared)
+    cases hCounts
+    have hOperandPerm :
+        sourceOperands.Perm targetOperands := by
+      simpa [hComm] using traceOperands_eq_rel hTraceOperands
+    let sourceOperandValues :=
+      sourceOperands.map (lookupAtom values)
+    let targetOperandValues :=
+      targetOperands.map (lookupAtom values)
+    let sourceSuffix :=
+      sourceTail.map (lookupAtom values) ++ hidden
+    let targetSuffix :=
+      targetTail.map (lookupAtom values) ++ hidden
+    let sourceIso : EVMState :=
+      { source with stack := sourceOperandValues }
+    let targetIso : EVMState :=
+      { target with stack := targetOperandValues }
+    have hSourceFrame :
+        ({ sourceIso with
+            stack := sourceOperandValues ++ sourceSuffix } : EVMState) =
+          source := by
+      unfold sourceIso sourceOperandValues sourceSuffix
+      cases source
+      simp only [TableStateRel, List.map_append] at hRel
+      simp_all [List.append_assoc]
+    have hTargetFrame :
+        ({ targetIso with
+            stack := targetOperandValues ++ targetSuffix } : EVMState) =
+          target := by
+      unfold targetIso targetOperandValues targetSuffix
+      cases target
+      simp only [TableStateRel, List.map_append] at hRel
+      simp_all [List.append_assoc]
+    have hSourceLength :
+        sourceIso.stack.length = 2 := by
+      simp [sourceIso, sourceOperandValues,
+        hSourceOperandsLength]
+    have hTargetLength :
+        targetIso.stack.length = 2 := by
+      simp [targetIso, targetOperandValues,
+        hTargetOperandsLength]
+    have hValuePerm :
+        sourceIso.stack.Perm targetIso.stack := by
+      simpa [sourceIso, targetIso, sourceOperandValues,
+        targetOperandValues] using
+          hOperandPerm.map (lookupAtom values)
+    have hIsoShared :
+        sourceIso.toSharedState = targetIso.toSharedState := by
+      exact hRel.2.2
+    have hCanonicalCongruence :=
+      traceCommutative_step_map_eraseRuntimeControl
+        hComm hSourceLength hTargetLength hValuePerm hIsoShared
+    obtain ⟨step, hStep, _hGas, _hMsize, hTotal⟩ :=
+      primAllowed_spec hAllowed
+    have hSourceExists :
+        ∃ final, step.run sourceIso = .ok final :=
+      primStep_exists_run_of_total hTotal
+        (by
+          have hStepInput :
+              Assembly.PrimStep.inputArity step = 2 :=
+            ((Assembly.PrimOp.stackArity_values hArity).1.trans
+              (Assembly.PrimOp.continuingStep?_delta_alpha hStep).1).symm
+          simpa [hStepInput] using
+            (show 2 ≤ sourceIso.stack.length by
+              rw [hSourceLength]))
+    cases hSourceCanon : op.step sourceIso with
+    | error sourceError =>
+        have hSourceStep :
+            step.run sourceIso = .error sourceError := by
+          simpa [Assembly.PrimOp.step_eq_continuingStep_run hStep]
+            using hSourceCanon
+        obtain ⟨sourceFinal, hSourceFinal⟩ := hSourceExists
+        rw [hSourceStep] at hSourceFinal
+        contradiction
+    | ok sourceCanonicalFinal =>
+        rw [hSourceCanon] at hCanonicalCongruence
+        cases hTargetCanon : op.step targetIso with
+        | error targetError =>
+            simp [hTargetCanon, Except.map] at hCanonicalCongruence
+        | ok targetCanonicalFinal =>
+            have hCanonicalRel :
+                SameRuntimeData sourceCanonicalFinal
+                  targetCanonicalFinal := by
+              simpa [hTargetCanon, Except.map] using
+                hCanonicalCongruence
+            have hBoundSource : 2 ≤ sourceIso.stack.length := by
+              rw [hSourceLength]
+            have hBoundTarget : 2 ≤ targetIso.stack.length := by
+              rw [hTargetLength]
+            have hSourceActual :=
+              Assembly.PrimOp.step_append_stack_of_stackArity_le
+                sourceSuffix hArity hBoundSource hSourceCanon
+            have hTargetActual :=
+              Assembly.PrimOp.step_append_stack_of_stackArity_le
+                targetSuffix hArity hBoundTarget hTargetCanon
+            rw [hSourceFrame] at hSourceActual
+            rw [hTargetFrame] at hTargetActual
+            have hOutputLength :
+                sourceCanonicalFinal.stack.length = 1 := by
+              have hLength :=
+                Assembly.PrimOp.step_stack_length_of_stackArity
+                  hArity hSourceCanon
+              simpa [sourceIso, sourceOperandValues,
+                hSourceOperandsLength] using hLength
+            let outputValues : ValueTable :=
+              sourceCanonicalFinal.stack
+            have hOutputMap :
+                outputAtoms.map
+                    (lookupAtom (values ++ outputValues)) =
+                  outputValues := by
+              rw [hOutputAtoms, hNext, ← hOutputLength]
+              exact
+                atomRangeFrom_map_lookupAtom_append
+                  values outputValues
+            have hSourceTailBelow :
+                AtomsBelow values.length sourceTail := by
+              intro atom hAtom
+              exact hSourceBelow atom (by simp [hAtom])
+            have hTargetTailBelow :
+                AtomsBelow values.length targetTail := by
+              intro atom hAtom
+              exact hTargetBelow atom (by simp [hAtom])
+            have hSourceTailMap :=
+              map_lookupAtom_append_of_below
+                sourceTail values outputValues hSourceTailBelow
+            have hTargetTailMap :=
+              map_lookupAtom_append_of_below
+                targetTail values outputValues hTargetTailBelow
+            change
+              Simulation.Interaction.ExceptRel
+                (fun sourceError targetError : EVMException =>
+                  sourceError = targetError)
+                (PrimPostRel values hidden
+                  (outputAtoms ++ sourceTail)
+                  (outputAtoms ++ targetTail) 1)
+                (op.step source) (op.step target)
+            rw [hSourceActual, hTargetActual]
+            apply Simulation.Interaction.ExceptRel.ok
+            refine ⟨outputValues, hOutputLength, ?_⟩
+            unfold TableStateRel
+            constructor
+            · simp only [List.map_append]
+              change outputValues ++ sourceSuffix =
+                outputAtoms.map
+                    (lookupAtom (values ++ outputValues)) ++
+                  sourceTail.map
+                      (lookupAtom (values ++ outputValues)) ++
+                    hidden
+              rw [hOutputMap, hSourceTailMap]
+              simp [sourceSuffix, List.append_assoc]
+            constructor
+            · simp only [List.map_append]
+              change targetCanonicalFinal.stack ++ targetSuffix =
+                outputAtoms.map
+                    (lookupAtom (values ++ outputValues)) ++
+                  targetTail.map
+                      (lookupAtom (values ++ outputValues)) ++
+                    hidden
+              rw [← SameRuntimeData.stack_eq hCanonicalRel,
+                hOutputMap, hTargetTailMap]
+              simp [outputValues, targetSuffix,
+                List.append_assoc]
+            · have hSharedFinal :
+                  sourceCanonicalFinal.toSharedState =
+                    targetCanonicalFinal.toSharedState :=
+                SameRuntimeData.shared_eq hCanonicalRel
+              exact hSharedFinal
+  · have hOperands :
+        sourceOperands = targetOperands := by
+      have hRelOperands :=
+        traceOperands_eq_rel hTraceOperands
+      simpa [Bool.eq_false_of_not_eq_true hComm] using
+        hRelOperands
+    subst targetOperands
+    exact
+      runState_prim_tableRel hAllowed hArity
+        hSourceOperandsLength hNext hOutputAtoms
+        hSourceBelow hTargetBelow hRel
+
 def EventPostRel (hidden : EvmYul.Stack Word)
     (sourceAfter targetAfter : TraceState)
     (source target : EVMState) : Prop :=
@@ -1538,43 +1909,48 @@ theorem runState_event_pair
             exact Option.some.inj
               (hSourceArity.symm.trans hTargetArity)
           cases hCounts
-          let operands := sourceBefore.stack.take sourceInput
+          let sourceOperands := sourceBefore.stack.take sourceInput
+          let targetOperands := targetBefore.stack.take sourceInput
           let sourceTail := sourceBefore.stack.drop sourceInput
           let targetTail := targetBefore.stack.drop sourceInput
           have hSourceAtoms :
-              sourceBefore.stack = operands ++ sourceTail := by
+              sourceBefore.stack = sourceOperands ++ sourceTail := by
             exact (List.take_append_drop _ _).symm
           have hTargetAtoms :
-              targetBefore.stack = operands ++ targetTail := by
-            unfold operands targetTail
-            have hOperands :
-                sourceBefore.stack.take sourceInput =
-                  targetBefore.stack.take sourceInput := by
-              exact hOperandsEvent
-            rw [hOperands]
+              targetBefore.stack = targetOperands ++ targetTail := by
             exact (List.take_append_drop _ _).symm
-          have hOperandsLength :
-              operands.length = sourceInput := by
-            unfold operands
+          have hSourceOperandsLength :
+              sourceOperands.length = sourceInput := by
+            unfold sourceOperands
             simp [List.length_take,
               Nat.min_eq_left hSourceBound]
+          have hTargetOperandsLength :
+              targetOperands.length = sourceInput := by
+            unfold targetOperands
+            simp [List.length_take,
+              Nat.min_eq_left hTargetBound]
           have hRel' :
               TableStateRel values hidden
-                (operands ++ sourceTail) (operands ++ targetTail)
+                (sourceOperands ++ sourceTail)
+                (targetOperands ++ targetTail)
                 source target := by
             simpa [hSourceAtoms, hTargetAtoms] using hRel
           have hSourceBelow' :
-              AtomsBelow values.length (operands ++ sourceTail) := by
+              AtomsBelow values.length
+                (sourceOperands ++ sourceTail) := by
             simpa [hSourceAtoms] using hSourceBelow
           have hTargetBelow' :
-              AtomsBelow values.length (operands ++ targetTail) := by
+              AtomsBelow values.length
+                (targetOperands ++ targetTail) := by
             simpa [hTargetAtoms] using hTargetBelow
           have hPrim :=
-            runState_prim_tableRel
+            runState_prim_tableRel_traceOperands
               (sourceShape := sourceShape)
               (targetShape := targetShape)
-              hSourceAllowed hSourceArity hOperandsLength
-              hSourceNext rfl hSourceBelow' hTargetBelow' hRel'
+              hSourceAllowed hSourceArity
+              hSourceOperandsLength hTargetOperandsLength
+              hOperandsEvent hSourceNext rfl
+              hSourceBelow' hTargetBelow' hRel'
           change
             Simulation.Interaction.ExceptRel
               (fun sourceError targetError : EVMException =>
@@ -1598,7 +1974,8 @@ theorem runState_event_pair
                   nextAtom := sourceBefore.nextAtom + sourceOutput
                   events :=
                     sourceBefore.events ++
-                      [.prim sourceOp operands
+                        [.prim sourceOp
+                          (traceOperands sourceOp sourceOperands)
                         (atomRangeFrom sourceBefore.nextAtom sourceOutput)] }
                 { stack :=
                     atomRangeFrom targetBefore.nextAtom sourceOutput ++
@@ -1606,7 +1983,8 @@ theorem runState_event_pair
                   nextAtom := targetBefore.nextAtom + sourceOutput
                   events :=
                     targetBefore.events ++
-                      [.prim sourceOp operands
+                        [.prim sourceOp
+                          (traceOperands sourceOp targetOperands)
                         (atomRangeFrom targetBefore.nextAtom sourceOutput)] })
               (sourceOp.step source) (sourceOp.step target)
           cases hSourceRun : sourceOp.step source with
