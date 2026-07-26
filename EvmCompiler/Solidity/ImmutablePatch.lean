@@ -1917,7 +1917,10 @@ private theorem immutablePushPlanFor?_marker_chain
         ordered.toObjects? = some lower ∧
         Compiler.StackArtifact.compile? lower.toFunctions =
           some compiledMarker ∧
-        markerTarget = compiledMarker.certified.target := by
+        markerTarget =
+          Assembly.MachineBlockDedup.fixedPointOptimize
+            compiledMarker.certified.metadata.entry
+            compiledMarker.certified.target := by
   unfold Object.immutablePushPlanFor? at hPlan
   dsimp only [] at hPlan
   split at hPlan

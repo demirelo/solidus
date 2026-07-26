@@ -170,27 +170,16 @@ private theorem compactAssembly_openRunNResult_rel_of_fixedPoint
       (Assembly.InteractionSemantics.Source.openRunNResult
         compiled.certified.target fuel
         { state with pc := EvmYul.UInt256.ofNat 0 }) := by
-  by_cases hNames : object.loadImmutableNames.isEmpty = true
-  · have hOptimizedEntry :=
-      fixedPointOptimize_entry_labelPc_zero hEntry
-    have hOpen := hFixed.2 fuel state
-    simpa [Solidity.Frontend.Object.compactAssembly, hNames,
-      Assembly.MachineBlockDedup.entryState, hEntry, hOptimizedEntry,
-      Assembly.MachineBlockDedup.ExceptStepResultRuntimeRel,
-      Assembly.MachineBlockDedup.StepResultRuntimeRel,
-      Assembly.MachineBlockDedup.HaltRuntimeRel,
-      Assembly.Compact.RuntimeOutcomeRel,
-      Assembly.Compact.StepResultRuntimeRel] using hOpen
-  · have hNamesFalse :
-        object.loadImmutableNames.isEmpty = false :=
-      Bool.eq_false_of_not_eq_true hNames
-    rw [Solidity.Frontend.Object.compactAssembly_eq_target_of_not_isEmpty
-      hNamesFalse]
-    exact
-      Simulation.Interaction.Rel.refl runtimeOutcomeRel_refl
-        (Assembly.InteractionSemantics.Source.openRunNResult
-          compiled.certified.target fuel
-          { state with pc := EvmYul.UInt256.ofNat 0 })
+  have hOptimizedEntry :=
+    fixedPointOptimize_entry_labelPc_zero hEntry
+  have hOpen := hFixed.2 fuel state
+  simpa [Solidity.Frontend.Object.compactAssembly,
+    Assembly.MachineBlockDedup.entryState, hEntry, hOptimizedEntry,
+    Assembly.MachineBlockDedup.ExceptStepResultRuntimeRel,
+    Assembly.MachineBlockDedup.StepResultRuntimeRel,
+    Assembly.MachineBlockDedup.HaltRuntimeRel,
+    Assembly.Compact.RuntimeOutcomeRel,
+    Assembly.Compact.StepResultRuntimeRel] using hOpen
 
 private theorem compactAssembly_openRunNResult_rel
     {object : Solidity.Frontend.Object}
