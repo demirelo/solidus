@@ -214,6 +214,32 @@ def pureAliasPrim? : EvmYul.Operation .Yul → Bool
   | .Env .CALLDATASIZE => true
   | _ => false
 
+/-- Primitives admissible as *nested operands* of the direct arg-hoisting path.
+Superset of `pureAliasPrim?`; every entry must satisfy
+`hoistSafePrim?_toBasicOp_outputs_one` below, otherwise `toLocals?` fails and
+`lowerUnchecked?` fails CLOSED (no fallback at the direct-args gate). -/
+def hoistSafePrim? : EvmYul.Operation .Yul → Bool
+  | .StopArith .STOP => false
+  | .StopArith _ => true
+  | .CompBit _ => true
+  | .Env .CALLER => true
+  | .Env .CALLDATASIZE => true
+  | .Env .CALLDATALOAD => true
+  | .Env .CALLVALUE => true
+  | .Env .ADDRESS => true
+  | .Env .ORIGIN => true
+  | .Env .GASPRICE => true
+  | .Env .CODESIZE => true
+  | .Block .TIMESTAMP => true
+  | .Block .NUMBER => true
+  | .Block .CHAINID => true
+  | .Block .BASEFEE => true
+  | .Block .GASLIMIT => true
+  | .Block .COINBASE => true
+  | .Block .PREVRANDAO => true
+  | .Block .BLOBBASEFEE => true
+  | _ => false
+
 mutual
   def toLocals? (results : Nat) :
       AstExpr → Option (Locals.Expr results)
@@ -350,7 +376,7 @@ mutual
     | .Lit _value => true
     | .Var _name => true
     | .Call (.inl prim) args =>
-        pureAliasPrim? prim && List.pureAliasArgsSafe? args
+        hoistSafePrim? prim && List.pureAliasArgsSafe? args
     | .Call (.inr _functionName) _args => false
 
   def List.pureAliasArgsSafe? : List AstExpr → Bool
@@ -399,6 +425,27 @@ theorem Prim.toUncheckedBasicOp?_eq_toBasicOp?_of_pureAlias
     Prim.toUncheckedBasicOp? prim = Prim.toBasicOp? prim := by
   cases prim <;>
     simp [pureAliasPrim?, Prim.toUncheckedBasicOp?] at hPure ⊢
+
+theorem Prim.toUncheckedBasicOp?_eq_toBasicOp?_of_hoistSafe
+    {prim : EvmYul.Operation .Yul}
+    (hSafe : hoistSafePrim? prim = true) :
+    Prim.toUncheckedBasicOp? prim = Prim.toBasicOp? prim := by
+  cases prim <;>
+    simp [hoistSafePrim?, Prim.toUncheckedBasicOp?] at hSafe ⊢
+
+/-- Static fence: every hoist-admissible primitive lowers to a 1-output basic
+op, so the direct path's `toLocals?` cannot fail on it. Re-admitting `gas` or
+`msize` (which `Prim.toBasicOp?` rejects) breaks this lemma at compile time
+instead of silently fail-closing whole contracts to zero bytes. -/
+theorem hoistSafePrim?_toBasicOp_outputs_one
+    {prim : EvmYul.Operation .Yul}
+    (hSafe : hoistSafePrim? prim = true) :
+    ∃ op, Prim.toBasicOp? prim = some op ∧
+      Expressions.Structured.BasicOp.outputs op = 1 := by
+  cases prim <;> rename_i primitive <;> cases primitive <;>
+    first
+      | exact absurd hSafe (by decide)
+      | exact ⟨_, rfl, rfl⟩
 
 mutual
   def lower? (results : Nat) (state : Fresh.State) :
@@ -818,10 +865,10 @@ theorem lower1Unchecked?_direct_parts
                   true :=
             Bool.and_eq_true_iff.mp hSafe
           have hAliasParts :
-              pureAliasPrim? prim = true ∧
+              hoistSafePrim? prim = true ∧
                 List.pureAliasArgsSafe? args = true := by
             simpa [pureAliasArgSafe?] using hSafeParts.1
-          have hPurePrim : pureAliasPrim? prim = true := by
+          have hPurePrim : hoistSafePrim? prim = true := by
             exact hAliasParts.1
           have hDirect : List.directPureArgsSafe? args = true := by
             have hPureArgs :
@@ -837,7 +884,7 @@ theorem lower1Unchecked?_direct_parts
               omega
             simp [List.directPureArgsSafe?, hPureArgs, hDepth]
           have hPrimEq :=
-            Prim.toUncheckedBasicOp?_eq_toBasicOp?_of_pureAlias hPurePrim
+            Prim.toUncheckedBasicOp?_eq_toBasicOp?_of_hoistSafe hPurePrim
           cases hOp : Prim.toBasicOp? prim with
           | none =>
               simp [lower1Unchecked?, lowerUnchecked?, hDirect, hPrimEq,
