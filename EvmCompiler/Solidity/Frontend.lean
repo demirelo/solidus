@@ -3808,23 +3808,15 @@ structure ImmutablePushPlan where
 /--
 Logical Assembly program passed to the compact encoder.
 
-Immutable-bearing objects retain the legacy program because their actual and
-marker compiles must have identical instruction shape. Immutable-free objects
-may use the checked, fail-open fixed-point machine-block deduplicator.
+All objects use the checked, fail-open fixed-point machine-block deduplicator.
+For immutable-bearing objects, the marker compile is optimized independently
+and the existing immutable patch gate accepts only identical instruction
+shapes.
 -/
-def compactAssembly (object : Object)
+def compactAssembly (_object : Object)
     (compiled : Compiler.StackArtifact.Artifact) : Assembly.Program :=
-  if object.loadImmutableNames.isEmpty then
-    Assembly.MachineBlockDedup.fixedPointOptimize
-      compiled.certified.metadata.entry compiled.certified.target
-  else
-    compiled.certified.target
-
-theorem compactAssembly_eq_target_of_not_isEmpty
-    {object : Object} {compiled : Compiler.StackArtifact.Artifact}
-    (hNames : object.loadImmutableNames.isEmpty = false) :
-    object.compactAssembly compiled = compiled.certified.target := by
-  simp [compactAssembly, hNames]
+  Assembly.MachineBlockDedup.fixedPointOptimize
+    compiled.certified.metadata.entry compiled.certified.target
 
 /-- Compute the physical push sites whose compact width must remain stable when
 Solidity patches immutable values. The marker program is produced by the same
@@ -3848,11 +3840,14 @@ def immutablePushPlanFor? (object : Object)
         let ordered ← resolved.toSolcYulOrderedProgram?
         let lower ← ordered.toObjects?
         let compiled ← Compiler.StackArtifact.compile? lower.toFunctions
+        let markerTarget :=
+          Assembly.MachineBlockDedup.fixedPointOptimize
+            compiled.certified.metadata.entry compiled.certified.target
         let pinnedPushPcs ← Assembly.Compact.differingPushPcs?
-          actual compiled.certified.target
+          actual markerTarget
         some
           { pinnedPushPcs := pinnedPushPcs
-            markerTarget? := some compiled.certified.target }
+            markerTarget? := some markerTarget }
 
 def verifiedCodeSentinel : List UInt8 :=
   Assembly.Compact.encodeInstr (.prim .invalid)
