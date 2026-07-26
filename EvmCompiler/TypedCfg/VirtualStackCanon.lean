@@ -453,6 +453,147 @@ def blocksCost (blocks : List Block) : Nat :=
   runtimeBodyCost (blocks.flatMap Block.body)
 
 /-!
+The virtual scheduler can leave a transport identity split exactly across its
+one pending block boundary:
+
+* `DUPn | POP`;
+* `DUPn | SWAPn POP`.
+
+Both sequences restore the stack at the right block's exit.  Removing them
+inside either block would require moving an instruction across a control-flow
+edge, so the ordinary block-local peephole pass cannot see them.
+
+`cleanupBoundaryOnce?` is deliberately structural and fail-closed.  It only
+edits a literal tail/head match, re-runs the block type checker on both edited
+bodies, and requires the right output shape to remain exact.  The production
+pair constructor subsequently replays the independent event/atom trace
+certificate over the cleaned pair as a second semantic check.
+-/
+def splitLastRuntimeRev? :
+    List Instr → List Instr →
+      Option (List Instr × Instr × List Instr)
+  | [], _ => none
+  | instr :: rest, suffix =>
+      if runtimeInstrCost instr = 0 then
+        splitLastRuntimeRev? rest (instr :: suffix)
+      else
+        some (rest.reverse, instr, suffix)
+
+def splitLastRuntime? (body : List Instr) :
+    Option (List Instr × Instr × List Instr) :=
+  splitLastRuntimeRev? body.reverse []
+
+def splitFirstRuntime? :
+    List Instr → Option (List Instr × Instr × List Instr)
+  | [] => none
+  | instr :: rest =>
+      if runtimeInstrCost instr = 0 then
+        match splitFirstRuntime? rest with
+        | none => none
+        | some (metadata, runtime, suffix) =>
+            some (instr :: metadata, runtime, suffix)
+      else
+        some ([], instr, rest)
+
+def typedBoundaryCandidate? (left right : Block)
+    (leftBody rightBody : List Instr) : Option (Block × Block) :=
+  match Block.bodyType? leftBody left.input with
+  | none => none
+  | some middle =>
+      match Block.bodyType? rightBody middle with
+      | none => none
+      | some output =>
+          if output = right.output then
+            some
+              ( { left with body := leftBody, output := middle }
+              , { right with
+                  input := middle
+                  body := rightBody
+                  output := output } )
+          else
+            none
+
+def cleanupBoundaryOnce? (left right : Block) : Option (Block × Block) := do
+  let (leftPrefix, leftRuntime, leftSuffix) ←
+    splitLastRuntime? left.body
+  match leftRuntime with
+  | .dup leftDepth =>
+      let leftBody := leftPrefix
+      let (rightPrefix, rightRuntime, rightRest) ←
+        splitFirstRuntime? right.body
+      match rightRuntime with
+      | .pop =>
+          typedBoundaryCandidate? left right
+            leftBody rightRest
+      | .swap rightDepth =>
+          if leftDepth = rightDepth then
+            let (middleMeta, secondRuntime, rightSuffix) ←
+              splitFirstRuntime? rightRest
+            match secondRuntime with
+            | .pop =>
+                typedBoundaryCandidate? left right leftBody
+                  rightSuffix
+            | _ => none
+          else
+            none
+      | _ => none
+  | _ => none
+
+def cleanupBoundary : Nat → Block → Block → Block × Block
+  | 0, left, right => (left, right)
+  | fuel + 1, left, right =>
+      match cleanupBoundaryOnce? left right with
+      | none => (left, right)
+      | some (cleanLeft, cleanRight) =>
+          cleanupBoundary fuel cleanLeft cleanRight
+
+def cleanupPairCandidate? (source : List Block) : Option (List Block) :=
+  match source with
+  | [left, right] =>
+      let (cleanLeft, cleanRight) :=
+        cleanupBoundary left.body.length left right
+      let candidate := [cleanLeft, cleanRight]
+      if blocksCost candidate < blocksCost source then
+        some candidate
+      else
+        none
+  | _ => none
+
+def hasRuntimeEvent (block : Block) : Bool :=
+  block.body.any fun instr =>
+    match instr with
+    | .dup _ | .push _ | .returnToken _ | .prim _ => true
+    | _ => false
+
+def cleanupCandidate? (source : List Block) : Option (List Block) := do
+  let candidate ← cleanupPairCandidate? source
+  let _ ← certify? source candidate
+  some candidate
+
+def pairCandidate? (source : List Block) : Option (List Block) :=
+  let scheduled :=
+    match source.head? with
+    | some left =>
+        if hasRuntimeEvent left then
+          candidate? source
+        else
+          none
+    | none => none
+  match cleanupCandidate? source, scheduled with
+  | some cleaned, some scheduled =>
+      -- Preserve the established scheduler on exact cost ties.
+      if blocksCost scheduled ≤ blocksCost cleaned then
+        some scheduled
+      else
+        some cleaned
+  | some cleaned, none => some cleaned
+  | none, some scheduled => some scheduled
+  | none, none => none
+
+def pairEligible (left right : Block) : Bool :=
+  hasRuntimeEvent left
+
+/-!
 The production transform deliberately uses pairs rather than arbitrary-length
 chains.  Measurements retain most of the distributed win, while the semantic
 invariant has exactly one pending boundary: the left block creates it and the
@@ -471,21 +612,16 @@ structure PairChoice where
   savings : Nat
   deriving Repr
 
-def hasRuntimeEvent (block : Block) : Bool :=
-  block.body.any fun instr =>
-    match instr with
-    | .push _ | .returnToken _ | .prim _ => true
-    | _ => false
-
 def pairChoice? (program : Program) (left right : Block) :
     Option PairChoice := do
-  if hasRuntimeEvent left then pure () else none
+  if pairEligible left right then pure () else none
   if chainStep program left right then pure () else none
-  let candidate ← candidateCore? [left, right]
+  let candidate ← pairCandidate? [left, right]
   let certificate ← certify? [left, right] candidate
   match candidate with
   | [targetLeft, targetRight] =>
       if targetLeft.input = left.input ∧
+          targetLeft.output = targetRight.input ∧
           targetRight.output = right.output then
         pure ()
       else
@@ -544,7 +680,7 @@ def applyEdit (edits : List (Label × Edit)) (block : Block) : Block :=
         body := choice.targetRight.body
         output := choice.targetRight.output }
 
-def canonProgram (program : Program) : Program :=
+def canonProgramOnce (program : Program) : Program :=
   let edits := editTable program
   { program with blocks := program.blocks.map (applyEdit edits) }
 
@@ -560,17 +696,71 @@ def canonProgram (program : Program) : Program :=
   unfold applyEdit
   split <;> rfl
 
+@[simp] theorem canonProgramOnce_entry (program : Program) :
+    (canonProgramOnce program).entry = program.entry := rfl
+
+@[simp] theorem canonProgramOnce_blocks (program : Program) :
+    (canonProgramOnce program).blocks =
+      program.blocks.map (applyEdit (editTable program)) := rfl
+
+theorem canonProgramOnce_block_labels (program : Program) :
+    (canonProgramOnce program).blocks.map Block.label =
+      program.blocks.map Block.label := by
+  simp
+
+/-!
+The first scheduling sweep deliberately chooses disjoint adjacent pairs.  A
+successful edit can therefore expose a transport identity only at the seam to
+the next pair.  A second certified sweep sees those final-program seams.  Its
+candidate chooser gives an exact boundary cleanup priority over another
+virtual scheduling candidate, and every accepted edit is independently
+retyped, trace-certified, and required to be strictly cheaper.
+-/
+def secondSweepEligible (program : Program) : Bool :=
+  program.wellTyped? && program.programCounterIndependent?
+
+def canonProgram (program : Program) : Program :=
+  let scheduled := canonProgramOnce program
+  { program with
+    blocks :=
+      if secondSweepEligible scheduled then
+        (canonProgramOnce scheduled).blocks
+      else
+        scheduled.blocks }
+
 @[simp] theorem canonProgram_entry (program : Program) :
     (canonProgram program).entry = program.entry := rfl
 
-@[simp] theorem canonProgram_blocks (program : Program) :
-    (canonProgram program).blocks =
-      program.blocks.map (applyEdit (editTable program)) := rfl
+theorem canonProgram_eq_double
+    {program : Program}
+    (hEligible :
+      secondSweepEligible (canonProgramOnce program) = true) :
+    canonProgram program =
+      canonProgramOnce (canonProgramOnce program) := by
+  simp only [canonProgram, hEligible, if_true]
+  rfl
+
+theorem canonProgram_eq_once
+    {program : Program}
+    (hEligible :
+      secondSweepEligible (canonProgramOnce program) = false) :
+    canonProgram program = canonProgramOnce program := by
+  simp only [canonProgram, hEligible, if_false]
+  rfl
 
 theorem canonProgram_block_labels (program : Program) :
     (canonProgram program).blocks.map Block.label =
       program.blocks.map Block.label := by
-  simp
+  by_cases hEligible :
+      secondSweepEligible (canonProgramOnce program) = true
+  · simp only [canonProgram, hEligible, if_true]
+    rw [canonProgramOnce_block_labels,
+      canonProgramOnce_block_labels]
+  · have hFalse :
+        secondSweepEligible (canonProgramOnce program) = false :=
+      Bool.eq_false_of_not_eq_true hEligible
+    simp only [canonProgram, hFalse, if_false]
+    exact canonProgramOnce_block_labels program
 
 end VirtualStack
 end TypedCfg

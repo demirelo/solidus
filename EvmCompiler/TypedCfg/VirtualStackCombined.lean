@@ -28,6 +28,15 @@ abbrev virtualBase (cfg : Program) : Program :=
 abbrev virtualProgram (cfg : Program) : Program :=
   VirtualStack.canonProgram (virtualBase cfg)
 
+@[simp] theorem virtualBase_entry (cfg : Program) :
+    (virtualBase cfg).entry = cfg.entry := by
+  simp [virtualBase, ConstTrueBranch.optimizedProgram,
+    preChainProgram]
+
+@[simp] theorem virtualProgram_entry (cfg : Program) :
+    (virtualProgram cfg).entry = cfg.entry := by
+  simp [virtualProgram]
+
 theorem VirtualStack.hasRuntimeEvent_eq_false_of_chainInstr
     {block : Block}
     (hChain : ∀ instr ∈ block.body, ChainInstr instr) :
@@ -88,11 +97,11 @@ theorem VirtualStack.hasRuntimeEvent_constTrueBlock_false
   next => exact hFalse
 
 /--
-A virtual-stack left edit can only fire on a chain block that was left
+A virtual-stack eligible block can only come from a chain block that was left
 untouched by chain canonicalisation.  Therefore its entry shape is realised by
 the source-threaded chain state.
 -/
-theorem stackRealizes_virtualLeft_of_chainCombined
+theorem stackRealizes_virtualEligible_of_chainCombined
     {source : Structured.Program}
     {entryShapes : Structured.TypedCfgCompiler.ProcEntryShapes}
     {cfg : Program}
@@ -106,12 +115,11 @@ theorem stackRealizes_virtualLeft_of_chainCombined
       ChainCombinedStepRelEff (source := source) (cfg := cfg)
         context.calls label sourceState chainState)
     (hConst : SameRuntimeData chainState constState)
-    {block : Block} {choice : VirtualStack.PairChoice}
+    {block : Block}
     (hFind :
       (virtualBase cfg).findBlock? label = some block)
-    (hVirtual :
-      (VirtualStack.editTable (virtualBase cfg)).lookup block.label =
-        some (.left choice)) :
+    (hEvent :
+      VirtualStack.hasRuntimeEvent block = true) :
     StackRealizes block.input constState := by
   let Q := preChainProgram cfg
   let C := ShuffleCanon.chainCanonProgram Q
@@ -130,9 +138,6 @@ theorem stackRealizes_virtualLeft_of_chainCombined
     exact List.mem_of_find?_eq_some hFind
   have hUniqueR : (virtualBase cfg).LabelsUnique := by
     exact BlockReorder.reorderProgram_labelsUnique T
-  obtain ⟨hBlockEq, hValid, hRightBlock⟩ :=
-    VirtualStack.block_eq_sourceLeft_of_lookup
-      hUniqueR hBlockR hVirtual
   have hBlockLabel : block.label = label := by
     unfold Program.findBlock? at hFind
     have hFound := List.find?_some hFind
@@ -181,8 +186,7 @@ theorem stackRealizes_virtualLeft_of_chainCombined
               hUniqueQ hOriginal hChainLookup
           have hConstFalse :=
             VirtualStack.hasRuntimeEvent_constTrueBlock_false hFalse
-          rw [hChainApplied, hConstApplied, hBlockEq,
-            hValid.leftHasEvent] at hConstFalse
+          rw [hChainApplied, hConstApplied, hEvent] at hConstFalse
           contradiction
       | consumed out =>
           have hFalse :=
@@ -190,9 +194,49 @@ theorem stackRealizes_virtualLeft_of_chainCombined
               hChainLookup
           have hConstFalse :=
             VirtualStack.hasRuntimeEvent_constTrueBlock_false hFalse
-          rw [hChainApplied, hConstApplied, hBlockEq,
-            hValid.leftHasEvent] at hConstFalse
+          rw [hChainApplied, hConstApplied, hEvent] at hConstFalse
           contradiction
+
+/--
+Compatibility wrapper for callers that obtain eligibility from a certified
+left edit rather than carrying it explicitly.
+-/
+theorem stackRealizes_virtualLeft_of_chainCombined
+    {source : Structured.Program}
+    {entryShapes : Structured.TypedCfgCompiler.ProcEntryShapes}
+    {cfg : Program}
+    (context :
+      Structured.TypedCfgPreservation.Program.GeneratedContext
+        source entryShapes cfg)
+    (hSourceWF : source.WF)
+    (hTyped : cfg.WellTyped)
+    {label : Label} {sourceState chainState constState : EVMState}
+    (hCombined :
+      ChainCombinedStepRelEff (source := source) (cfg := cfg)
+        context.calls label sourceState chainState)
+    (hConst : SameRuntimeData chainState constState)
+    {block : Block} {choice : VirtualStack.PairChoice}
+    (hFind :
+      (virtualBase cfg).findBlock? label = some block)
+    (hVirtual :
+      (VirtualStack.editTable (virtualBase cfg)).lookup block.label =
+        some (.left choice)) :
+    StackRealizes block.input constState := by
+  have hBlock : block ∈ (virtualBase cfg).blocks := by
+    unfold Program.findBlock? at hFind
+    exact List.mem_of_find?_eq_some hFind
+  have hUnique : (virtualBase cfg).LabelsUnique := by
+    let Q := preChainProgram cfg
+    let C := ShuffleCanon.chainCanonProgram Q
+    let T := ConstTrueBranch.constTrueProgram C
+    exact BlockReorder.reorderProgram_labelsUnique T
+  obtain ⟨hBlockEq, hValid, _⟩ :=
+    VirtualStack.block_eq_sourceLeft_of_lookup
+      hUnique hBlock hVirtual
+  apply stackRealizes_virtualEligible_of_chainCombined
+    context hSourceWF hTyped hCombined hConst hFind
+  rw [hBlockEq]
+  exact hValid.leftHasEvent
 
 /-- Source-to-virtual invariant carried at every reached block entry. -/
 def VirtualCombinedStepRelEff {source : Structured.Program}
@@ -203,7 +247,7 @@ def VirtualCombinedStepRelEff {source : Structured.Program}
     ChainCombinedStepRelEff (source := source) (cfg := cfg)
         calls label sourceState chainState ∧
       SameRuntimeData chainState constState ∧
-      VirtualStack.PairStepRel
+      VirtualStack.CanonStepRel
         (virtualBase cfg) label constState finalState
 
 /-- One-step outcome relation for the complete source-to-virtual pipeline. -/
@@ -243,7 +287,7 @@ theorem virtualCombinedStepRelEff_entry_of_generated
       SameRuntimeData.refl cfgState,
       ?_⟩
   simpa [virtualBase, preChainProgram] using
-    VirtualStack.pairStepRel_entry (virtualBase cfg) cfgState
+    VirtualStack.canonStepRel_entry (virtualBase cfg) cfgState
 
 /-- Exact one-step composition of the chain/reorder pipeline and the certified
 virtual-stack pair scheduler. -/
@@ -305,16 +349,113 @@ theorem openStep_virtualCombinedEff_congr_of_source
   have hConst :=
     ConstTrueBranch.openStep_constTrueProgram_congr
       hTypedC hIndependentC hConstState (label := label)
+  have hRealizesFirst :
+      ∀ block choice,
+        R.findBlock? label = some block →
+          (VirtualStack.editTable R).lookup block.label =
+              some (.left choice) →
+            StackRealizes block.input constState := by
+    intro block choice hFind hLookup
+    have hBlock : block ∈ R.blocks := by
+      unfold Program.findBlock? at hFind
+      exact List.mem_of_find?_eq_some hFind
+    obtain ⟨hBlockEq, hValid, hRightBlock⟩ :=
+      VirtualStack.block_eq_sourceLeft_of_lookup
+        hTypedR.1 hBlock hLookup
+    have hEvent :
+        VirtualStack.hasRuntimeEvent block = true := by
+      rw [hBlockEq]
+      simpa [VirtualStack.pairEligible] using
+        hValid.leftEligible
+    exact stackRealizes_virtualEligible_of_chainCombined
+      context hSourceWF hTyped hChainStep hConstState
+        (by simpa [virtualBase, R, T, C, Q] using hFind)
+        hEvent
+  have hRealizesSecond :
+      ∀ (hMiddleTyped :
+          (VirtualStack.canonProgramOnce R).WellTyped)
+          middle block choice,
+        VirtualStack.PairStepRel R label constState middle →
+          (VirtualStack.canonProgramOnce R).findBlock? label =
+              some block →
+            (VirtualStack.editTable
+                (VirtualStack.canonProgramOnce R)).lookup
+                  block.label =
+                some (.left choice) →
+              StackRealizes block.input middle := by
+    intro hMiddleTyped middle block choice
+      hFirstStep hFind hSecondLookup
+    apply
+      VirtualStack.stackRealizes_canonProgramOnce_of_pairStepRel
+        hTypedR.1 hMiddleTyped
+    · intro original hOriginalFind hNoRight
+      have hOriginalMem : original ∈ R.blocks := by
+        unfold Program.findBlock? at hOriginalFind
+        exact List.mem_of_find?_eq_some hOriginalFind
+      have hOriginalLabel : original.label = label := by
+        unfold Program.findBlock? at hOriginalFind
+        have hFound := List.find?_some hOriginalFind
+        simpa using hFound
+      have hBlockMem :
+          block ∈ (VirtualStack.canonProgramOnce R).blocks := by
+        unfold Program.findBlock? at hFind
+        exact List.mem_of_find?_eq_some hFind
+      obtain ⟨hBlockEq, hSecondValid, hSecondRight⟩ :=
+        VirtualStack.block_eq_sourceLeft_of_lookup
+          hMiddleTyped.1 hBlockMem hSecondLookup
+      have hSecondEvent :
+          VirtualStack.hasRuntimeEvent block = true := by
+        rw [hBlockEq]
+        simpa [VirtualStack.pairEligible] using
+          hSecondValid.leftEligible
+      have hAppliedEq :
+          VirtualStack.applyEdit
+              (VirtualStack.editTable R) original = block := by
+        rw [VirtualStack.findBlock?_canonProgram,
+          hOriginalFind] at hFind
+        simpa using hFind
+      cases hFirstLookup :
+          (VirtualStack.editTable R).lookup original.label with
+      | none =>
+          have hOriginalEq : original = block := by
+            simpa [VirtualStack.applyEdit, hFirstLookup] using
+              hAppliedEq
+          have hEvent :
+              VirtualStack.hasRuntimeEvent original = true := by
+            rw [hOriginalEq]
+            exact hSecondEvent
+          exact stackRealizes_virtualEligible_of_chainCombined
+            context hSourceWF hTyped hChainStep hConstState
+              (by simpa [virtualBase, R, T, C, Q] using
+                hOriginalFind)
+              hEvent
+      | some firstEdit =>
+          cases firstEdit with
+          | left firstChoice =>
+              obtain ⟨hOriginalEq, hFirstValid, hFirstRight⟩ :=
+                VirtualStack.block_eq_sourceLeft_of_lookup
+                  hTypedR.1 hOriginalMem hFirstLookup
+              have hEvent :
+                  VirtualStack.hasRuntimeEvent original = true := by
+                rw [hOriginalEq]
+                simpa [VirtualStack.pairEligible] using
+                  hFirstValid.leftEligible
+              exact stackRealizes_virtualEligible_of_chainCombined
+                context hSourceWF hTyped hChainStep hConstState
+                  (by simpa [virtualBase, R, T, C, Q] using
+                    hOriginalFind)
+                  hEvent
+          | right firstChoice =>
+              exact absurd hFirstLookup
+                (hNoRight firstChoice)
+    · exact hFirstStep
+    · exact hFind
   have hVirtual :=
-    VirtualStack.openStep_pair_congr
+    VirtualStack.openStep_canonProgram_congr
       (program := R) hTypedR.1 hTypedR
       (by simpa [virtualProgram, virtualBase, R, T, C, Q] using
         hVirtualTyped)
-      hIndependentR
-      (fun block choice hFind hLookup =>
-        stackRealizes_virtualLeft_of_chainCombined
-          context hSourceWF hTyped hChainStep
-            hConstState hFind hLookup)
+      hIndependentR hRealizesFirst hRealizesSecond
       (by simpa [virtualBase, R, T, C, Q] using hVirtualStep)
   rw [BlockReorder.openStep_reorderProgram T hTypedT.1] at hVirtual
   refine Simulation.Interaction.Rel.mono

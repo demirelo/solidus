@@ -16,12 +16,12 @@ open Assembly (EVMState SameRuntimeData)
 
 structure PairChoice.Valid (program : Program)
     (choice : PairChoice) : Prop where
-  leftHasEvent :
-    hasRuntimeEvent choice.sourceLeft = true
+  leftEligible :
+    pairEligible choice.sourceLeft choice.sourceRight = true
   linked :
     chainStep program choice.sourceLeft choice.sourceRight = true
   candidate :
-    candidateCore? [choice.sourceLeft, choice.sourceRight] =
+    pairCandidate? [choice.sourceLeft, choice.sourceRight] =
       some [choice.targetLeft, choice.targetRight]
   certified :
     certify? [choice.sourceLeft, choice.sourceRight]
@@ -29,6 +29,7 @@ structure PairChoice.Valid (program : Program)
       some choice.certificate
   boundary :
     choice.targetLeft.input = choice.sourceLeft.input ∧
+      choice.targetLeft.output = choice.targetRight.input ∧
       choice.targetRight.output = choice.sourceRight.output
   cheaper :
     blocksCost [choice.targetLeft, choice.targetRight] <
@@ -38,6 +39,12 @@ structure PairChoice.Valid (program : Program)
       blocksCost [choice.sourceLeft, choice.sourceRight] -
         blocksCost [choice.targetLeft, choice.targetRight]
 
+theorem PairChoice.Valid.leftHasEvent
+    {program : Program} {choice : PairChoice}
+    (hValid : choice.Valid program) :
+    hasRuntimeEvent choice.sourceLeft = true := by
+  simpa [pairEligible] using hValid.leftEligible
+
 theorem pairChoice?_valid
     {program : Program} {left right : Block} {choice : PairChoice}
     (hChoice : pairChoice? program left right = some choice) :
@@ -45,18 +52,18 @@ theorem pairChoice?_valid
       choice.sourceRight = right ∧
         choice.Valid program := by
   unfold pairChoice? at hChoice
-  cases hEvent : hasRuntimeEvent left with
+  cases hEligible : pairEligible left right with
   | false =>
-      simp [hEvent] at hChoice
+      simp [hEligible] at hChoice
   | true =>
-      simp only [hEvent, if_true, pure_bind] at hChoice
+      simp only [hEligible, if_true, pure_bind] at hChoice
       cases hLinked : chainStep program left right with
       | false =>
           simp [hLinked] at hChoice
       | true =>
           simp only [hLinked, if_true, pure_bind] at hChoice
           cases hCandidate :
-              candidateCore? [left, right] with
+              pairCandidate? [left, right] with
           | none =>
               simp [hCandidate] at hChoice
           | some candidate =>
@@ -89,6 +96,7 @@ theorem pairChoice?_valid
                           | some certificate =>
                               by_cases hBoundary :
                                   targetLeft.input = left.input ∧
+                                    targetLeft.output = targetRight.input ∧
                                     targetRight.output = right.output
                               · simp [hBoundary] at hChoice
                                 by_cases hCheaper :
@@ -98,7 +106,7 @@ theorem pairChoice?_valid
                                   subst choice
                                   refine ⟨rfl, rfl, ?_⟩
                                   exact
-                                    { leftHasEvent := hEvent
+                                    { leftEligible := hEligible
                                       linked := hLinked
                                       candidate := hCandidate
                                       certified := hCertificate
@@ -473,10 +481,10 @@ theorem target_not_right_of_no_left
         hUnique hBlock hTarget hRight).2
 
 theorem findBlock?_canonProgram (program : Program) (label : Label) :
-    (canonProgram program).findBlock? label =
+    (canonProgramOnce program).findBlock? label =
       (program.findBlock? label).map
         (applyEdit (editTable program)) := by
-  simp only [canonProgram, Program.findBlock?]
+  simp only [canonProgramOnce, Program.findBlock?]
   induction program.blocks with
   | nil => rfl
   | cons block rest ih =>
@@ -624,6 +632,175 @@ def PairPending (choice : PairChoice)
       TableStateRel values hidden
         sourceMiddle.stack targetMiddle.stack source target
 
+theorem traceStep_stack_length_of_type
+    {instr : Instr} {input output : Shape}
+    {before after : TraceState}
+    (hType : Instr.type? instr input = some output)
+    (hTrace : traceStep instr before = some after)
+    (hLength : before.stack.length = input.length) :
+    after.stack.length = output.length := by
+  cases instr with
+  | push value =>
+      simp only [traceStep, Option.some.injEq] at hTrace
+      subst after
+      simp [Instr.type?] at hType
+      subst output
+      simp [hLength, Shape.length]
+  | returnToken value =>
+      simp only [traceStep, Option.some.injEq] at hTrace
+      subst after
+      simp [Instr.type?] at hType
+      subst output
+      simp [hLength, Shape.length]
+  | prim op =>
+      unfold traceStep at hTrace
+      by_cases hAllowed : primAllowed op = true
+      · simp only [hAllowed, if_true, pure_bind] at hTrace
+        cases hArity : op.stackArity? with
+        | none => simp [hArity] at hTrace
+        | some arity =>
+            rcases arity with ⟨inputs, outputs⟩
+            by_cases hInputs : inputs ≤ before.stack.length
+            · simp [hArity, hInputs] at hTrace
+              subst after
+              have hTypeLength :=
+                Instr.length_of_type?_prim hArity hType
+              rw [atomRangeFrom_eq_range']
+              simp only [List.length_append,
+                List.length_range',
+                List.length_map, List.length_range,
+                List.length_drop]
+              omega
+            · simp [hArity, hInputs] at hTrace
+      · have hFalse : primAllowed op = false :=
+          Bool.eq_false_of_not_eq_true hAllowed
+        simp [hFalse] at hTrace
+  | pop =>
+      simp only [traceStep] at hTrace
+      cases hStack : before.stack with
+      | nil => simp [hStack] at hTrace
+      | cons head tail =>
+          simp [hStack] at hTrace
+          subst after
+          have hTypeLength := Instr.length_of_type?_pop hType
+          simp [hStack] at hLength
+          simp
+          omega
+  | dup depth =>
+      simp only [traceStep] at hTrace
+      cases hDup : sourceDup? depth before.stack with
+      | none => simp [hDup] at hTrace
+      | some stack =>
+          simp [hDup] at hTrace
+          subst after
+          unfold sourceDup? at hDup
+          split at hDup
+          · rename_i hDepth
+            cases hGet : before.stack[depth]? with
+            | none => simp [hGet] at hDup
+            | some atom =>
+                simp [hGet] at hDup
+                subst stack
+                have hTypeLength := Instr.length_of_type?_dup hType
+                simp
+                omega
+          · simp at hDup
+  | swap depth =>
+      simp only [traceStep] at hTrace
+      cases hSwap : sourceSwap? depth before.stack with
+      | none => simp [hSwap] at hTrace
+      | some stack =>
+          simp [hSwap] at hTrace
+          subst after
+          unfold sourceSwap? at hSwap
+          split at hSwap
+          · simp only [Option.some.injEq] at hSwap
+            subst stack
+            have hTypeLength := Instr.length_of_type?_swap hType
+            dsimp
+            change (applySwap depth before.stack).length =
+              output.length
+            simp only [applySwap, ShuffleCanon.length_applySwap]
+            rw [hLength]
+            exact hTypeLength.2.2.symm
+          · simp at hSwap
+  | bindLocals offset names =>
+      simp only [traceStep, Option.some.injEq] at hTrace
+      subst after
+      rw [Instr.length_of_type?_bindLocals hType, hLength]
+  | bindScratch baseDepth name slot =>
+      simp only [traceStep, Option.some.injEq] at hTrace
+      subst after
+      rw [Instr.length_of_type?_bindScratch hType, hLength]
+  | relabel target =>
+      simp only [traceStep, Option.some.injEq] at hTrace
+      subst after
+      rw [Instr.length_of_type?_relabel hType, hLength]
+  | unwind target =>
+      simp [traceStep] at hTrace
+
+theorem traceBody_stack_length_of_bodyType
+    {body : List Instr} {input output : Shape}
+    {before after : TraceState}
+    (hType : Block.bodyType? body input = some output)
+    (hTrace : traceBody body before = some after)
+    (hLength : before.stack.length = input.length) :
+    after.stack.length = output.length := by
+  induction body generalizing input before with
+  | nil =>
+      simp only [Block.bodyType?, Option.some.injEq] at hType
+      simp only [traceBody, Option.some.injEq] at hTrace
+      subst output
+      subst after
+      exact hLength
+  | cons instr rest ih =>
+      simp only [Block.bodyType?, traceBody] at hType hTrace
+      obtain ⟨middleShape, hInstrType, hRestType⟩ :=
+        Option.bind_eq_some_iff.mp hType
+      obtain ⟨middleTrace, hInstrTrace, hRestTrace⟩ :=
+        Option.bind_eq_some_iff.mp hTrace
+      exact ih hRestType hRestTrace
+        (traceStep_stack_length_of_type
+          hInstrType hInstrTrace hLength)
+
+theorem PairPending.targetRight_realizes
+    {program : Program} {choice : PairChoice}
+    {source target : EVMState}
+    (hValid : choice.Valid program)
+    (hTargetType :
+      Block.bodyType? choice.targetLeft.body
+          choice.targetLeft.input =
+        some choice.targetLeft.output)
+    (hPending : PairPending choice source target) :
+    StackRealizes choice.targetRight.input target := by
+  obtain ⟨sourceMiddle, targetMiddle, values, hidden,
+    hSourceTrace, hTargetTrace, hNext, hValues, hTable⟩ :=
+    hPending
+  obtain ⟨certSourceMiddle, certTargetMiddle,
+    certSourceFinal, certTargetFinal,
+    hLeftLabel, hLeftTerm, hCertSourceTrace,
+    hCertTargetTrace, hMiddleEvents, hMiddleNext,
+    hRightLabel, hRightTerm, hCertSourceFinal,
+    hCertTargetFinal, hFinalEvents, hFinalNext,
+    hFinalStack⟩ :=
+    certifyPair_trace_sound hValid.certified
+  have hTargetMiddle : targetMiddle = certTargetMiddle := by
+    exact Option.some.inj
+      (hTargetTrace.symm.trans hCertTargetTrace)
+  subst certTargetMiddle
+  have hTraceLength :
+      targetMiddle.stack.length =
+        choice.targetLeft.output.length :=
+    traceBody_stack_length_of_bodyType
+      hTargetType hTargetTrace (by
+        rw [List.length_range, hValid.boundary.1])
+  have hReal := hTable.targetRealizes
+  unfold StackRealizes
+  unfold StateRealizes at hReal
+  rw [hReal, List.length_append, List.length_map,
+    ← hValid.boundary.2.1, ← hTraceLength]
+  omega
+
 /-- The inter-block invariant: only the right half of a fired pair may observe
 the certified pending atom layout.  Every other label is fully synchronized. -/
 def PairStepRel (program : Program) (label : Label)
@@ -631,6 +808,113 @@ def PairStepRel (program : Program) (label : Label)
   match (editTable program).lookup label with
   | some (.right choice) => PairPending choice source target
   | _ => SameRuntimeData source target
+
+theorem stackRealizes_canonProgramOnce_of_pairStepRel
+    {program : Program} {label : Label}
+    {source middle : EVMState} {block : Block}
+    (hUnique : program.LabelsUnique)
+    (hMiddleTyped : (canonProgramOnce program).WellTyped)
+    (hSourceRealizes :
+      ∀ original,
+        program.findBlock? label = some original →
+          (∀ choice,
+            (editTable program).lookup original.label ≠
+              some (.right choice)) →
+          StackRealizes original.input source)
+    (hStep : PairStepRel program label source middle)
+    (hFind :
+      (canonProgramOnce program).findBlock? label = some block) :
+    StackRealizes block.input middle := by
+  rw [findBlock?_canonProgram] at hFind
+  cases hSourceFind : program.findBlock? label with
+  | none =>
+      simp [hSourceFind] at hFind
+  | some original =>
+      rw [hSourceFind] at hFind
+      simp only [Option.map_some, Option.some.injEq] at hFind
+      subst block
+      have hOriginalLabel : original.label = label := by
+        unfold Program.findBlock? at hSourceFind
+        have hFound := List.find?_some hSourceFind
+        simpa using hFound
+      have hOriginalMem : original ∈ program.blocks := by
+        unfold Program.findBlock? at hSourceFind
+        exact List.mem_of_find?_eq_some hSourceFind
+      cases hLookup :
+          (editTable program).lookup original.label with
+      | none =>
+          have hRealSource :=
+            hSourceRealizes original hSourceFind (by
+              intro choice hRight
+              rw [hLookup] at hRight
+              contradiction)
+          have hSame : SameRuntimeData source middle := by
+            simpa only [PairStepRel, ← hOriginalLabel, hLookup]
+              using hStep
+          unfold StackRealizes at hRealSource ⊢
+          simp only [applyEdit, hLookup]
+          rw [← SameRuntimeData.stack_eq hSame]
+          exact hRealSource
+      | some edit =>
+          cases edit with
+          | left choice =>
+              have hRealSource :=
+                hSourceRealizes original hSourceFind (by
+                  intro other hRight
+                  rw [hLookup] at hRight
+                  cases hRight)
+              obtain ⟨hOriginalEq, hValid, hRightBlock⟩ :=
+                block_eq_sourceLeft_of_lookup
+                  hUnique hOriginalMem hLookup
+              have hSame : SameRuntimeData source middle := by
+                simpa only [PairStepRel, ← hOriginalLabel, hLookup]
+                  using hStep
+              subst original
+              unfold StackRealizes at hRealSource ⊢
+              simp only [applyEdit, hLookup]
+              rw [hValid.boundary.1,
+                ← SameRuntimeData.stack_eq hSame]
+              exact hRealSource
+          | right choice =>
+              obtain ⟨hOriginalEq, hValid, hLeftBlock⟩ :=
+                block_eq_sourceRight_of_lookup
+                  hUnique hOriginalMem hLookup
+              have hPending : PairPending choice source middle := by
+                simpa only [PairStepRel, ← hOriginalLabel, hLookup]
+                  using hStep
+              have hLeftLookup :
+                  (editTable program).lookup
+                      choice.sourceLeft.label =
+                    some (.left choice) :=
+                editTable_lookup_left_of_right hUnique hLookup
+              have hApplied :
+                  applyEdit (editTable program)
+                      choice.sourceLeft =
+                    { choice.sourceLeft with
+                      input := choice.targetLeft.input
+                      body := choice.targetLeft.body
+                      output := choice.targetLeft.output } := by
+                unfold applyEdit
+                rw [hLeftLookup]
+              have hTargetLeftMem :
+                  applyEdit (editTable program)
+                      choice.sourceLeft ∈
+                    (canonProgramOnce program).blocks := by
+                rw [canonProgramOnce_blocks, List.mem_map]
+                exact ⟨choice.sourceLeft, hLeftBlock, rfl⟩
+              have hTargetLeftTyped :=
+                Peephole.blockWellTyped_of_mem
+                  hMiddleTyped.2.1 hTargetLeftMem
+              have hTargetBodyType :
+                  Block.bodyType? choice.targetLeft.body
+                      choice.targetLeft.input =
+                    some choice.targetLeft.output := by
+                rw [hApplied] at hTargetLeftTyped
+                exact hTargetLeftTyped.1
+              subst original
+              simp only [applyEdit, hLookup]
+              exact hPending.targetRight_realizes
+                hValid hTargetBodyType
 
 abbrev PairRuntimeOutcomeRel :
     Except EVMException TypedCfg.Outcome →
@@ -972,7 +1256,7 @@ theorem openRun_pair_congr
     {program : Program}
     (hUnique : program.LabelsUnique)
     (hSourceTyped : program.WellTyped)
-    (hTargetTyped : (canonProgram program).WellTyped)
+    (hTargetTyped : (canonProgramOnce program).WellTyped)
     {block : Block}
     (hBlock : block ∈ program.blocks)
     (hIndependent : block.ProgramCounterIndependent)
@@ -993,12 +1277,12 @@ theorem openRun_pair_congr
       hSourceTyped.2.1 hBlock
   have hTargetBlockMem :
       applyEdit (editTable program) block ∈
-        (canonProgram program).blocks := by
-    rw [canonProgram_blocks, List.mem_map]
+        (canonProgramOnce program).blocks := by
+    rw [canonProgramOnce_blocks, List.mem_map]
     exact ⟨block, hBlock, rfl⟩
   have hTargetBlockTyped :
       (applyEdit (editTable program) block).WellTyped
-        (canonProgram program) :=
+        (canonProgramOnce program) :=
     Peephole.blockWellTyped_of_mem
       hTargetTyped.2.1 hTargetBlockMem
   cases hLookup :
@@ -1136,7 +1420,7 @@ theorem openRun_pair_congr
                   hAfter
               simp only [hSourceOutput, hTargetOutput,
                 ↓reduceIte]
-              rw [hValid.boundary.2]
+              rw [hValid.boundary.2.2]
               exact
                 pairOutcome_srd_resync
                   (fun label hTarget candidate =>
@@ -1161,7 +1445,7 @@ theorem openStep_pair_congr
     {source target : EVMState}
     (hUnique : program.LabelsUnique)
     (hSourceTyped : program.WellTyped)
-    (hTargetTyped : (canonProgram program).WellTyped)
+    (hTargetTyped : (canonProgramOnce program).WellTyped)
     (hIndependent : program.ProgramCounterIndependent)
     (hRealizes :
       ∀ block choice,
@@ -1174,7 +1458,7 @@ theorem openStep_pair_congr
       (InteractionSemantics.Program.openStep
         program label source)
       (InteractionSemantics.Program.openStep
-        (canonProgram program) label target) := by
+        (canonProgramOnce program) label target) := by
   unfold InteractionSemantics.Program.openStep
     Control.Program.step
   rw [findBlock?_canonProgram]
@@ -1223,6 +1507,213 @@ theorem openStep_pair_congr
           hBlock hBlockIndependent hStep
           (fun choice hLookup =>
             hRealizes block choice hFind hLookup)
+
+/-!
+## Two certified sweeps
+
+The production program performs a second sweep only when the first result
+passes the executable whole-program typing and PC-independence checks.  The
+relation below composes the two existing pair certificates without changing
+their proof kernel.
+-/
+def CanonStepRel (program : Program) (label : Label)
+    (source target : EVMState) : Prop :=
+  let scheduled := canonProgramOnce program
+  if secondSweepEligible scheduled then
+    ∃ middle,
+      PairStepRel program label source middle ∧
+        PairStepRel scheduled label middle target
+  else
+    PairStepRel program label source target
+
+def CanonOutcomeRel (program : Program) :
+    Except EVMException TypedCfg.Outcome →
+      Except EVMException TypedCfg.Outcome → Prop :=
+  fun source target =>
+    (∃ (next : Label) (sourceState targetState : EVMState),
+      source = .ok (.jump next sourceState) ∧
+        target = .ok (.jump next targetState) ∧
+        CanonStepRel program next sourceState targetState)
+    ∨ (PairRuntimeOutcomeRel source target ∧
+        ∀ (next : Label) (state : EVMState),
+          source ≠ .ok (.jump next state))
+
+theorem secondSweepEligible_parts
+    {program : Program}
+    (hEligible : secondSweepEligible program = true) :
+    program.WellTyped ∧ program.ProgramCounterIndependent := by
+  have hParts :
+      program.wellTyped? = true ∧
+        program.programCounterIndependent? = true := by
+    simpa [secondSweepEligible] using hEligible
+  exact
+    ⟨Program.wellTyped_of_check hParts.1,
+      Program.programCounterIndependent_of_check hParts.2⟩
+
+theorem canonStepRel_entry (program : Program) (state : EVMState) :
+    CanonStepRel program program.entry state state := by
+  by_cases hEligible :
+      secondSweepEligible (canonProgramOnce program) = true
+  · simp only [CanonStepRel, hEligible, if_true]
+    refine ⟨state, pairStepRel_entry program state, ?_⟩
+    simpa using
+      pairStepRel_entry (canonProgramOnce program) state
+  · have hFalse :
+        secondSweepEligible (canonProgramOnce program) = false :=
+      Bool.eq_false_of_not_eq_true hEligible
+    simp only [CanonStepRel, hFalse, if_false]
+    exact pairStepRel_entry program state
+
+theorem pairOutcomeRel_comp
+    {program : Program}
+    {source middle target :
+      Except EVMException TypedCfg.Outcome}
+    (hFirst : PairOutcomeRel program source middle)
+    (hSecond :
+      PairOutcomeRel (canonProgramOnce program) middle target)
+    (hEligible :
+      secondSweepEligible (canonProgramOnce program) = true) :
+    CanonOutcomeRel program source target := by
+  rcases hFirst with
+    hFirstJump | ⟨hFirstRuntime, hSourceNotJump⟩
+  · obtain ⟨next, sourceState, middleState,
+        hSource, hMiddle, hFirstStep⟩ :=
+      hFirstJump
+    rw [hMiddle] at hSecond
+    rcases hSecond with
+      hSecondJump | ⟨hSecondRuntime, hMiddleNotJump⟩
+    · obtain ⟨next₂, middleState₂, targetState,
+          hMiddle₂, hTarget, hSecondStep⟩ :=
+        hSecondJump
+      rw [Except.ok.injEq, Outcome.jump.injEq] at hMiddle₂
+      obtain ⟨hNext, hState⟩ := hMiddle₂
+      subst next₂
+      subst middleState₂
+      exact Or.inl
+        ⟨next, sourceState, targetState,
+          hSource, hTarget, by
+            simp only [CanonStepRel, hEligible, if_true]
+            exact ⟨middleState, hFirstStep, hSecondStep⟩⟩
+    · exact absurd rfl
+        (hMiddleNotJump next middleState)
+  · rcases hSecond with
+      hSecondJump | ⟨hSecondRuntime, hMiddleNotJump⟩
+    · obtain ⟨next, middleState, targetState,
+          hMiddle, hTarget, hSecondStep⟩ :=
+        hSecondJump
+      exfalso
+      cases hFirstRuntime with
+      | error hError =>
+          exact absurd hMiddle (by simp)
+      | ok hRuntime =>
+          cases hRuntime with
+          | jump label hState =>
+              exact hSourceNotJump label _ rfl
+          | fallthrough hState =>
+              exact absurd hMiddle (by simp)
+          | returnDispatch hState =>
+              exact absurd hMiddle (by simp)
+          | halt kind hState =>
+              exact absurd hMiddle (by simp)
+          | invalid hState =>
+              exact absurd hMiddle (by simp)
+    · refine Or.inr ⟨?_, hSourceNotJump⟩
+      cases hFirstRuntime with
+      | error hSourceError =>
+          cases hSecondRuntime with
+          | error hTargetError =>
+              exact .error (hSourceError.trans hTargetError)
+      | ok hSourceResult =>
+          cases hSecondRuntime with
+          | ok hTargetResult =>
+              exact .ok
+                (InteractionCongruence.Outcome.RuntimeRel.trans
+                  hSourceResult hTargetResult)
+
+theorem openStep_canonProgram_congr
+    {program : Program} {label : Label}
+    {source target : EVMState}
+    (hUnique : program.LabelsUnique)
+    (hSourceTyped : program.WellTyped)
+    (hTargetTyped : (canonProgram program).WellTyped)
+    (hIndependent : program.ProgramCounterIndependent)
+    (hRealizesFirst :
+      ∀ block choice,
+        program.findBlock? label = some block →
+          (editTable program).lookup block.label =
+              some (.left choice) →
+            StackRealizes block.input source)
+    (hRealizesSecond :
+      ∀ (hMiddleTyped :
+          (canonProgramOnce program).WellTyped)
+          middle block choice,
+        PairStepRel program label source middle →
+          (canonProgramOnce program).findBlock? label = some block →
+            (editTable (canonProgramOnce program)).lookup block.label =
+                some (.left choice) →
+              StackRealizes block.input middle)
+    (hStep : CanonStepRel program label source target) :
+    Simulation.Interaction.Rel (CanonOutcomeRel program)
+      (InteractionSemantics.Program.openStep
+        program label source)
+      (InteractionSemantics.Program.openStep
+        (canonProgram program) label target) := by
+  by_cases hEligible :
+      secondSweepEligible (canonProgramOnce program) = true
+  · obtain ⟨hMiddleTyped, hMiddleIndependent⟩ :=
+      secondSweepEligible_parts hEligible
+    simp only [CanonStepRel, hEligible, if_true] at hStep
+    obtain ⟨middle, hFirstStep, hSecondStep⟩ := hStep
+    have hFirst :=
+      openStep_pair_congr
+        hUnique hSourceTyped hMiddleTyped hIndependent
+        hRealizesFirst hFirstStep
+    have hTargetTyped' :
+        (canonProgramOnce
+          (canonProgramOnce program)).WellTyped := by
+      rw [← canonProgram_eq_double hEligible]
+      exact hTargetTyped
+    have hSecond :=
+      openStep_pair_congr
+        hMiddleTyped.1 hMiddleTyped hTargetTyped'
+        hMiddleIndependent
+        (fun block choice hFind hLookup =>
+          hRealizesSecond hMiddleTyped middle block choice
+            hFirstStep hFind hLookup)
+        hSecondStep
+    have hComposed :=
+      Simulation.Interaction.Rel.trans hFirst hSecond
+    rw [canonProgram_eq_double hEligible]
+    refine Simulation.Interaction.Rel.mono hComposed ?_
+    intro sourceOutcome targetOutcome hOutcomes
+    obtain ⟨middleOutcome, hFirstOutcome,
+      hSecondOutcome⟩ := hOutcomes
+    exact pairOutcomeRel_comp
+      hFirstOutcome hSecondOutcome hEligible
+  · have hFalse :
+        secondSweepEligible (canonProgramOnce program) = false :=
+      Bool.eq_false_of_not_eq_true hEligible
+    simp only [CanonStepRel, hFalse, if_false] at hStep
+    have hOne :=
+      openStep_pair_congr
+        hUnique hSourceTyped
+        (by
+          rw [← canonProgram_eq_once hFalse]
+          exact hTargetTyped)
+        hIndependent hRealizesFirst hStep
+    rw [canonProgram_eq_once hFalse]
+    refine Simulation.Interaction.Rel.mono hOne ?_
+    intro sourceOutcome targetOutcome hOutcome
+    rcases hOutcome with
+      hJump | ⟨hRuntime, hNotJump⟩
+    · obtain ⟨next, sourceState, targetState,
+          hSource, hTarget, hPair⟩ := hJump
+      exact Or.inl
+        ⟨next, sourceState, targetState,
+          hSource, hTarget, by
+            simp only [CanonStepRel, hFalse, if_false]
+            exact hPair⟩
+    · exact Or.inr ⟨hRuntime, hNotJump⟩
 
 end VirtualStack
 end TypedCfg
