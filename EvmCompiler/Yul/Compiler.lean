@@ -217,7 +217,14 @@ def pureAliasPrim? : EvmYul.Operation .Yul → Bool
 /-- Primitives admissible as *nested operands* of the direct arg-hoisting path.
 Superset of `pureAliasPrim?`; every entry must satisfy
 `hoistSafePrim?_toBasicOp_outputs_one` below, otherwise `toLocals?` fails and
-`lowerUnchecked?` fails CLOSED (no fallback at the direct-args gate). -/
+`lowerUnchecked?` fails CLOSED (no fallback at the direct-args gate).
+
+The additional returndata-size and self-balance observers are zero-input, so
+admitting them cannot deepen operand access while a direct expression is
+evaluated.  The direct gate also requires every sibling to satisfy this
+predicate, so no intervening argument can change what they observe.  One-input
+account/block observers and memory/storage loads deliberately remain on the
+bound path: their direct form can exceed transient stack headroom. -/
 def hoistSafePrim? : EvmYul.Operation .Yul → Bool
   | .StopArith .STOP => false
   | .StopArith _ => true
@@ -230,6 +237,7 @@ def hoistSafePrim? : EvmYul.Operation .Yul → Bool
   | .Env .ORIGIN => true
   | .Env .GASPRICE => true
   | .Env .CODESIZE => true
+  | .Env .RETURNDATASIZE => true
   | .Block .TIMESTAMP => true
   | .Block .NUMBER => true
   | .Block .CHAINID => true
@@ -237,6 +245,7 @@ def hoistSafePrim? : EvmYul.Operation .Yul → Bool
   | .Block .GASLIMIT => true
   | .Block .COINBASE => true
   | .Block .PREVRANDAO => true
+  | .Block .SELFBALANCE => true
   | .Block .BLOBBASEFEE => true
   | _ => false
 
@@ -430,7 +439,7 @@ theorem Prim.toUncheckedBasicOp?_eq_toBasicOp?_of_hoistSafe
     {prim : EvmYul.Operation .Yul}
     (hSafe : hoistSafePrim? prim = true) :
     Prim.toUncheckedBasicOp? prim = Prim.toBasicOp? prim := by
-  cases prim <;>
+  cases prim <;> rename_i primitive <;> cases primitive <;>
     simp [hoistSafePrim?, Prim.toUncheckedBasicOp?] at hSafe ⊢
 
 /-- Static fence: every hoist-admissible primitive lowers to a 1-output basic
